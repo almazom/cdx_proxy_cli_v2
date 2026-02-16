@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdx-proxy-cli-v2"
+version = "0.1.0"
+description = "Simplified localhost proxy CLI with request traceability and TUI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "cdx_proxy_cli_v2 maintainers" }]
+keywords = ["codex", "proxy", "cli", "trace", "tui"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "rich>=13.7,<15",
+]
+
+[project.scripts]
+cdx2 = "cdx_proxy_cli_v2.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cdx_proxy_cli_v2*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["build", "dist", ".venv", "venv"]
