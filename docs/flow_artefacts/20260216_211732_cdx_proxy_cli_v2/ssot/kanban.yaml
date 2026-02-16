@@ -49,18 +49,18 @@ cards:
     id: P0-002
     title: "Add token sanitization to EventLogger"
     priority: P0
-    status: backlog
+    status: done
     story_points: 2
     category: security
     expert: security_sentinel
     file: "cards/P0-002.md"
-    commit_sha: null
+    commit_sha: "f48307a9f01b877c3d3d454649850bf583fc6330"
     implementation:
-      started_at: null
-      completed_at: null
-      duration_seconds: null
-      test_results: []
-      verification_passed: false
+      started_at: "2026-02-16T21:48:00Z"
+      completed_at: "2026-02-16T21:52:00Z"
+      duration_seconds: 240
+      test_results: ["PASSED: 9 sanitization tests"]
+      verification_passed: true
       retry_count: 0
       error_log: []
 
@@ -178,7 +178,7 @@ quality_metrics:
 
 implementation:
   total_cards: 7
-  completed_cards: 1
-  current_card: P0-002
+  completed_cards: 2
+  current_card: P0-003
   failed_cards: []
   retry_count: 0
