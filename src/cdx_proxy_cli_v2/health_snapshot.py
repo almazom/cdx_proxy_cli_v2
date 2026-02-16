@@ -97,7 +97,7 @@ def collective_health_snapshot(
         entry: Dict[str, Any] = {
             "file": auth.name,
             "email": auth.email,
-            "access_token": auth.token,
+            # NOTE: access_token intentionally NOT included to prevent token leakage
             "account_id": auth.account_id,
             "status": "UNKNOWN",
             "plan_type": None,
