@@ -87,18 +87,18 @@ cards:
     id: P0-004
     title: "Create proxy server unit tests"
     priority: P0
-    status: backlog
+    status: done
     story_points: 8
     category: testing
     expert: testability_expert
     file: "cards/P0-004.md"
-    commit_sha: null
+    commit_sha: "82c8dcb0c284684bf7a08c29510049721ad71033"
     implementation:
-      started_at: null
-      completed_at: null
-      duration_seconds: null
-      test_results: []
-      verification_passed: false
+      started_at: "2026-02-16T22:00:00Z"
+      completed_at: "2026-02-16T22:10:00Z"
+      duration_seconds: 600
+      test_results: ["PASSED: 30 proxy server tests"]
+      verification_passed: true
       retry_count: 0
       error_log: []
 
@@ -106,18 +106,18 @@ cards:
     id: P0-005
     title: "Create config settings unit tests"
     priority: P0
-    status: backlog
+    status: done
     story_points: 3
     category: testing
     expert: testability_expert
     file: "cards/P0-005.md"
-    commit_sha: null
+    commit_sha: "82c8dcb0c284684bf7a08c29510049721ad71033"
     implementation:
-      started_at: null
-      completed_at: null
-      duration_seconds: null
-      test_results: []
-      verification_passed: false
+      started_at: "2026-02-16T22:00:00Z"
+      completed_at: "2026-02-16T22:10:00Z"
+      duration_seconds: 600
+      test_results: ["PASSED: 47 config settings tests"]
+      verification_passed: true
       retry_count: 0
       error_log: []
 
@@ -178,7 +178,7 @@ quality_metrics:
 
 implementation:
   total_cards: 7
-  completed_cards: 3
-  current_card: P0-004
+  completed_cards: 5
+  current_card: P0-006
   failed_cards: []
   retry_count: 0

@@ -34,6 +34,7 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--management-key", default=None)
     parser.add_argument("--trace-max", type=int, default=None)
     parser.add_argument("--allow-non-loopback", action="store_true", default=None)
+    parser.add_argument("--quiet", "-q", action="store_true", default=False, help="Suppress non-error output")
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
@@ -99,23 +100,28 @@ def handle_proxy(args: argparse.Namespace) -> int:
         host=result.host,
         port=result.port,
     )
+    quiet = bool(getattr(args, "quiet", False))
+    
     if bool(getattr(args, "print_env_only", False)):
         print(format_shell_exports(exports))
         return 0
 
     if args.print_env:
-        step = "started" if result.started else "already running"
-        print(f"# proxy {step} on {result.base_url}", file=sys.stderr)
+        if not quiet:
+            step = "started" if result.started else "already running"
+            print(f"# proxy {step} on {result.base_url}", file=sys.stderr)
         print(format_shell_exports(exports))
         return 0
 
-    if result.started:
-        print(f"Proxy started on {result.base_url}")
-    else:
-        print(f"Proxy already running on {result.base_url}")
-    print(f"Auth dir: {settings.auth_dir}")
-    print(f"One-line shell setup: {_proxy_eval_hint(settings)}")
-    print("Next: run `cdx2 trace` or use `codex` in this shell")
+    # Interactive output - status messages to stderr
+    if not quiet:
+        if result.started:
+            print(f"Proxy started on {result.base_url}", file=sys.stderr)
+        else:
+            print(f"Proxy already running on {result.base_url}", file=sys.stderr)
+        print(f"Auth dir: {settings.auth_dir}", file=sys.stderr)
+        print(f"One-line shell setup: {_proxy_eval_hint(settings)}", file=sys.stderr)
+        print("Next: run `cdx2 trace` or use `codex` in this shell", file=sys.stderr)
     return 0
 
 
@@ -240,10 +246,12 @@ def handle_doctor(args: argparse.Namespace) -> int:
 def handle_stop(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     stopped = stop_service(settings)
-    if stopped:
-        print("Proxy stopped")
-    else:
-        print("Proxy is not running")
+    quiet = bool(getattr(args, "quiet", False))
+    if not quiet:
+        if stopped:
+            print("Proxy stopped", file=sys.stderr)
+        else:
+            print("Proxy is not running", file=sys.stderr)
     return 0
 
 
@@ -285,8 +293,9 @@ def handle_logs(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     lines = tail_service_logs(settings.auth_dir, lines=max(1, int(args.lines)))
     if not lines:
-        print("No logs found")
+        print("No logs found", file=sys.stderr)
         return 0
+    # Log content goes to stdout (data output)
     for line in lines:
         print(line)
     return 0
@@ -408,6 +417,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Main entry point for cdx2 CLI.
+    
+    Exit codes:
+        0: Success
+        1: Runtime error (service not running, network error)
+        2: User error (invalid arguments, configuration error)
+        130: Interrupted (Ctrl+C)
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     handler = getattr(args, "handler", None)
@@ -422,3 +439,5 @@ def main(argv: Optional[list[str]] = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        return 130
