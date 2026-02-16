@@ -4,9 +4,39 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, FrozenSet
 
 from cdx_proxy_cli_v2.config.settings import resolve_path
+
+# Field names that should never be logged (case-insensitive matching)
+SENSITIVE_FIELD_NAMES: FrozenSet[str] = frozenset({
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "password",
+    "secret",
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth",
+    "credential",
+    "private_key",
+    "session_key",
+})
+
+
+def _is_sensitive_field(field_name: str) -> bool:
+    """Check if a field name matches a sensitive pattern."""
+    normalized = str(field_name).lower().strip()
+    # Direct match
+    if normalized in SENSITIVE_FIELD_NAMES:
+        return True
+    # Substring match for compound names like "user_token", "api_secret_key"
+    for sensitive in SENSITIVE_FIELD_NAMES:
+        if sensitive in normalized:
+            return True
+    return False
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -22,7 +52,11 @@ def _to_jsonable(value: Any) -> Any:
 
 
 class EventLogger:
-    """Structured JSONL writer for operational proxy events."""
+    """Structured JSONL writer for operational proxy events.
+    
+    Automatically sanitizes sensitive fields before logging to prevent
+    credential exposure in log files.
+    """
 
     def __init__(self, auth_dir: str) -> None:
         self._path = resolve_path(auth_dir) / "rr_proxy_v2.events.jsonl"
@@ -40,7 +74,11 @@ class EventLogger:
             "message": str(message),
         }
         for key, value in fields.items():
-            record[str(key)] = _to_jsonable(value)
+            # Sanitize sensitive fields
+            if _is_sensitive_field(key):
+                record[str(key)] = "[REDACTED]"
+            else:
+                record[str(key)] = _to_jsonable(value)
         raw = json.dumps(record, ensure_ascii=False)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:

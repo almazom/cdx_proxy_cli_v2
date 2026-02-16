@@ -30,18 +30,18 @@ cards:
     id: P0-001
     title: "Remove access tokens from health snapshot response"
     priority: P0
-    status: backlog
+    status: done
     story_points: 1
     category: security
     expert: security_sentinel
     file: "cards/P0-001.md"
-    commit_sha: null
+    commit_sha: "60d52b3c5a1122006c06e7083f9fb7d0f1396465"
     implementation:
-      started_at: null
-      completed_at: null
-      duration_seconds: null
-      test_results: []
-      verification_passed: false
+      started_at: "2026-02-16T21:45:41Z"
+      completed_at: "2026-02-16T21:48:00Z"
+      duration_seconds: 139
+      test_results: ["PASSED: test_health_snapshot_no_token_in_response", "PASSED: test_build_collective_payload_no_token_in_output"]
+      verification_passed: true
       retry_count: 0
       error_log: []
 
@@ -178,7 +178,7 @@ quality_metrics:
 
 implementation:
   total_cards: 7
-  completed_cards: 0
-  current_card: null
+  completed_cards: 1
+  current_card: P0-002
   failed_cards: []
   retry_count: 0
