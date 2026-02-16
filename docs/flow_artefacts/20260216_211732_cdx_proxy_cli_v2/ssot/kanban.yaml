@@ -144,18 +144,18 @@ cards:
     id: P0-007
     title: "Standardize error output destination"
     priority: P0
-    status: backlog
+    status: done
     story_points: 2
     category: api
     expert: api_curator
     file: "cards/P0-007.md"
-    commit_sha: null
+    commit_sha: "e0db4306cb9e3cc77ffe764dba0d128f7b5376a0"
     implementation:
-      started_at: null
-      completed_at: null
-      duration_seconds: null
-      test_results: []
-      verification_passed: false
+      started_at: "2026-02-16T22:10:00Z"
+      completed_at: "2026-02-16T22:18:00Z"
+      duration_seconds: 480
+      test_results: ["PASSED: all 123 tests"]
+      verification_passed: true
       retry_count: 0
       error_log: []
 
@@ -178,7 +178,7 @@ quality_metrics:
 
 implementation:
   total_cards: 7
-  completed_cards: 5
+  completed_cards: 6
   current_card: P0-006
   failed_cards: []
   retry_count: 0
