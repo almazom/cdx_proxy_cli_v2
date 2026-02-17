@@ -99,8 +99,35 @@ def status_level_emoji(status: str) -> str:
 
 
 def status_rank(status: str) -> int:
-    order = {"UNKNOWN": 0, "OK": 1, "WARN": 2, "COOLDOWN": 3}
-    return order.get(status, 0)
+    """Rank status for sorting. Lower rank = better = appears first.
+    
+    Order: OK (green) > WARN (yellow) > COOLDOWN (red) > UNKNOWN (white)
+    """
+    order = {"OK": 0, "WARN": 1, "COOLDOWN": 2, "UNKNOWN": 3}
+    return order.get(status, 4)
+
+
+def account_best_left(entry: Dict[str, Any]) -> Optional[float]:
+    """Get the best (highest) left percentage from available windows."""
+    best_left = None
+    for key in ("five_hour", "weekly"):
+        window = entry.get(key)
+        if isinstance(window, dict):
+            used = window.get("used_percent")
+            if isinstance(used, (int, float)):
+                left = 100.0 - float(used)
+                if best_left is None or left > best_left:
+                    best_left = left
+    return best_left
+
+
+def account_has_data(entry: Dict[str, Any]) -> bool:
+    """Check if account has any usage data."""
+    for key in ("five_hour", "weekly"):
+        window = entry.get(key)
+        if isinstance(window, dict) and window.get("used_percent") is not None:
+            return True
+    return False
 
 
 def account_worst_used(entry: Dict[str, Any]) -> Optional[float]:
@@ -125,14 +152,23 @@ def account_min_reset(entry: Dict[str, Any]) -> Optional[int]:
     return min_reset
 
 
-def collective_sort_key(entry: Dict[str, Any]) -> Tuple[float, float, float, str]:
+def collective_sort_key(entry: Dict[str, Any]) -> Tuple[int, float, float, str]:
+    """Sort key for accounts. Lower tuple = appears first (top of list).
+    
+    Priority:
+    1. Status rank (OK=0, WARN=1, COOLDOWN=2, UNKNOWN=3)
+    2. Has data (True=0, False=1) - accounts with data come first
+    3. Best left percentage (higher = better = lower sort key, so negate)
+    4. File name (alphabetical as tiebreaker)
+    """
     status = entry.get("status", "UNKNOWN")
     rank = status_rank(status)
-    worst_used = account_worst_used(entry)
-    min_reset = account_min_reset(entry)
-    worst_used_val = worst_used if worst_used is not None else 1e9
-    min_reset_val = min_reset if min_reset is not None else 1e18
-    return (rank, worst_used_val, min_reset_val, entry.get("file", ""))
+    has_data = 0 if account_has_data(entry) else 1
+    best_left = account_best_left(entry)
+    # Negate best_left so higher values sort first (lower key)
+    # If no data, use -1 (will sort after accounts with 0% left)
+    best_left_sort = -best_left if best_left is not None else 1e9
+    return (rank, has_data, best_left_sort, entry.get("file", ""))
 
 
 def build_collective_payload(
