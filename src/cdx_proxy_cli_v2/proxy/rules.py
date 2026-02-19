@@ -57,6 +57,8 @@ def management_route(path: str) -> Optional[str]:
         return "auth-files"
     if path_only == "/shutdown":
         return "shutdown"
+    if path_only == "/reset":
+        return "reset"
     return None
 
 
