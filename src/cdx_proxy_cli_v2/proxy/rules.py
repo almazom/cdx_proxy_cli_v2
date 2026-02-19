@@ -76,7 +76,8 @@ def rewrite_request_path(*, req_path: str, upstream_host: Optional[str], upstrea
 
 
 def is_primary_responses_path(req_path: str) -> bool:
-    return req_path.split("?", 1)[0] == "/codex/responses"
+    path = req_path.split("?", 1)[0]
+    return path in {"/codex/responses", "/codex/responses/compact"}
 
 
 def drop_header_case_insensitive(headers: Dict[str, str], key: str) -> None:
