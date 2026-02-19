@@ -8,9 +8,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.limits_domain import decode_jwt_payload
 
+try:
+    import keyring
+    from keyring.errors import NoKeyringError
+    KEYRING_AVAILABLE = True
+except ImportError:
+    keyring = None  # type: ignore
+    NoKeyringError = Exception  # type: ignore
+    KEYRING_AVAILABLE = False
+
+SERVICE_NAME = "cdx_proxy_cli_v2"
+
 
 def iter_auth_json_files(auth_dir: str) -> List[Path]:
-    root = Path(os.path.expanduser(auth_dir))
+    """Iterate over auth JSON files, preventing path traversal attacks."""
+    root = Path(os.path.expanduser(auth_dir)).resolve()
     try:
         entries = sorted(root.iterdir())
     except (FileNotFoundError, PermissionError, OSError):
@@ -18,8 +30,12 @@ def iter_auth_json_files(auth_dir: str) -> List[Path]:
     files: List[Path] = []
     for entry in entries:
         try:
-            if entry.is_file() and entry.suffix.lower() == ".json":
-                files.append(entry)
+            resolved = entry.resolve()
+            # Prevent symlink attacks - ensure file is within auth directory
+            if not str(resolved).startswith(str(root)):
+                continue
+            if resolved.is_file() and resolved.suffix.lower() == ".json":
+                files.append(resolved)
         except OSError:
             continue
     return files
@@ -68,14 +84,27 @@ def extract_auth_fields(raw: Dict[str, Any]) -> Tuple[str, Optional[str], Option
 
 
 def load_auth_records(auth_dir: str) -> List[AuthRecord]:
+    """Load auth records, retrieving tokens from OS keyring when available."""
     records: List[AuthRecord] = []
     for path in iter_auth_json_files(auth_dir):
         raw, error = read_auth_json(path)
         if error or raw is None:
             continue
         token, email, account_id = extract_auth_fields(raw)
+        
+        # If keyring is available, try to get token from keyring first
+        if KEYRING_AVAILABLE and keyring:
+            try:
+                keyring_token = keyring.get_password(SERVICE_NAME, path.stem)
+                if keyring_token:
+                    token = keyring_token
+            except NoKeyringError:
+                pass  # Fall back to file-based token
+        
+        # Skip if still no token
         if not token:
             continue
+        
         records.append(
             AuthRecord(
                 name=path.name,
@@ -86,3 +115,25 @@ def load_auth_records(auth_dir: str) -> List[AuthRecord]:
             )
         )
     return records
+
+
+def save_auth_record(auth_dir: str, record: AuthRecord) -> None:
+    """Save auth record, storing token in OS keyring when available."""
+    path = Path(os.path.expanduser(auth_dir)) / record.name
+    
+    # Store non-token data in JSON file
+    data: Dict[str, Any] = {}
+    if record.email:
+        data["email"] = record.email
+    if record.account_id:
+        data["tokens"] = {"account_id": record.account_id}
+    
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    
+    # Store token in keyring if available
+    if KEYRING_AVAILABLE and keyring:
+        try:
+            keyring.set_password(SERVICE_NAME, path.stem, record.token)
+        except NoKeyringError:
+            pass  # Token stored in file only

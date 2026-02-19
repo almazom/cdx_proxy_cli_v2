@@ -1,0 +1,1058 @@
+{
+  "version": "2.0",
+  "ssot": true,
+  "overall_status": "READY_TO_IMPLEMENT",
+  "metadata": {
+    "run_id": "run_20260218_111710",
+    "started_at": "2026-02-18T11:17:10Z",
+    "target_project": "/home/pets/TOOLS/cdx_proxy_cli_v2",
+    "review_type": "full_repository",
+    "experts": [
+      "Security",
+      "Performance",
+      "Maintainer",
+      "Simplicity",
+      "Testability",
+      "API"
+    ]
+  },
+  "quality_metrics": {
+    "current_score": 100,
+    "target_score": 95,
+    "improvement_iteration": 1,
+    "threshold_reached": true,
+    "card_scores": {
+      "P0-001": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-002": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-003": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-004": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-005": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-006": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-007": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P0-008": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P1-001": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P1-002": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P1-003": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P1-004": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P1-005": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P2-001": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P2-002": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      },
+      "P2-003": {
+        "percentage": 100,
+        "passed_checks": 12,
+        "total_checks": 12,
+        "failed_checks": []
+      }
+    }
+  },
+  "cards": {
+    "P0-001": {
+      "id": "P0-001",
+      "priority": "P0",
+      "title": "Remove plaintext token storage - use OS keyring",
+      "expert": "Security",
+      "points": 5,
+      "status": "completed",
+      "file": "trello-cards/P0-001-remove-plaintext-token-storage.md",
+      "depends_on": [],
+      "blocks": [
+        "P0-002"
+      ],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Add keyring dependency to pyproject.toml",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z"
+          },
+          {
+            "id": 2,
+            "task": "Update auth/store.py to use keyring for token storage",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z"
+          },
+          {
+            "id": 3,
+            "task": "Add migration script for existing plaintext tokens",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z"
+          },
+          {
+            "id": 4,
+            "task": "Write tests for keyring-based token storage",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z"
+          },
+          {
+            "id": 5,
+            "task": "Update README with keyring setup instructions",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z"
+          }
+        ],
+        "completed": 5,
+        "total": 5,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T11:51:59.948368Z"
+    },
+    "P0-002": {
+      "id": "P0-002",
+      "priority": "P0",
+      "title": "Secure management key storage - remove from .env file",
+      "expert": "Security",
+      "points": 3,
+      "status": "completed",
+      "file": "trello-cards/P0-002-secure-management-key-storage.md",
+      "depends_on": [
+        "P0-001"
+      ],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Update config/settings.py to use keyring for management key",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z",
+            "note": "Shared keyring infrastructure"
+          },
+          {
+            "id": 2,
+            "task": "Remove management key from .env file persistence",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z",
+            "note": "Keyring used when available"
+          },
+          {
+            "id": 3,
+            "task": "Add CLI flag --management-key for explicit provision",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:51:59.948368Z",
+            "note": "Fallback to env var supported"
+          }
+        ],
+        "completed": 3,
+        "total": 3,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T11:51:59.948368Z"
+    },
+    "P0-003": {
+      "id": "P0-003",
+      "priority": "P0",
+      "title": "Add schema versioning to state files",
+      "expert": "API",
+      "points": 3,
+      "status": "completed",
+      "file": "trello-cards/P0-003-add-state-schema-versioning.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Define STATE_SCHEMA_VERSION constant",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 2,
+            "task": "Update _save_state to include $schema_version field",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 3,
+            "task": "Update _load_state to validate schema version",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 4,
+            "task": "Add state migration utility for future versions",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z",
+            "note": "Built into handle_migrate"
+          }
+        ],
+        "completed": 4,
+        "total": 4,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T11:54:00.775215Z"
+    },
+    "P0-004": {
+      "id": "P0-004",
+      "priority": "P0",
+      "title": "Create V1 to V2 migration command",
+      "expert": "API",
+      "points": 5,
+      "status": "completed",
+      "file": "trello-cards/P0-004-create-v1-migration-command.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Design migration data mapping (V1\u2192V2)",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 2,
+            "task": "Add migrate subcommand to CLI",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 3,
+            "task": "Implement handle_migrate function",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 4,
+            "task": "Add --dry-run flag support",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          },
+          {
+            "id": 5,
+            "task": "Test migration with sample V1 data",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:54:00.775215Z"
+          }
+        ],
+        "completed": 5,
+        "total": 5,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T11:54:00.775215Z"
+    },
+    "P0-005": {
+      "id": "P0-005",
+      "priority": "P0",
+      "title": "Add comprehensive tests for CLI module",
+      "expert": "Testability",
+      "points": 8,
+      "status": "completed",
+      "file": "trello-cards/P0-005-test-cli-module.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Create tests/cli/ directory structure",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 2,
+            "task": "Write tests for handle_migrate function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 3,
+            "task": "Write tests for handle_status function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 4,
+            "task": "Write tests for handle_stop function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 5,
+            "task": "Write tests for _settings_from_args function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 6,
+            "task": "Write tests for format_shell_exports function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 7,
+            "task": "Add --json flag to status command",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          }
+        ],
+        "completed": 7,
+        "total": 7,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T12:00:26.604758Z"
+    },
+    "P0-006": {
+      "id": "P0-006",
+      "priority": "P0",
+      "title": "Add tests for runtime/service.py lifecycle",
+      "expert": "Testability",
+      "points": 8,
+      "status": "completed",
+      "file": "trello-cards/P0-006-test-service-lifecycle.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Create tests/runtime/ directory",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 2,
+            "task": "Write tests for state schema versioning",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 3,
+            "task": "Write tests for start_service function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 4,
+            "task": "Write tests for stop_service function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 5,
+            "task": "Write tests for service_status function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          },
+          {
+            "id": 6,
+            "task": "Write tests for tail_service_logs function",
+            "status": "completed",
+            "completed_at": "2026-02-18T12:00:26.604758Z"
+          }
+        ],
+        "completed": 6,
+        "total": 6,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T12:00:26.604758Z"
+    },
+    "P0-007": {
+      "id": "P0-007",
+      "priority": "P0",
+      "title": "Remove unused connection_pool.py (YAGNI)",
+      "expert": "Simplicity",
+      "points": 2,
+      "status": "completed",
+      "file": "trello-cards/P0-007-remove-connection-pool.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Verify connection_pool is not used in production",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:23:51.621026Z"
+          },
+          {
+            "id": 2,
+            "task": "Remove connection_pool.py file",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:23:51.621026Z"
+          },
+          {
+            "id": 3,
+            "task": "Remove ConnectionPool import from runtime.py",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:23:51.621026Z"
+          },
+          {
+            "id": 4,
+            "task": "Remove test_connection_pool.py",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:23:51.621026Z"
+          },
+          {
+            "id": 5,
+            "task": "Run tests to verify no breakage",
+            "status": "completed",
+            "completed_at": "2026-02-18T11:23:51.621026Z"
+          }
+        ],
+        "completed": 5,
+        "total": 5,
+        "percentage": 100
+      },
+      "completed_at": "2026-02-18T11:23:51.621026Z"
+    },
+    "P0-008": {
+      "id": "P0-008",
+      "priority": "P0",
+      "title": "Merge duplicate dashboard implementations",
+      "expert": "Simplicity",
+      "points": 5,
+      "status": "pending",
+      "file": "trello-cards/P0-008-merge-duplicate-dashboards.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Analyze all_dashboard.py vs collective_dashboard.py differences",
+            "status": "pending",
+            "command": "diff src/cdx_proxy_cli_v2/observability/all_dashboard.py src/cdx_proxy_cli_v2/observability/collective_dashboard.py",
+            "verification": "diff src/cdx_proxy_cli_v2/observability/all_dashboard.py src/cdx_proxy_cli_v2/observability/collective_dashboard.py"
+          },
+          {
+            "id": 2,
+            "task": "Create unified dashboard.py with --source flag",
+            "status": "pending",
+            "command": "create src/cdx_proxy_cli_v2/observability/dashboard.py",
+            "verification": "test -f src/cdx_proxy_cli_v2/observability/dashboard.py"
+          },
+          {
+            "id": 3,
+            "task": "Update CLI to use unified dashboard",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'dashboard' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 4,
+            "task": "Remove all_dashboard.py",
+            "status": "pending",
+            "command": "rm src/cdx_proxy_cli_v2/observability/all_dashboard.py",
+            "verification": "test ! -f src/cdx_proxy_cli_v2/observability/all_dashboard.py"
+          },
+          {
+            "id": 5,
+            "task": "Update tests for unified dashboard",
+            "status": "pending",
+            "command": "edit tests/observability/test_collective_dashboard.py",
+            "verification": "grep -q 'dashboard' tests/observability/test_collective_dashboard.py"
+          }
+        ],
+        "completed": 0,
+        "total": 5,
+        "percentage": 0
+      }
+    },
+    "P1-001": {
+      "id": "P1-001",
+      "priority": "P1",
+      "title": "Add rate limiting to management endpoints",
+      "expert": "Security/API",
+      "points": 5,
+      "status": "pending",
+      "file": "trello-cards/P1-001-rate-limit-management-endpoints.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Create RateLimiter class",
+            "status": "pending",
+            "command": "create src/cdx_proxy_cli_v2/proxy/rate_limiter.py",
+            "verification": "test -f src/cdx_proxy_cli_v2/proxy/rate_limiter.py"
+          },
+          {
+            "id": 2,
+            "task": "Integrate rate limiter into _authorize_management",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q 'RateLimiter' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 3,
+            "task": "Add 429 response for rate-limited requests",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '429' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 4,
+            "task": "Write tests for rate limiting",
+            "status": "pending",
+            "command": "create tests/proxy/test_rate_limiter.py",
+            "verification": "test -f tests/proxy/test_rate_limiter.py"
+          },
+          {
+            "id": 5,
+            "task": "Configure rate limit parameters",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/rate_limiter.py",
+            "verification": "grep -q 'max_requests' src/cdx_proxy_cli_v2/proxy/rate_limiter.py"
+          }
+        ],
+        "completed": 0,
+        "total": 5,
+        "percentage": 0
+      }
+    },
+    "P1-002": {
+      "id": "P1-002",
+      "priority": "P1",
+      "title": "Implement event log rotation",
+      "expert": "Performance",
+      "points": 3,
+      "status": "pending",
+      "file": "trello-cards/P1-002-event-log-rotation.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Add RotatingFileHandler to event_log.py",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/observability/event_log.py",
+            "verification": "grep -q 'RotatingFileHandler' src/cdx_proxy_cli_v2/observability/event_log.py"
+          },
+          {
+            "id": 2,
+            "task": "Configure max_bytes and backup_count",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/observability/event_log.py",
+            "verification": "grep -q 'maxBytes' src/cdx_proxy_cli_v2/observability/event_log.py"
+          },
+          {
+            "id": 3,
+            "task": "Test log rotation behavior",
+            "status": "pending",
+            "command": "pytest tests/observability/test_event_log.py",
+            "verification": "pytest tests/observability/test_event_log.py"
+          }
+        ],
+        "completed": 0,
+        "total": 3,
+        "percentage": 0
+      }
+    },
+    "P1-003": {
+      "id": "P1-003",
+      "priority": "P1",
+      "title": "Refactor _proxy_request function (reduce complexity)",
+      "expert": "Maintainer",
+      "points": 5,
+      "status": "pending",
+      "file": "trello-cards/P1-003-refactor-proxy-request.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Extract _build_request_context method",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '_build_request_context' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 2,
+            "task": "Extract _execute_attempt method",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '_execute_attempt' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 3,
+            "task": "Extract _record_attempt method",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '_record_attempt' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 4,
+            "task": "Extract _send_response method",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '_send_response' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 5,
+            "task": "Run tests to verify no regression",
+            "status": "pending",
+            "command": "pytest tests/proxy/test_server.py",
+            "verification": "pytest tests/proxy/test_server.py -x"
+          }
+        ],
+        "completed": 0,
+        "total": 5,
+        "percentage": 0
+      }
+    },
+    "P1-004": {
+      "id": "P1-004",
+      "priority": "P1",
+      "title": "Add auth management CLI commands",
+      "expert": "API",
+      "points": 5,
+      "status": "pending",
+      "file": "trello-cards/P1-004-auth-management-commands.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Add auth subcommand to CLI parser",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'auth' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 2,
+            "task": "Implement handle_auth_list function",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'handle_auth_list' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 3,
+            "task": "Implement handle_auth_validate function",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'handle_auth_validate' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 4,
+            "task": "Implement handle_auth_remove function",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'handle_auth_remove' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 5,
+            "task": "Write tests for auth commands",
+            "status": "pending",
+            "command": "create tests/cli/test_auth_commands.py",
+            "verification": "test -f tests/cli/test_auth_commands.py"
+          }
+        ],
+        "completed": 0,
+        "total": 5,
+        "percentage": 0
+      }
+    },
+    "P1-005": {
+      "id": "P1-005",
+      "priority": "P1",
+      "title": "Reduce config complexity (14\u21924 env vars)",
+      "expert": "Simplicity",
+      "points": 5,
+      "status": "pending",
+      "file": "trello-cards/P1-005-simplify-config.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Identify essential env vars (AUTH_DIR, PORT, UPSTREAM, MANAGEMENT_KEY)",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/config/settings.py",
+            "verification": "grep -c 'ENV_' src/cdx_proxy_cli_v2/config/settings.py"
+          },
+          {
+            "id": 2,
+            "task": "Remove HOST env var (always localhost)",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/config/settings.py",
+            "verification": "grep -v 'CLIPROXY_HOST' src/cdx_proxy_cli_v2/config/settings.py"
+          },
+          {
+            "id": 3,
+            "task": "Remove ALLOW_NON_LOOPBACK (security risk)",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/config/settings.py",
+            "verification": "grep -v 'ALLOW_NON_LOOPBACK' src/cdx_proxy_cli_v2/config/settings.py"
+          },
+          {
+            "id": 4,
+            "task": "Remove TRACE_MAX (internal tuning)",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/config/settings.py",
+            "verification": "grep -v 'TRACE_MAX' src/cdx_proxy_cli_v2/config/settings.py"
+          },
+          {
+            "id": 5,
+            "task": "Update documentation for simplified config",
+            "status": "pending",
+            "command": "edit README.md",
+            "verification": "grep -q 'CLIPROXY_AUTH_DIR' README.md"
+          }
+        ],
+        "completed": 0,
+        "total": 5,
+        "percentage": 0
+      }
+    },
+    "P2-001": {
+      "id": "P2-001",
+      "priority": "P2",
+      "title": "Add API versioning to management endpoints",
+      "expert": "API",
+      "points": 3,
+      "status": "pending",
+      "file": "trello-cards/P2-001-api-versioning.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Define API_VERSION constant",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/management.py",
+            "verification": "grep -q 'API_VERSION' src/cdx_proxy_cli_v2/proxy/management.py"
+          },
+          {
+            "id": 2,
+            "task": "Update endpoint paths to /api/v1/...",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/server.py",
+            "verification": "grep -q '/api/v1' src/cdx_proxy_cli_v2/proxy/server.py"
+          },
+          {
+            "id": 3,
+            "task": "Include api_version in all responses",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/proxy/management.py",
+            "verification": "grep -q 'api_version' src/cdx_proxy_cli_v2/proxy/management.py"
+          }
+        ],
+        "completed": 0,
+        "total": 3,
+        "percentage": 0
+      }
+    },
+    "P2-002": {
+      "id": "P2-002",
+      "priority": "P2",
+      "title": "Add --json flag to status and logs commands",
+      "expert": "API",
+      "points": 2,
+      "status": "pending",
+      "file": "trello-cards/P2-002-json-output-consistency.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Add --json flag to status_parser",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q '\\-\\-json' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 2,
+            "task": "Add --json flag to logs_parser",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q '\\-\\-json' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 3,
+            "task": "Update handle_status to support JSON output",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'json.dumps' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 4,
+            "task": "Update handle_logs to support JSON output",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'json.dumps' src/cdx_proxy_cli_v2/cli/main.py"
+          }
+        ],
+        "completed": 0,
+        "total": 4,
+        "percentage": 0
+      }
+    },
+    "P2-003": {
+      "id": "P2-003",
+      "priority": "P2",
+      "title": "Add deprecation warning infrastructure",
+      "expert": "API",
+      "points": 2,
+      "status": "pending",
+      "file": "trello-cards/P2-003-deprecation-infrastructure.md",
+      "depends_on": [],
+      "blocks": [],
+      "todo": {
+        "items": [
+          {
+            "id": 1,
+            "task": "Create deprecated() utility function",
+            "status": "pending",
+            "command": "create src/cdx_proxy_cli_v2/utils/deprecation.py",
+            "verification": "test -f src/cdx_proxy_cli_v2/utils/deprecation.py"
+          },
+          {
+            "id": 2,
+            "task": "Add DeprecationWarning filter to CLI",
+            "status": "pending",
+            "command": "edit src/cdx_proxy_cli_v2/cli/main.py",
+            "verification": "grep -q 'DeprecationWarning' src/cdx_proxy_cli_v2/cli/main.py"
+          },
+          {
+            "id": 3,
+            "task": "Document deprecation policy in README",
+            "status": "pending",
+            "command": "edit README.md",
+            "verification": "grep -q 'deprecation' README.md"
+          }
+        ],
+        "completed": 0,
+        "total": 3,
+        "percentage": 0
+      }
+    }
+  },
+  "progress": {
+    "completed": 7,
+    "total": 18,
+    "percentage": 0,
+    "story_points_completed": 26,
+    "story_points_total": 81
+  },
+  "execution_log": [
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Swarm review started - full repository review",
+      "phase": "init"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 0 complete: Focus Selection - full repository",
+      "phase": "phase_0"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 1 complete: Context Analysis",
+      "phase": "phase_1"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 2 complete: 6 Experts spawned",
+      "phase": "phase_2"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 3 complete: Reports collected",
+      "phase": "phase_3"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 4 complete: Reports aggregated",
+      "phase": "phase_4"
+    },
+    {
+      "timestamp": "2026-02-18T11:17:10Z",
+      "level": "INFO",
+      "message": "Phase 5 in progress: Creating Trello cards and kanban.json",
+      "phase": "phase_5"
+    },
+    {
+      "timestamp": "2026-02-18T11:22:46.556129Z",
+      "level": "INFO",
+      "message": "Phase 6 complete: Quality threshold reached (100%)",
+      "phase": "phase_6"
+    },
+    {
+      "timestamp": "2026-02-18T11:22:46.556132Z",
+      "level": "INFO",
+      "message": "Phase 7 starting: Auto-implementing all cards",
+      "phase": "phase_7"
+    },
+    {
+      "timestamp": "2026-02-18T11:23:51.621026Z",
+      "level": "INFO",
+      "message": "Card P0-007 completed: Remove unused connection_pool.py (YAGNI)",
+      "phase": "implementation",
+      "card": "P0-007"
+    },
+    {
+      "timestamp": "2026-02-18T11:51:59.948368Z",
+      "level": "INFO",
+      "message": "Card P0-001 completed: Remove plaintext token storage - use OS keyring",
+      "phase": "implementation",
+      "card": "P0-001"
+    },
+    {
+      "timestamp": "2026-02-18T11:51:59.948368Z",
+      "level": "INFO",
+      "message": "Card P0-002 completed: Secure management key storage - keyring infrastructure implemented",
+      "phase": "implementation",
+      "card": "P0-002"
+    },
+    {
+      "timestamp": "2026-02-18T11:54:00.775215Z",
+      "level": "INFO",
+      "message": "Card P0-003 completed: Add schema versioning to state files",
+      "phase": "implementation",
+      "card": "P0-003"
+    },
+    {
+      "timestamp": "2026-02-18T11:54:00.775215Z",
+      "level": "INFO",
+      "message": "Card P0-004 completed: Create V1 to V2 migration command",
+      "phase": "implementation",
+      "card": "P0-004"
+    },
+    {
+      "timestamp": "2026-02-18T12:00:26.604758Z",
+      "level": "INFO",
+      "message": "Card P0-005 completed: Add comprehensive tests for CLI module",
+      "phase": "implementation",
+      "card": "P0-005"
+    },
+    {
+      "timestamp": "2026-02-18T12:00:26.604758Z",
+      "level": "INFO",
+      "message": "Card P0-006 completed: Add tests for runtime/service.py lifecycle",
+      "phase": "implementation",
+      "card": "P0-006"
+    }
+  ],
+  "notifications": [
+    {
+      "timestamp": "2026-02-18T11:22:46.556102Z",
+      "type": "quality_threshold_reached",
+      "message": "Quality threshold reached: 100%. Auto-starting implementation..."
+    },
+    {
+      "timestamp": "2026-02-18T11:23:51.621026Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-007 completed: Remove unused connection_pool.py (YAGNI) - saved 162 lines, 1 file, 8 functions"
+    },
+    {
+      "timestamp": "2026-02-18T11:51:59.948368Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-001 completed: Remove plaintext token storage - tokens now encrypted at rest via OS keyring"
+    },
+    {
+      "timestamp": "2026-02-18T11:51:59.948368Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-002 completed: Secure management key storage - keyring infrastructure ready"
+    },
+    {
+      "timestamp": "2026-02-18T11:54:00.775215Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-003 completed: State files now have schema versioning for backward-compatible upgrades"
+    },
+    {
+      "timestamp": "2026-02-18T11:54:00.775215Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-004 completed: V1\u2192V2 migration command added (cdx2 migrate)"
+    },
+    {
+      "timestamp": "2026-02-18T12:00:26.604758Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-005 completed: CLI module now has comprehensive test coverage"
+    },
+    {
+      "timestamp": "2026-02-18T12:00:26.604758Z",
+      "type": "card_completed",
+      "message": "\u2705 Card P0-006 completed: Runtime service lifecycle fully tested"
+    }
+  ]
+}

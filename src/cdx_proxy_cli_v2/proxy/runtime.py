@@ -10,23 +10,20 @@ from cdx_proxy_cli_v2.auth.rotation import RoundRobinAuthPool
 from cdx_proxy_cli_v2.config.settings import Settings
 from cdx_proxy_cli_v2.observability.event_log import EventLogger
 from cdx_proxy_cli_v2.observability.trace_store import TraceStore
-from cdx_proxy_cli_v2.proxy.connection_pool import ConnectionPool
 
 
 @dataclass
 class ProxyRuntime:
-    """Coordinates proxy state including auth pool, tracing, logging, and connections.
-    
+    """Coordinates proxy state including auth pool, tracing, and logging.
+
     This class manages all runtime state for the proxy server:
     - Auth pool: Round-robin selection with cooldown/blacklist support
-    - Connection pool: Reusable HTTP connections for upstream requests
     - Trace store: In-memory ring buffer for request tracing
     - Event logger: Persistent JSONL event log
     """
-    
+
     settings: Settings
     auth_pool: RoundRobinAuthPool = field(default_factory=RoundRobinAuthPool)
-    connection_pool: ConnectionPool = field(default_factory=ConnectionPool)
     trace_store: TraceStore = field(init=False)
     logger: EventLogger = field(init=False)
 
@@ -140,4 +137,4 @@ class ProxyRuntime:
 
     def shutdown(self) -> None:
         """Clean up resources on shutdown."""
-        self.connection_pool.close_all()
+        pass  # Connection pooling removed - connections managed per-request

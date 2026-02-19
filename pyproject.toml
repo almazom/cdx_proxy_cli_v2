@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "rich>=13.7,<15",
+  "keyring>=24.0",
 ]
 
 [project.scripts]

@@ -208,6 +208,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(length)
 
+    def _parse_reset_params(self) -> tuple[Optional[str], Optional[str]]:
+        """Parse reset query parameters from request path.
+        
+        Returns:
+            Tuple of (name, state) filters. Either may be None.
+        """
+        query = urlsplit(self.path).query
+        if not query:
+            return None, None
+        params = parse_qs(query)
+        name = params.get("name", [None])[0]
+        state = params.get("state", [None])[0]
+        return name, state
+
     def _handle_management(self, route: str) -> None:
         host, port = self.server.server_address[:2]
         runtime = self.server.runtime
@@ -241,6 +255,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "shutting_down"})
             runtime.logger.write(level="INFO", event="proxy.shutdown_requested", message="shutdown requested")
             self.server.initiate_shutdown()
+            return
+        if route == "reset":
+            if self.command.upper() != "POST":
+                self._send_json(405, {"error": "Method not allowed. Use POST."})
+                return
+            name, state = self._parse_reset_params()
+            count = runtime.auth_pool.reset_auth(name=name, state=state)
+            self._send_json(200, {
+                "reset": count,
+                "filter": {"name": name, "state": state}
+            })
+            runtime.logger.write(
+                level="INFO",
+                event="proxy.auth_reset",
+                message=f"reset {count} auth key(s)",
+                name=name,
+                state=state,
+                count=count,
+            )
             return
         self._send_json(404, {"error": "unknown management route"})
 

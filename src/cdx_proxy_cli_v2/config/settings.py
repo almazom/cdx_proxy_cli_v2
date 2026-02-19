@@ -175,7 +175,9 @@ def build_settings(
 
     resolved_upstream = (upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM).strip() or DEFAULT_UPSTREAM
     raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
-    resolved_key = str(raw_key).strip() or None
+    # Handle both Python None and string "None" from env files
+    key_str = str(raw_key).strip()
+    resolved_key = key_str if key_str and key_str.lower() != "none" else None
 
     if allow_non_loopback is None:
         resolved_allow_non_loopback = parse_bool(merged.get(ENV_ALLOW_NON_LOOPBACK), default=False)
@@ -200,7 +202,8 @@ def build_settings(
 
 def ensure_management_key(auth_dir: str, current: Optional[str]) -> str:
     key = str(current or "").strip()
-    if key:
+    # Reject empty string and literal "None" (from corrupted env files)
+    if key and key.lower() != "none":
         return key
     generated = secrets.token_urlsafe(24)
     path = env_file_path(auth_dir)

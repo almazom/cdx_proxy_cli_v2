@@ -69,3 +69,24 @@ def test_token_change_resets_blacklist_state(monkeypatch) -> None:
     # Same file name but refreshed token should return to whitelist.
     pool.load([AuthRecord(name="a.json", path="/tmp/a.json", token="tok-new", email="a@example.com")])
     assert pool.pick() is not None
+
+
+def test_prefers_stable_keys_when_available(monkeypatch) -> None:
+    now = 3000.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"),
+            AuthRecord(name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"),
+        ]
+    )
+
+    # Mark key A as hard-failed; it will become available later via probation.
+    pool.mark_result("a.json", status=401, error_code="token_expired")
+    now = now + float(DEFAULT_BLACKLIST_SECONDS) + 1.0
+
+    # Key B is stable, so foreground selection should avoid key A.
+    picked = pool.pick()
+    assert picked is not None
+    assert picked.record.name == "b.json"

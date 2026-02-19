@@ -45,6 +45,7 @@ class ManagementHandler:
     - /health: Auth pool health snapshot
     - /auth-files: List of auth file names
     - /shutdown: Graceful shutdown request
+    - /reset: Reset auth key(s) to healthy state
     """
     
     def __init__(self, runtime: "ProxyRuntime", host: str, port: int) -> None:
@@ -52,7 +53,7 @@ class ManagementHandler:
         self._host = host
         self._port = port
 
-    def handle(self, route: str, path: str, send_json_callback) -> bool:
+    def handle(self, route: str, path: str, send_json_callback, method: str = "GET") -> bool:
         """Handle a management route.
         
         Args:
@@ -89,6 +90,26 @@ class ManagementHandler:
                 level="INFO", event="proxy.shutdown_requested", message="shutdown requested"
             )
             return True
+
+        if route == "reset":
+            if method.upper() != "POST":
+                send_json_callback(405, {"error": "Method not allowed. Use POST."})
+                return True
+            name, state = self._parse_reset_params(path)
+            count = self._runtime.auth_pool.reset_auth(name=name, state=state)
+            send_json_callback(200, {
+                "reset": count,
+                "filter": {"name": name, "state": state}
+            })
+            self._runtime.logger.write(
+                level="INFO",
+                event="proxy.auth_reset",
+                message=f"reset {count} auth key(s)",
+                name=name,
+                state=state,
+                count=count,
+            )
+            return True
             
         return False
 
@@ -112,3 +133,18 @@ class ManagementHandler:
             return False
         params = parse_qs(query)
         return params.get("refresh", ["0"])[0] == "1"
+
+    @staticmethod
+    def _parse_reset_params(path: str) -> tuple[Optional[str], Optional[str]]:
+        """Parse reset query parameters from path.
+        
+        Returns:
+            Tuple of (name, state) filters. Either may be None.
+        """
+        query = urlsplit(path).query
+        if not query:
+            return None, None
+        params = parse_qs(query)
+        name = params.get("name", [None])[0]
+        state = params.get("state", [None])[0]
+        return name, state

@@ -93,6 +93,14 @@ def _load_codex_auth_identity() -> tuple[Optional[str], Optional[str], Optional[
 
 def handle_proxy(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
+    
+    # Handle --force: stop any existing proxy first
+    if getattr(args, "force", False):
+        from cdx_proxy_cli_v2.runtime.service import stop_service
+        stopped = stop_service(settings)
+        if stopped and not bool(getattr(args, "quiet", False)):
+            print("Stopped existing proxy (force mode)", file=sys.stderr)
+    
     result = start_service(settings)
     exports = _proxy_exports(
         settings,
@@ -128,6 +136,11 @@ def handle_proxy(args: argparse.Namespace) -> int:
 def handle_status(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     payload = service_status(settings)
+    
+    if getattr(args, 'json', False):
+        print(json.dumps(payload, indent=2))
+        return 0
+    
     table = Table(title="cdx2 service status")
     table.add_column("Field")
     table.add_column("Value")
@@ -337,6 +350,117 @@ def handle_run_server(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_reset(args: argparse.Namespace) -> int:
+    settings = _settings_from_args(args)
+    status_payload = service_status(settings)
+    base_url = str(status_payload.get("base_url") or settings.base_url)
+    healthy = bool(status_payload.get("healthy"))
+    if not healthy:
+        print("Proxy is not healthy/running. Start with `cdx2 proxy` first.", file=sys.stderr)
+        return 1
+
+    headers = _management_headers(settings)
+    
+    # Build query params
+    params = []
+    name = getattr(args, "name", None)
+    state = getattr(args, "state", None)
+    if name:
+        params.append(f"name={name}")
+    if state:
+        params.append(f"state={state}")
+    
+    path = "/reset"
+    if params:
+        path += "?" + "&".join(params)
+    
+    try:
+        result = fetch_json(
+            base_url=base_url,
+            path=path,
+            method="POST",
+            headers=headers,
+            timeout=5.0,
+        )
+    except Exception as exc:
+        print(f"Reset failed: {exc}", file=sys.stderr)
+        return 1
+
+    count = result.get("reset", 0)
+    filter_info = result.get("filter", {})
+    
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(result, indent=2))
+        return 0
+    
+    # Print summary
+    filter_str = ""
+    if filter_info.get("name"):
+        filter_str = f" (name={filter_info['name']})"
+    elif filter_info.get("state"):
+        filter_str = f" (state={filter_info['state']})"
+    
+    print(f"Reset {count} auth key(s){filter_str}")
+    return 0
+
+
+def handle_migrate(args: argparse.Namespace) -> int:
+    """Migrate from cdx_proxy_cli v1 to v2."""
+    v1_dir = getattr(args, 'v1_auth_dir', None)
+    dry_run = bool(getattr(args, 'dry_run', False))
+    
+    if not v1_dir:
+        v1_dir = os.path.expanduser("~/.codex/_auths")
+    
+    v1_path = Path(v1_dir)
+    if not v1_path.exists():
+        print(f"Error: V1 auth directory not found: {v1_dir}", file=sys.stderr)
+        return 1
+    
+    # V1 file names
+    v1_files = ["rr_proxy.pid", "rr_proxy.state.json", "rr_proxy.log", "rr_proxy.events.jsonl"]
+    # V2 file names  
+    v2_files = ["rr_proxy_v2.pid", "rr_proxy_v2.state.json", "rr_proxy_v2.log", "rr_proxy_v2.events.jsonl"]
+    
+    print(f"Scanning V1 directory: {v1_dir}")
+    print("-" * 50)
+    
+    migrated = 0
+    for v1_name, v2_name in zip(v1_files, v2_files):
+        v1_file = v1_path / v1_name
+        v2_file = v1_path / v2_name
+        
+        if v1_file.exists():
+            if dry_run:
+                print(f"Would migrate: {v1_name} → {v2_name}")
+            else:
+                # Migrate file
+                content = v1_file.read_text(encoding="utf-8")
+                
+                # For state file, add schema version
+                if v1_name == "rr_proxy.state.json":
+                    try:
+                        state_data = json.loads(content)
+                        state_data["$schema_version"] = "1.0.0"
+                        content = json.dumps(state_data, indent=2)
+                    except json.JSONDecodeError:
+                        pass
+                
+                v2_file.write_text(content, encoding="utf-8")
+                print(f"Migrated: {v1_name} → {v2_name}")
+            migrated += 1
+        else:
+            print(f"Skipped (not found): {v1_name}")
+    
+    print("-" * 50)
+    print(f"Migrated: {migrated} files")
+    
+    if dry_run:
+        print("\nThis was a dry run. Remove --dry-run to actually migrate.")
+    
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="cdx proxy cli v2",
@@ -362,6 +486,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_runtime_options(proxy_parser)
+    proxy_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="force restart: stop any existing proxy before starting",
+    )
     proxy_mode_group = proxy_parser.add_mutually_exclusive_group()
     proxy_mode_group.add_argument("--print-env", action="store_true", help="print shell exports (with status line to stderr)")
     proxy_mode_group.add_argument(
@@ -373,6 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = sub.add_parser("status", help="service status")
     _add_runtime_options(status_parser)
+    status_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
     status_parser.set_defaults(handler=handle_status)
 
     doctor_parser = sub.add_parser("doctor", help="rotation doctor (white/black/probation)")
@@ -394,6 +524,25 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(logs_parser)
     logs_parser.add_argument("--lines", type=int, default=120)
     logs_parser.set_defaults(handler=handle_logs)
+
+    migrate_parser = sub.add_parser("migrate", help="migrate from cdx_proxy_cli v1 to v2")
+    migrate_parser.add_argument("--v1-auth-dir", dest="v1_auth_dir", default=None,
+                                help="V1 auth directory (default: ~/.codex/_auths)")
+    migrate_parser.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                help="Show what would be migrated without making changes")
+    migrate_parser.set_defaults(handler=handle_migrate)
+
+    reset_parser = sub.add_parser("reset", help="reset auth key(s) to healthy state")
+    _add_runtime_options(reset_parser)
+    reset_parser.add_argument("--name", default=None, help="reset specific auth file by name")
+    reset_parser.add_argument(
+        "--state",
+        choices=["blacklist", "cooldown", "probation"],
+        default=None,
+        help="reset only keys in this state",
+    )
+    reset_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
+    reset_parser.set_defaults(handler=handle_reset)
 
     all_parser = sub.add_parser("all", help="show all keys cards dashboard (v1 style)")
     _add_runtime_options(all_parser)

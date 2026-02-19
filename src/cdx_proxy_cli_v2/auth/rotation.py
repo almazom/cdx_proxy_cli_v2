@@ -60,8 +60,12 @@ class RoundRobinAuthPool:
             available = [state for state in self._states if state.available(now)]
             if not available:
                 return None
-            state = available[self._index % len(available)]
-            self._index = (self._index + 1) % len(available)
+            # Latency-first policy: when at least one stable key exists,
+            # avoid sending foreground traffic through previously hard-failed keys.
+            preferred = [state for state in available if self._is_stable(state)]
+            pool = preferred or available
+            state = pool[self._index % len(pool)]
+            self._index = (self._index + 1) % len(pool)
             state.used += 1
             if state.probation_successes < state.probation_target:
                 state.next_probe_after = now + PROBATION_PROBE_INTERVAL_SECONDS
@@ -187,3 +191,54 @@ class RoundRobinAuthPool:
     def _mark_transient_failure(state: AuthState, now: float) -> None:
         state.errors += 1
         state.cooldown_until = max(state.cooldown_until, now + DEFAULT_TRANSIENT_COOLDOWN_SECONDS)
+
+    @staticmethod
+    def _is_stable(state: AuthState) -> bool:
+        return (
+            state.hard_failures <= 0
+            and state.rate_limit_strikes <= 0
+            and state.probation_successes >= state.probation_target
+        )
+
+    def reset_auth(
+        self,
+        *,
+        name: Optional[str] = None,
+        state: Optional[str] = None,
+    ) -> int:
+        """Reset auth key(s) to healthy state.
+
+        Args:
+            name: If specified, only reset the auth with this file name.
+            state: If specified, only reset auths in this state 
+                   ("blacklist", "cooldown", or "probation").
+
+        Returns:
+            Number of auth keys that were reset.
+        """
+        with self._lock:
+            now = time.time()
+            count = 0
+            for auth_state in self._states:
+                # Filter by name if specified
+                if name is not None and auth_state.record.name != name:
+                    continue
+
+                # Filter by state if specified
+                if state is not None:
+                    current_status = auth_state.status(now).lower()
+                    if current_status != state.lower():
+                        continue
+
+                # Reset all failure counters and timers
+                auth_state.cooldown_until = 0.0
+                auth_state.blacklist_until = 0.0
+                auth_state.blacklist_reason = None
+                auth_state.rate_limit_strikes = 0
+                auth_state.hard_failures = 0
+                auth_state.errors = 0
+                auth_state.probation_successes = auth_state.probation_target
+                auth_state.next_probe_after = 0.0
+                count += 1
+
+            return count

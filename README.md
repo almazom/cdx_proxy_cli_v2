@@ -87,12 +87,38 @@ All management endpoints require `X-Management-Key`.
 - default bind: `127.0.0.1`
 - non-loopback bind blocked unless `--allow-non-loopback`
 - auth tokens are never written to trace/event payloads
+- tokens stored in OS keyring (not plaintext files) when keyring is available
+
+## Token Storage (Keyring)
+
+Tokens are stored in your OS keyring for encryption at rest:
+
+- **Linux:** Secret Service API (GNOME Keyring, KWallet)
+- **macOS:** Keychain
+- **Windows:** Credential Vault
+
+For headless servers, configure a keyring backend:
+
+```bash
+# Install alternative keyring backend
+pip install keyrings.alt
+
+# Use file-based encrypted keyring
+export PYTHON_KEYRING_BACKEND=keyrings.alt.file.EncryptedKeyring
+```
+
+To migrate existing plaintext tokens to keyring:
+
+```bash
+python scripts/migrate_tokens_to_keyring.py ~/.codex/_auths
+```
 
 ## Rotation Strategy (Blacklist/Whitelist)
 
 - `401/403`: key is temporarily blacklisted (outlier ejection)
 - `429`: key gets exponential cooldown and is skipped by round-robin
 - re-entry: blacklisted key must pass probation before full whitelist return
+- stable-first selection: if at least one stable key is available, foreground traffic avoids previously hard-failed keys
 - token refresh: if auth file token changes, penalties reset for that key
 
 ## Tests
