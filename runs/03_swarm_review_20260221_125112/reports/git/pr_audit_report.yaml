@@ -1,0 +1,11 @@
+contract: gitflow_completion
+mode: analysis_only
+produced_at: "2026-02-21T12:56:00Z"
+pr_infrastructure_available: false
+attestation: >
+  Mode is analysis_only. No code implementation performed.
+  No PR created. GitFlow completion contract is not_applicable for analysis_only runs.
+requirements_to_cards_chain: present  # requirements_traceability.yaml
+cards_to_code_chain: not_applicable_analysis_only
+code_to_verification_chain: not_applicable_analysis_only
+terminal_status_implication: ANALYSIS_READY_WITH_RISKS (not COMPLETE)

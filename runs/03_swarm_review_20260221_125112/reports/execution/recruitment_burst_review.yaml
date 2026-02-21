@@ -1,0 +1,11 @@
+contract: waggle_recruitment_burst
+phase: 3
+produced_at: "2026-02-21T12:52:30Z"
+trigger_check:
+  agreement_ratio: 0.95  # all 6 variations agree on P0 findings
+  confidence_percent: 96
+  dissent_count: 0
+  trigger_fired: false
+  reason: "Agreement ratio 0.95 >= 0.67 threshold. No dissent. Burst not needed."
+additional_lanes_spawned: 0
+status: pass

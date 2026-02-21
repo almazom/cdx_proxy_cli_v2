@@ -1,0 +1,23 @@
+contract: pheromone_evaporation
+phase: 5
+produced_at: "2026-02-21T12:53:30Z"
+decay_window_iterations: 2
+prior_run_priorities:
+  - item_id: TASK-003
+    original_priority: P1
+    reconfirmed: false
+    decay_action: closed_resolved
+    reason: "TraceStore memory leak is resolved by deque(maxlen). No new evidence to reconfirm as active."
+  - item_id: TASK-005
+    original_priority: P0
+    reconfirmed: false
+    decay_action: closed_resolved
+    reason: "Event log sanitization implemented. SENSITIVE_FIELD_NAMES + _is_sensitive_field() active."
+  - item_id: TASK-002
+    original_priority: P0
+    reconfirmed: true
+    decay_action: downgraded_to_p1_pending_verification
+    reason: "Race condition appears resolved by threading.Lock. Needs concurrent stress test (CARD-008) before full closure."
+current_active_p0: [F-P0-001, F-P0-002]
+stale_p0_p1_items_are_reconfirmed_or_decayed: true
+status: pass

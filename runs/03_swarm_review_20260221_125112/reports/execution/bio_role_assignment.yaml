@@ -1,0 +1,29 @@
+contract: dynamic_role_differentiation
+phase: 2
+produced_at: "2026-02-21T12:52:00Z"
+assignments:
+  - variation_id: sv_security
+    role: security_auditor
+    fitness_basis: security_domain_knowledge
+    adapted: false
+  - variation_id: sv_performance
+    role: performance_analyst
+    fitness_basis: systems_performance_knowledge
+    adapted: false
+  - variation_id: sv_maintainability
+    role: maintainability_reviewer
+    fitness_basis: software_engineering_patterns
+    adapted: false
+  - variation_id: sv_simplicity
+    role: simplicity_critic
+    fitness_basis: code_complexity_analysis
+    adapted: false
+  - variation_id: sv_testability
+    role: testability_auditor
+    fitness_basis: testing_best_practices
+    adapted: false
+  - variation_id: sv_api
+    role: api_design_reviewer
+    fitness_basis: api_design_patterns
+    adapted: false
+topology_note: "All variations are strategy variations of a single executor. Role differentiation is analytical perspective differentiation."

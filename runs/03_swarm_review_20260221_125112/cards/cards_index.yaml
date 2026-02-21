@@ -1,0 +1,83 @@
+run_id: "03_swarm_review_20260221_125112"
+phase: 4
+produced_at: "2026-02-21T12:53:00Z"
+cards:
+  - id: CARD-001
+    title: "Implement per-IP rate limiting on proxy"
+    priority: P0
+    complexity_hours: 2
+    ssot_ref: TASK-001.2
+    file: cards/CARD-001.md
+  - id: CARD-002
+    title: "Enforce response body size limit"
+    priority: P0
+    complexity_hours: 2
+    ssot_ref: null
+    file: cards/CARD-002.md
+  - id: CARD-003
+    title: "Fix _read_body() indefinite block on slow clients"
+    priority: P1
+    complexity_hours: 1
+    ssot_ref: null
+    file: cards/CARD-003.md
+  - id: CARD-004
+    title: "Fix EventLogger: persistent handle + NullEventLogger"
+    priority: P1
+    complexity_hours: 2
+    ssot_ref: null
+    file: cards/CARD-004.md
+  - id: CARD-005
+    title: "Split server.py: extract ProxyForwarder class"
+    priority: P1
+    complexity_hours: 3
+    ssot_ref: TASK-006
+    file: cards/CARD-005.md
+  - id: CARD-006
+    title: "Add Settings schema validation"
+    priority: P1
+    complexity_hours: 2
+    ssot_ref: TASK-004
+    file: cards/CARD-006.md
+  - id: CARD-007
+    title: "Add /v1/ versioning prefix to management API"
+    priority: P1
+    complexity_hours: 2
+    ssot_ref: null
+    file: cards/CARD-007.md
+  - id: CARD-008
+    title: "Add concurrent stress test for auth rotation"
+    priority: P1
+    complexity_hours: 2
+    ssot_ref: TASK-002.3
+    file: cards/CARD-008.md
+  - id: CARD-009
+    title: "Add pagination to /trace endpoint"
+    priority: P1
+    complexity_hours: 1
+    ssot_ref: null
+    file: cards/CARD-009.md
+  - id: CARD-010
+    title: "Remove /debug filesystem path leakage"
+    priority: P2
+    complexity_hours: 1
+    ssot_ref: null
+    file: cards/CARD-010.md
+  - id: CARD-011
+    title: "Refactor build_forward_headers() into separate paths"
+    priority: P2
+    complexity_hours: 1
+    ssot_ref: null
+    file: cards/CARD-011.md
+  - id: CARD-012
+    title: "Cap ThreadingHTTPServer max concurrent threads"
+    priority: P2
+    complexity_hours: 2
+    ssot_ref: null
+    file: cards/CARD-012.md
+validation:
+  all_cards_within_4h: true
+  cards_exceeding_4h: []
+  total_cards: 12
+  total_p0: 2
+  total_p1: 7
+  total_p2: 3

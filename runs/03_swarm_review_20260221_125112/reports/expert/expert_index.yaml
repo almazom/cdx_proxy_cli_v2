@@ -1,0 +1,52 @@
+run_id: "03_swarm_review_20260221_125112"
+phase: 2
+produced_at: "2026-02-21T12:52:00Z"
+topology: strategy_variations
+reports:
+  - id: sv_security
+    file: reports/expert/01_security_report.md
+    role: security
+    findings_count: 6
+    p0_count: 2
+    p1_count: 2
+    p2_count: 2
+  - id: sv_performance
+    file: reports/expert/02_performance_report.md
+    role: performance
+    findings_count: 5
+    p0_count: 0
+    p1_count: 2
+    p2_count: 3
+  - id: sv_maintainability
+    file: reports/expert/03_maintainability_report.md
+    role: maintainability
+    findings_count: 4
+    p0_count: 0
+    p1_count: 2
+    p2_count: 2
+  - id: sv_simplicity
+    file: reports/expert/04_simplicity_report.md
+    role: simplicity
+    findings_count: 4
+    p0_count: 0
+    p1_count: 0
+    p2_count: 4
+  - id: sv_testability
+    file: reports/expert/05_testability_report.md
+    role: testability
+    findings_count: 5
+    p0_count: 0
+    p1_count: 2
+    p2_count: 3
+  - id: sv_api
+    file: reports/expert/06_api_report.md
+    role: api
+    findings_count: 5
+    p0_count: 0
+    p1_count: 2
+    p2_count: 3
+totals:
+  p0: 2
+  p1: 10
+  p2: 17
+  total_findings: 29

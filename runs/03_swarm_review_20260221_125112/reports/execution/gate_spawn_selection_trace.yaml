@@ -1,0 +1,79 @@
+contract: control_gate_agent_selection
+points:
+  phase_0_preflight_decision:
+    candidate_agents:
+    - Kimi
+    - Qwen
+    - Codex
+    fallback_rule: strategy_variations_when_distinct_engines_unavailable
+    selected_agents:
+    - sv_env_check
+    - sv_version_check
+    - sv_mode_check
+    selection_reason: Strategy variations used (single executor). 3 analytical perspectives
+      applied.
+    source_index_checked: true
+  phase_3_fusion_decision:
+    candidate_agents:
+    - Kimi
+    - Qwen
+    - Codex
+    - Gemini
+    fallback_rule: strategy_variations_when_distinct_engines_unavailable
+    selected_agents:
+    - sv_fusion_validator_1
+    - sv_fusion_validator_2
+    - sv_fusion_validator_3
+    selection_reason: 'Strategy variations: priority consistency, SSOT reconciliation,
+      conflict detection'
+    source_index_checked: true
+  phase_5_quality_95_validation:
+    candidate_agents:
+    - Kimi
+    - Qwen
+    - Codex
+    fallback_rule: strategy_variations_when_distinct_engines_unavailable
+    selected_agents:
+    - sv_q5_1
+    - sv_q5_2
+    - sv_q5_3
+    selection_reason: 'Strategy variations: comprehension, template compliance, complexity
+      bounds'
+    source_index_checked: true
+  phase_8_implementation_decision:
+    candidate_agents:
+    - Codex
+    - Kimi
+    - Qwen
+    fallback_rule: strategy_variations_when_distinct_engines_unavailable
+    selected_agents:
+    - sv_p8_1
+    - sv_p8_2
+    - sv_p8_3
+    selection_reason: 'Strategy variations: attestation, mode compliance, readiness
+      completeness'
+    source_index_checked: true
+  phase_9_final_readiness_decision:
+    candidate_agents:
+    - Kimi
+    - Qwen
+    - Codex
+    - Gemini
+    fallback_rule: strategy_variations_when_distinct_engines_unavailable
+    selected_agents:
+    - sv_p9_1
+    - sv_p9_2
+    - sv_p9_3
+    selection_reason: 'Strategy variations: final gate audit, expectation lock verification,
+      mutation record verification'
+    source_index_checked: true
+produced_at: '2026-02-21T12:51:12Z'
+source_index_agents:
+- Kimi
+- Pi
+- Qwen
+- Codex
+- Gemini
+- Claude GLM5
+source_index_checked_at: '2026-02-21T12:51:12Z'
+source_index_path: /home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/docs/ai_agents/aiagentsdocs/INDEX.md

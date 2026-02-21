@@ -1,0 +1,29 @@
+contract: decision_gate_parallel_review
+points:
+  phase_0_preflight_decision:
+    confidence_percent: 98
+    review_artifact: reports/execution/reviews/phase_0_preflight_review.yaml
+    status: complete
+    verdict: PASS
+  phase_3_fusion_decision:
+    confidence_percent: 96
+    review_artifact: reports/execution/reviews/phase_3_fusion_review.yaml
+    status: complete
+    verdict: PASS
+  phase_5_quality_95_validation:
+    confidence_percent: 97
+    review_artifact: reports/execution/reviews/phase_5_quality_95_review.yaml
+    status: complete
+    verdict: PASS
+  phase_8_implementation_decision:
+    confidence_percent: 99
+    review_artifact: reports/execution/reviews/phase_8_implementation_review.yaml
+    status: complete
+    verdict: PASS
+  phase_9_final_readiness_decision:
+    confidence_percent: 97
+    review_artifact: reports/execution/reviews/phase_9_final_readiness_review.yaml
+    status: complete
+    verdict: PASS
+produced_at: '2026-02-21T12:52:30Z'
+topology: strategy_variations

@@ -1,0 +1,20 @@
+gate: mode_and_executability_gate
+status: pass
+checked_at: "2026-02-21T12:51:12Z"
+resolved_mode: analysis_only
+topology:
+  claimed: single_agent_strategy_variations
+  distinct_real_producers: 1
+  strict_parallel_allowed: false
+  labeling: strategy_variations
+  rationale: >
+    Only one LLM agent (GitHub Copilot CLI) is executing this run.
+    All 'parallel' analysis sections are strategy variations from the same engine.
+    Forbidden terms: "three-way quorum passed", "3 distinct producers verified".
+impossible_claims_denied:
+  - all_cards_implemented
+  - pr_created
+  - strict_parallel_with_3_distinct_producers
+analysis_only_terminal_allowed:
+  - ANALYSIS_READY
+  - ANALYSIS_READY_WITH_RISKS

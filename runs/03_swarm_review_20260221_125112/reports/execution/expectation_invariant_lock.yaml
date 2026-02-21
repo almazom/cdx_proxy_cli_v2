@@ -1,0 +1,14 @@
+captured_at: '2026-02-21T12:51:12Z'
+contract: queen_invariant_lock
+hashes_match: true
+locked_files:
+- path: docs/ai_agents/TOTAL_EXPECTATIONS_RU.md
+  resolved_from: /home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/docs/ai_agents/TOTAL_EXPECTATIONS_RU.md
+  sha256: 742bbe59022d8a29377a892c941d139e6da4d35981bf14217ce070cbd454576b
+- path: docs/ai_agents/EXPECTATIONS_MAPPING.md
+  resolved_from: /home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/docs/ai_agents/EXPECTATIONS_MAPPING.md
+  sha256: 12967dc07397555929a4d43e0cf3876064b15f81416aced62b8d667d40e55b76
+phase_captured: 0
+phase_rechecked: 9
+rechecked_at: '2026-02-21T12:55:30Z'
+status: verified

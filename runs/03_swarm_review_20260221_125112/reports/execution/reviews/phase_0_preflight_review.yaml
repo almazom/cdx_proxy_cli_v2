@@ -1,0 +1,30 @@
+point_id: phase_0_preflight_decision
+decision_question: "Do all preflight gates pass and is the environment ready for run execution?"
+input_artifacts:
+  - reports/preflight/environment_gate_report.yaml
+  - reports/preflight/flow_version_lock_report.yaml
+  - reports/preflight/mode_and_executability_report.yaml
+  - reports/preflight/cli_capabilities_snapshot.yaml
+spawned_agents:
+  - id: sv_env_check
+    role: environment_auditor
+    engine: strategy_variation_1
+    verdict: pass
+    notes: "All paths verified. Run root writable. aiagentsdocs index found."
+  - id: sv_version_check
+    role: version_lock_auditor
+    engine: strategy_variation_2
+    verdict: pass
+    notes: "v5.0.2.fork confirmed. Protocol files present."
+  - id: sv_mode_check
+    role: mode_executability_auditor
+    engine: strategy_variation_3
+    verdict: pass
+    notes: "analysis_only mode confirmed. topology truth declared. No impossible claims."
+topology_attestation: strategy_variations  # single agent, not strict parallel
+consolidated_verdict: PASS
+confidence_percent: 98
+notes:
+  - "Environment, version lock, and mode gates all pass."
+  - "Topology truth correctly declared as single-agent strategy_variations."
+  - "Ready to proceed to phase 1."

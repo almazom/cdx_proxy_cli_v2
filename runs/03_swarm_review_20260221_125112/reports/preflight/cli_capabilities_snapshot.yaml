@@ -1,0 +1,18 @@
+snapshot_at: "2026-02-21T12:51:12Z"
+executor: "GitHub Copilot CLI (claude-sonnet-4.x)"
+topology:
+  type: single_agent
+  distinct_producers: 1
+  strategy_variations_only: true
+  strict_parallel_claim_allowed: false
+capabilities:
+  file_read: true
+  file_write: true
+  bash_exec: true
+  git_ops: true
+  external_api_spawn: false
+  distinct_engine_pool: false
+notes:
+  - "Single LLM agent; parallel sections use strategy_variations labeling per topology_truth_policy."
+  - "All agent-output claims in this run are single-producer strategy variations."
+  - "No external AI CLI binaries (kimi, qwen, codex, gemini) were invoked."

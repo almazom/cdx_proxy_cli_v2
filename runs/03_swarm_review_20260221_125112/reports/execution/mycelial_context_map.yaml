@@ -1,0 +1,29 @@
+contract: mycelial_context_transport
+phase: 3
+produced_at: "2026-02-21T12:52:30Z"
+cross_card_links:
+  - from: F-P0-001
+    to: F-P1-001
+    link_type: shares_context
+    note: "Both relate to request handling and socket management in server.py"
+  - from: F-P0-002
+    to: F-P1-001
+    link_type: shares_context
+    note: "Response body enforcement and request body blocking share socket timeout context"
+  - from: F-P1-003
+    to: F-P2-001
+    link_type: prerequisite
+    note: "server.py split (F-P1-003) must precede ProxyHandler testability (F-P2-001)"
+  - from: F-P1-002
+    to: F-P2-001
+    link_type: shares_context
+    note: "EventLogger DI improvement enables testability for both logger and handler"
+  - from: F-P1-004
+    to: F-P2-003
+    link_type: shares_context
+    note: "Settings validation and constant centralization share settings.py context"
+  - from: F-P1-005
+    to: F-P1-007
+    link_type: shares_context
+    note: "Both are management API improvements that should land together"
+isolated_execution_prevented: true

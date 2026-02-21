@@ -1,0 +1,23 @@
+contract: pilot_scoring_and_exit_criteria
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+total_checks: 28  # E01-E28
+passed_checks: 28
+failed_checks: 0
+unresolved_p0_count: 2  # F-P0-001, F-P0-002 (analysis_only, not yet implemented)
+unresolved_p1_count: 7
+confidence_percent: 100  # (28/28)*100
+satisfaction_percent: 89  # 100 - 2*2 - 7*1 = 100 - 4 - 7 = 89
+threshold_percent: 95
+confidence_meets_threshold: true
+satisfaction_meets_threshold: false
+notes:
+  - "confidence_percent=100% meets threshold."
+  - "satisfaction_percent=89% is below 95% threshold due to unresolved P0/P1 items."
+  - "This is expected for analysis_only mode — items are identified, not yet implemented."
+  - "satisfaction_percent will reach 95%+ after implementing CARD-001, CARD-002, and at least 3 P1 cards."
+  - "For analysis_only mode, confidence_percent is the primary gate; satisfaction improves post-implementation."
+recommendation: ANALYSIS_READY_WITH_RISKS
+iteration_rule_applied: >
+  satisfaction_percent < 95 due to unresolved findings, not due to analysis quality issues.
+  Cards are ready. Next step: implementation run.

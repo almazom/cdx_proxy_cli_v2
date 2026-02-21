@@ -1,0 +1,19 @@
+contract: graveyard_quarantine
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+quarantined_patterns:
+  - pattern_id: GP-001
+    description: "Claiming strict_parallel with fewer than 3 distinct engine producers"
+    detected_in_run: null
+    status: quarantined
+    mutation_fix_required: "Use strategy_variations label when only one executor is present"
+    reuse_allowed: false
+  - pattern_id: GP-002
+    description: "Fabricating implementation evidence (claiming pr_created or all_cards_implemented) in analysis_only mode"
+    detected_in_run: null
+    status: quarantined
+    mutation_fix_required: "Enforce mode check before any implementation claim"
+    reuse_allowed: false
+current_run_violations: []
+quarantined_patterns_not_reused: true
+status: pass

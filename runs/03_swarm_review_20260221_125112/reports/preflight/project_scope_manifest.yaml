@@ -1,0 +1,21 @@
+gate: project_scope
+status: pass
+checked_at: "2026-02-21T12:51:12Z"
+project: cdx_proxy_cli_v2
+include_paths:
+  - "src/cdx_proxy_cli_v2/**"
+  - "tests/**"
+  - "pyproject.toml"
+  - "SSOT_KANBAN.yaml"
+exclude_paths:
+  - "**/__pycache__/**"
+  - "*.egg-info/**"
+  - ".git/**"
+  - "runs/**"
+code_file_extensions:
+  - ".py"
+  - ".toml"
+  - ".yaml"
+  - ".md"
+source_file_count: 24
+test_file_count: 13

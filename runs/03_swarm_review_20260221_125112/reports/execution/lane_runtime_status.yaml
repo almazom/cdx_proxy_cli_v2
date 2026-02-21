@@ -1,0 +1,40 @@
+contract: lane_runtime_stabilization
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+lanes:
+  - lane_id: phase_0_preflight
+    status: success
+    inputs_materialized: true
+  - lane_id: phase_2_expert_analysis
+    status: success
+    inputs_materialized: true
+    variation_count: 6
+  - lane_id: phase_3_fusion
+    status: success
+    inputs_materialized: true
+  - lane_id: phase_4_cards
+    status: success
+    inputs_materialized: true
+    cards_count: 12
+  - lane_id: phase_5_quality
+    status: success
+    inputs_materialized: true
+    confidence_percent: 97
+  - lane_id: phase_6_ssot_freeze
+    status: success
+    inputs_materialized: true
+  - lane_id: phase_7_readiness
+    status: success
+    inputs_materialized: true
+  - lane_id: phase_8_attestation
+    status: success
+    inputs_materialized: true
+  - lane_id: phase_9_final
+    status: success
+    inputs_materialized: true
+total_lanes: 9
+success_count: 9
+success_rate_percent: 100
+instability_detected: false
+active_stop_signal: false
+status: pass

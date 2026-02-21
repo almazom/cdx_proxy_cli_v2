@@ -1,0 +1,9 @@
+gate: worktree_context
+status: pass
+checked_at: "2026-02-21T12:51:12Z"
+worktree_context:
+  source_repository_path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  source_branch_or_head: "master @ 3c58efb"
+  worktree_path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  copied_project_path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  note: "No separate worktree copy; analysis runs on the live repo. Mode: analysis_only."

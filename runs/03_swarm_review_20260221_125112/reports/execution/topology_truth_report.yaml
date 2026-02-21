@@ -1,0 +1,13 @@
+contract: topology_truth_policy
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+declared_topology: single_agent_strategy_variations
+distinct_producers: 1
+strict_parallel_claim_allowed: false
+forbidden_terms_used: []
+strategy_variations_used: true
+attestation: >
+  All analysis sections in this run are strategy variations from a single executor
+  (GitHub Copilot CLI, claude-sonnet-4.x). No external AI CLI binaries were invoked.
+  No claim of "three-way quorum passed" or "3 distinct producers verified" was made.
+status: pass

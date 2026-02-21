@@ -1,0 +1,81 @@
+run_id: "03_swarm_review_20260221_125112"
+phase: 3
+produced_at: "2026-02-21T12:52:30Z"
+p0:
+  - id: F-P0-001
+    title: "No per-IP rate limiting on proxy"
+    files: ["src/cdx_proxy_cli_v2/proxy/server.py:326"]
+    complexity_hours: 2
+    ssot_ref: TASK-001.2
+  - id: F-P0-002
+    title: "Response body size limit defined but not enforced"
+    files: ["src/cdx_proxy_cli_v2/proxy/server.py:35"]
+    complexity_hours: 2
+    ssot_ref: null
+p1:
+  - id: F-P1-001
+    title: "_read_body() blocks indefinitely on slow clients"
+    files: ["src/cdx_proxy_cli_v2/proxy/server.py:211"]
+    complexity_hours: 1
+    ssot_ref: null
+  - id: F-P1-002
+    title: "EventLogger opens file per write"
+    files: ["src/cdx_proxy_cli_v2/observability/event_log.py:62"]
+    complexity_hours: 2
+    ssot_ref: null
+  - id: F-P1-003
+    title: "server.py 5 mixed responsibilities, _proxy_request 163 lines"
+    files: ["src/cdx_proxy_cli_v2/proxy/server.py"]
+    complexity_hours: 3
+    ssot_ref: TASK-006
+  - id: F-P1-004
+    title: "No schema validation on Settings"
+    files: ["src/cdx_proxy_cli_v2/config/settings.py:190"]
+    complexity_hours: 2
+    ssot_ref: TASK-004
+  - id: F-P1-005
+    title: "Management API has no versioning"
+    files: ["src/cdx_proxy_cli_v2/proxy/rules.py:41"]
+    complexity_hours: 2
+    ssot_ref: null
+  - id: F-P1-006
+    title: "No concurrent stress test for auth rotation"
+    files: ["tests/auth/test_rotation.py"]
+    complexity_hours: 2
+    ssot_ref: TASK-002.3
+  - id: F-P1-007
+    title: "/trace endpoint lacks pagination"
+    files: ["src/cdx_proxy_cli_v2/proxy/server.py"]
+    complexity_hours: 1
+    ssot_ref: null
+p2:
+  - id: F-P2-001
+    title: "ProxyHandler not unit-testable without live socket"
+    complexity_hours: 3
+    ssot_ref: null
+  - id: F-P2-002
+    title: "build_forward_headers() dual-mode logic"
+    complexity_hours: 1
+    ssot_ref: null
+  - id: F-P2-003
+    title: "Hard-coded constants scattered across modules"
+    complexity_hours: 1
+    ssot_ref: null
+  - id: F-P2-004
+    title: "PATH_REWRITE_PATTERNS order-dependent and fragile"
+    complexity_hours: 1
+    ssot_ref: null
+  - id: F-P2-005
+    title: "/debug endpoint leaks filesystem paths"
+    complexity_hours: 1
+    ssot_ref: TASK-001.1
+  - id: F-P2-006
+    title: "ThreadingHTTPServer creates unbounded threads"
+    complexity_hours: 2
+    ssot_ref: null
+ssot_closed:
+  - TASK-003  # TraceStore memory leak — already resolved by deque(maxlen)
+  - TASK-005  # Event log sanitization — SENSITIVE_FIELD_NAMES implemented
+ssot_verification_needed:
+  - TASK-002  # Race condition appears resolved but concurrent test needed
+all_findings_have_priority: true

@@ -1,0 +1,19 @@
+checked_at: '2026-02-21T12:51:12Z'
+contract: lane_runtime_stabilization
+gate_inputs:
+  phase_0_preflight_decision:
+    inputs:
+    - reports/preflight/environment_gate_report.yaml
+    - reports/preflight/flow_version_lock_report.yaml
+    - reports/preflight/mode_and_executability_report.yaml
+    - reports/preflight/cli_capabilities_snapshot.yaml
+    materialized: true
+  phase_3_fusion_decision:
+    materialized: true
+  phase_5_quality_95_validation:
+    materialized: true
+  phase_8_implementation_decision:
+    materialized: true
+  phase_9_final_readiness_decision:
+    materialized: true
+status: all_phases_complete

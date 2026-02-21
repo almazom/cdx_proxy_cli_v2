@@ -1,0 +1,32 @@
+contract: stigmergy_coordination
+phase: 2
+produced_at: "2026-02-21T12:52:00Z"
+signals:
+  - signal_id: sig_001
+    emitted_by: sv_security
+    artifact_changed: reports/expert/01_security_report.md
+    signal_type: finding_p0
+    payload: "SEC-HIGH-001: no per-IP rate limiting"
+    picked_up_by: [sv_performance, sv_maintainability]
+  - signal_id: sig_002
+    emitted_by: sv_security
+    artifact_changed: reports/expert/01_security_report.md
+    signal_type: finding_p0
+    payload: "SEC-HIGH-002: response body size limit not enforced"
+    picked_up_by: [sv_testability]
+  - signal_id: sig_003
+    emitted_by: sv_performance
+    artifact_changed: reports/expert/02_performance_report.md
+    signal_type: finding_note
+    payload: "TASK-003 (trace store memory leak) appears resolved — SSOT stale"
+    picked_up_by: [fusion_agent]
+  - signal_id: sig_004
+    emitted_by: sv_maintainability
+    artifact_changed: reports/expert/03_maintainability_report.md
+    signal_type: finding_p1
+    payload: "server.py 527 lines, _proxy_request 163 lines — split needed"
+    picked_up_by: [sv_simplicity, sv_testability]
+coordination_model: stigmergy
+description: >
+  Agents coordinate by reading each other's materialized artifact signals.
+  No direct chat dependency. Each variation reads prior outputs before producing its own.

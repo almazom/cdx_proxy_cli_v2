@@ -1,0 +1,30 @@
+run_id: "03_swarm_review_20260221_125112"
+phase: 7
+produced_at: "2026-02-21T12:54:30Z"
+mode: analysis_only
+cards_ready:
+  - CARD-001  # no dependencies
+  - CARD-002  # no dependencies
+  - CARD-003  # no dependencies
+  - CARD-006  # no dependencies
+  - CARD-008  # no dependencies
+  - CARD-009  # no dependencies
+  - CARD-010  # no dependencies
+  - CARD-011  # no dependencies
+cards_with_soft_order:
+  - CARD-004  # can run independently but benefits from CARD-005 being done first for DI
+  - CARD-005  # extract forwarder — no blocker
+  - CARD-007  # versioning — benefits from knowing final server.py structure after CARD-005
+cards_blocked: []
+dependency_deadlocks_detected: 0
+bridge_cards_needed: false
+critical_path:
+  - [CARD-001, CARD-002]  # P0 parallel
+  - [CARD-003, CARD-005, CARD-006, CARD-008, CARD-009]  # P1 parallel group
+  - [CARD-004, CARD-007]  # P1 sequential after P0
+  - [CARD-010, CARD-011, CARD-012]  # P2 post P1
+implementation_order_recommendation:
+  wave_1_p0: [CARD-001, CARD-002]
+  wave_2_p1_core: [CARD-003, CARD-005, CARD-006, CARD-008]
+  wave_3_p1_api: [CARD-004, CARD-007, CARD-009]
+  wave_4_p2: [CARD-010, CARD-011, CARD-012]

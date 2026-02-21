@@ -1,0 +1,21 @@
+contract: quorum_sensing
+phase: 5
+produced_at: "2026-02-21T12:53:30Z"
+decision_points:
+  - point_id: quality_loop_advance
+    question: "Are all cards at >=95 confidence for comprehension and template compliance?"
+    votes:
+      - variation_id: sv_quality_1
+        vote: advance
+        reason: "All 12 cards pass 3-min comprehension test. Acceptance criteria are specific and testable."
+      - variation_id: sv_quality_2
+        vote: advance
+        reason: "Template compliance 100%. No ambiguity detected in any card."
+      - variation_id: sv_quality_3
+        vote: advance
+        reason: "All cards within 1-4h bounds. No cards need splitting."
+    quorum_threshold_percent: 67
+    agreement_ratio: 1.0
+    quorum_met: true
+    decision: advance
+    confidence_percent: 97

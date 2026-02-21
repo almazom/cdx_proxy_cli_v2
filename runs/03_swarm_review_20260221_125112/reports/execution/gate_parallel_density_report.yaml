@@ -1,0 +1,40 @@
+contract: control_gate_parallel_density
+min_required_per_point: 3
+points:
+  phase_0_preflight_decision:
+    meets_minimum: true
+    selected_count: 3
+    variations:
+    - sv_env_check
+    - sv_version_check
+    - sv_mode_check
+  phase_3_fusion_decision:
+    meets_minimum: true
+    selected_count: 3
+    variations:
+    - sv_fusion_validator_1
+    - sv_fusion_validator_2
+    - sv_fusion_validator_3
+  phase_5_quality_95_validation:
+    meets_minimum: true
+    selected_count: 3
+    variations:
+    - sv_q5_1
+    - sv_q5_2
+    - sv_q5_3
+  phase_8_implementation_decision:
+    meets_minimum: true
+    selected_count: 3
+    variations:
+    - sv_p8_1
+    - sv_p8_2
+    - sv_p8_3
+  phase_9_final_readiness_decision:
+    meets_minimum: true
+    selected_count: 3
+    variations:
+    - sv_p9_1
+    - sv_p9_2
+    - sv_p9_3
+produced_at: '2026-02-21T12:51:12Z'
+topology: strategy_variations

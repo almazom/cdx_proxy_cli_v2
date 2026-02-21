@@ -1,0 +1,23 @@
+run_id: "03_swarm_review_20260221_125112"
+flow_version: "5.0.2.fork"
+mode: "analysis_only"
+project: "cdx_proxy_cli_v2"
+project_root: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+run_root: "/home/pets/TOOLS/cdx_proxy_cli_v2/runs/03_swarm_review_20260221_125112"
+started_at: "2026-02-21T12:51:12Z"
+executor: "GitHub Copilot CLI (claude-sonnet-4.x)"
+topology: "single_agent_strategy_variations"
+git_head: "3c58efb"
+git_branch: "master"
+git_subject: "fix: support /compact endpoint and rename CLI to cdx"
+ssot_kanban_ref: "SSOT_KANBAN.yaml @ flow_version:4.0.18 run_id:001"
+ssot_prior_tasks_count: 6
+ssot_prior_subtasks_count: 14
+ssot_prior_p0_tasks:
+  - TASK-001  # Proxy Server Request Validation Hardening
+  - TASK-002  # Auth Store Token Rotation Race Condition Fix
+  - TASK-005  # Observability Event Log Sanitization
+expected_terminal_status: ANALYSIS_READY
+phase_span: "0->9"
+language_output: ru
+non_stop: true

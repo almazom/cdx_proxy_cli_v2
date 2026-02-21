@@ -1,0 +1,15 @@
+contract: evidence_integrity
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+checks:
+  no_claim_without_artifact:
+    status: pass
+    notes: "All 29 findings have file:line evidence citations in expert reports."
+  no_distinct_producer_claim_without_distinct_engine_session_pairs:
+    status: pass
+    notes: "No strict parallel claims made. strategy_variations used throughout."
+  no_simulated_pr_claim_without_pr_url:
+    status: pass
+    notes: "No PR claims. Mode is analysis_only."
+terminal_status_based_on: ANALYSIS_READY
+status: pass

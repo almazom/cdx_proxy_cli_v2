@@ -1,0 +1,35 @@
+contract: agent_fitness_allocation
+phase: 2
+produced_at: "2026-02-21T12:52:00Z"
+registry:
+  - agent_id: sv_security
+    role: security
+    fitness_score: 0.92
+    fitness_basis: "Domain: security auditing, CVE patterns, OWASP"
+    assigned_to: phase_2_expert_security
+  - agent_id: sv_performance
+    role: performance
+    fitness_score: 0.88
+    fitness_basis: "Domain: systems performance, concurrency patterns"
+    assigned_to: phase_2_expert_performance
+  - agent_id: sv_maintainability
+    role: maintainability
+    fitness_score: 0.90
+    fitness_basis: "Domain: software engineering, clean code"
+    assigned_to: phase_2_expert_maintainability
+  - agent_id: sv_simplicity
+    role: simplicity
+    fitness_score: 0.87
+    fitness_basis: "Domain: complexity analysis, KISS principle"
+    assigned_to: phase_2_expert_simplicity
+  - agent_id: sv_testability
+    role: testability
+    fitness_score: 0.89
+    fitness_basis: "Domain: testing patterns, TDD, mock strategies"
+    assigned_to: phase_2_expert_testability
+  - agent_id: sv_api
+    role: api
+    fitness_score: 0.86
+    fitness_basis: "Domain: API design, REST patterns, versioning"
+    assigned_to: phase_2_expert_api
+all_control_gate_assignments_have_fitness_basis: true

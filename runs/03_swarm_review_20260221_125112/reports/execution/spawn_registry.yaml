@@ -1,0 +1,65 @@
+contract: spawn_registry_and_context
+phase: 2
+produced_at: "2026-02-21T12:52:00Z"
+spawns:
+  - SUBAGENT: sv_security
+    TASK_ID: phase2_security
+    PHASE: 2
+    ROLE: security
+    GOAL: "Audit cdx_proxy_cli_v2 for security vulnerabilities with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/server.py, src/cdx_proxy_cli_v2/auth/store.py, src/cdx_proxy_cli_v2/observability/event_log.py, src/cdx_proxy_cli_v2/proxy/rules.py]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence. No fabricated claims."
+    OUTPUT_ARTIFACTS: [reports/expert/01_security_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+  - SUBAGENT: sv_performance
+    TASK_ID: phase2_performance
+    PHASE: 2
+    ROLE: performance
+    GOAL: "Analyze performance characteristics and bottlenecks with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/server.py, src/cdx_proxy_cli_v2/auth/rotation.py, src/cdx_proxy_cli_v2/observability/trace_store.py, src/cdx_proxy_cli_v2/observability/event_log.py]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence."
+    OUTPUT_ARTIFACTS: [reports/expert/02_performance_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+  - SUBAGENT: sv_maintainability
+    TASK_ID: phase2_maintainability
+    PHASE: 2
+    ROLE: maintainability
+    GOAL: "Review code for maintainability issues with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/server.py, src/cdx_proxy_cli_v2/config/settings.py, src/cdx_proxy_cli_v2/auth/rotation.py]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence."
+    OUTPUT_ARTIFACTS: [reports/expert/03_maintainability_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+  - SUBAGENT: sv_simplicity
+    TASK_ID: phase2_simplicity
+    PHASE: 2
+    ROLE: simplicity
+    GOAL: "Identify unnecessary complexity with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/rules.py, src/cdx_proxy_cli_v2/config/settings.py, src/cdx_proxy_cli_v2/auth/models.py, src/cdx_proxy_cli_v2/proxy/server.py]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence."
+    OUTPUT_ARTIFACTS: [reports/expert/04_simplicity_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+  - SUBAGENT: sv_testability
+    TASK_ID: phase2_testability
+    PHASE: 2
+    ROLE: testability
+    GOAL: "Audit test coverage and testability gaps with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/server.py, tests/]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence."
+    OUTPUT_ARTIFACTS: [reports/expert/05_testability_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+  - SUBAGENT: sv_api
+    TASK_ID: phase2_api
+    PHASE: 2
+    ROLE: api
+    GOAL: "Review API design quality with file:line evidence"
+    INPUT_ARTIFACTS: [src/cdx_proxy_cli_v2/proxy/rules.py, src/cdx_proxy_cli_v2/proxy/server.py]
+    CONSTRAINTS: "Only claim findings with direct file:line evidence."
+    OUTPUT_ARTIFACTS: [reports/expert/06_api_report.md]
+    OUTPUT: summary|findings|priorities
+    STATUS: complete
+topology_truth: strategy_variations  # not strict_parallel

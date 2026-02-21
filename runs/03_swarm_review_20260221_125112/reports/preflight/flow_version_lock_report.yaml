@@ -1,0 +1,18 @@
+gate: flow_version_lock_gate
+status: pass
+checked_at: "2026-02-21T12:51:12Z"
+active_start_file: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/START.md"
+declared_version: "5.0.2.fork"
+protocols_root: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/docs/ai_agents/protocols"
+protocols_present:
+  - FLOW_VERSION_LOCK.md
+  - EVOLUTION_REGRESSION_GUARD.md
+  - NON_STOP_CONTINUITY_GUARD.md
+  - STEP_COVERAGE_GUARD.md
+  - MODE_AND_EXECUTABILITY_GUARD.md
+  - SPAWN_REGISTRY_AND_CONTEXT_GUARD.md
+  - DECISION_GATE_PARALLEL_REVIEW_GUARD.md
+  - EVIDENCE_INTEGRITY_GUARD.md
+  - FUSION_AND_PRIORITY_GUARD.md
+  - CARD_QUALITY_95_GUARD.md
+lock_confirmed: true

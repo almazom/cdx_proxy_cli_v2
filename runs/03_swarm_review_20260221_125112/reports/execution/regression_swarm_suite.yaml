@@ -1,0 +1,26 @@
+contract: regression_swarm_suite
+phase: 9
+produced_at: "2026-02-21T12:55:30Z"
+scenarios:
+  - scenario_id: non_stop_break
+    description: "Run stops before phase 9 without explicit blocked_reason"
+    test_result: pass
+    evidence: "Run executed phases 0-9 without stop. non_stop_watchdog.yaml shows no blocked_reason."
+  - scenario_id: silent_skip
+    description: "A critical phase is skipped without marking it not_applicable"
+    test_result: pass
+    evidence: "step_coverage_report.yaml shows all phases 0-9 accounted for."
+  - scenario_id: fabricated_parallel_claim
+    description: "Claiming strict parallel when distinct producers < 3"
+    test_result: pass
+    evidence: "topology_truth_report.yaml + cli_capabilities_snapshot.yaml declare strategy_variations. No forbidden terms used."
+  - scenario_id: quorum_not_met_transition
+    description: "Phase advances without quorum threshold met"
+    test_result: pass
+    evidence: "quorum_decision_record.yaml shows agreement_ratio=1.0 for quality gate. No advancement without quorum."
+  - scenario_id: expectation_drift
+    description: "Locked expectations are not preserved across lifecycle"
+    test_result: pass
+    evidence: "expectation_invariant_lock.yaml hashes captured at phase 0 and verified at phase 9."
+critical_failures_count: 0
+status: pass
