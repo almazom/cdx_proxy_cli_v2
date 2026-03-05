@@ -23,6 +23,15 @@ PATH_REWRITE_PATTERNS = [
     ("/responses", "/codex/responses"),
 ]
 
+MANAGEMENT_ROUTES = {
+    "/debug": "debug",
+    "/trace": "trace",
+    "/health": "health",
+    "/auth-files": "auth-files",
+    "/shutdown": "shutdown",
+    "/reset": "reset",
+}
+
 
 def is_loopback_host(host: str) -> bool:
     normalized = (host or "").strip().lower()
@@ -47,19 +56,7 @@ def trace_route(path: str) -> str:
 
 def management_route(path: str) -> Optional[str]:
     path_only = urlsplit(path or "").path
-    if path_only == "/debug":
-        return "debug"
-    if path_only == "/trace":
-        return "trace"
-    if path_only == "/health":
-        return "health"
-    if path_only == "/auth-files":
-        return "auth-files"
-    if path_only == "/shutdown":
-        return "shutdown"
-    if path_only == "/reset":
-        return "reset"
-    return None
+    return MANAGEMENT_ROUTES.get(path_only)
 
 
 def rewrite_request_path(*, req_path: str, upstream_host: Optional[str], upstream_base_path: str) -> str:
@@ -78,6 +75,19 @@ def rewrite_request_path(*, req_path: str, upstream_host: Optional[str], upstrea
 def is_primary_responses_path(req_path: str) -> bool:
     path = req_path.split("?", 1)[0]
     return path in {"/codex/responses", "/codex/responses/compact"}
+
+
+def get_request_timeout(req_path: str, default: int = 25, compact: int = 120) -> int:
+    """Return appropriate timeout based on endpoint type.
+    
+    /compact endpoints can take significantly longer as they process
+    and compress large conversation histories. Research shows these
+    operations can take 30-300+ seconds depending on conversation size.
+    """
+    path = req_path.split("?", 1)[0]
+    if path.endswith("/compact"):
+        return compact
+    return default
 
 
 def drop_header_case_insensitive(headers: Dict[str, str], key: str) -> None:
