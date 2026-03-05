@@ -5,13 +5,15 @@ import re
 import secrets
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 DEFAULT_AUTH_DIR = "~/.codex/_auths"
 DEFAULT_ENV_FILE = ".env"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_UPSTREAM = "https://chatgpt.com/backend-api"
 DEFAULT_TRACE_MAX = 500
+DEFAULT_REQUEST_TIMEOUT = 45
+DEFAULT_COMPACT_TIMEOUT = 120
 
 ENV_AUTH_DIR = "CLIPROXY_AUTH_DIR"
 ENV_ENV_FILE = "CLIPROXY_ENV_FILE"
@@ -21,6 +23,8 @@ ENV_UPSTREAM = "CLIPROXY_UPSTREAM"
 ENV_MANAGEMENT_KEY = "CLIPROXY_MANAGEMENT_KEY"
 ENV_ALLOW_NON_LOOPBACK = "CLIPROXY_ALLOW_NON_LOOPBACK"
 ENV_TRACE_MAX = "CLIPROXY_TRACE_MAX"
+ENV_REQUEST_TIMEOUT = "CLIPROXY_REQUEST_TIMEOUT"
+ENV_COMPACT_TIMEOUT = "CLIPROXY_COMPACT_TIMEOUT"
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -132,6 +136,8 @@ class Settings:
     management_key: Optional[str]
     allow_non_loopback: bool
     trace_max: int
+    request_timeout: int
+    compact_timeout: int
 
     @property
     def base_url(self) -> str:
@@ -157,6 +163,8 @@ def build_settings(
     management_key: Optional[str] = None,
     allow_non_loopback: Optional[bool] = None,
     trace_max: Optional[int] = None,
+    request_timeout: Optional[int] = None,
+    compact_timeout: Optional[int] = None,
 ) -> Settings:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
@@ -168,10 +176,25 @@ def build_settings(
     resolved_auth_dir = str(resolve_path(auth_dir or merged.get(ENV_AUTH_DIR) or initial_auth_dir))
     resolved_host = (host or merged.get(ENV_HOST) or DEFAULT_HOST).strip() or DEFAULT_HOST
 
-    if port is None:
-        resolved_port = parse_port(merged.get(ENV_PORT), default=0)
-    else:
-        resolved_port = max(0, int(port))
+    def resolve_numeric_setting(
+        *,
+        cli_value: Optional[int],
+        env_key: str,
+        default: int,
+        env_parser: Callable[[Optional[str], int], int],
+        min_cli_value: int,
+    ) -> int:
+        if cli_value is None:
+            return env_parser(merged.get(env_key), default=default)
+        return max(min_cli_value, int(cli_value))
+
+    resolved_port = resolve_numeric_setting(
+        cli_value=port,
+        env_key=ENV_PORT,
+        default=0,
+        env_parser=parse_port,
+        min_cli_value=0,
+    )
 
     resolved_upstream = (upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM).strip() or DEFAULT_UPSTREAM
     raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
@@ -184,10 +207,29 @@ def build_settings(
     else:
         resolved_allow_non_loopback = bool(allow_non_loopback)
 
-    if trace_max is None:
-        resolved_trace_max = parse_positive_int(merged.get(ENV_TRACE_MAX), default=DEFAULT_TRACE_MAX)
-    else:
-        resolved_trace_max = max(1, int(trace_max))
+    resolved_trace_max = resolve_numeric_setting(
+        cli_value=trace_max,
+        env_key=ENV_TRACE_MAX,
+        default=DEFAULT_TRACE_MAX,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_request_timeout = resolve_numeric_setting(
+        cli_value=request_timeout,
+        env_key=ENV_REQUEST_TIMEOUT,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_compact_timeout = resolve_numeric_setting(
+        cli_value=compact_timeout,
+        env_key=ENV_COMPACT_TIMEOUT,
+        default=DEFAULT_COMPACT_TIMEOUT,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
 
     return Settings(
         auth_dir=resolved_auth_dir,
@@ -197,6 +239,8 @@ def build_settings(
         management_key=resolved_key,
         allow_non_loopback=resolved_allow_non_loopback,
         trace_max=resolved_trace_max,
+        request_timeout=resolved_request_timeout,
+        compact_timeout=resolved_compact_timeout,
     )
 
 

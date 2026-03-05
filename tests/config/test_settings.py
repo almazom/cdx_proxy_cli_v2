@@ -9,9 +9,12 @@ import pytest
 
 from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTH_DIR,
+    ENV_COMPACT_TIMEOUT,
     ENV_HOST,
     ENV_MANAGEMENT_KEY,
     ENV_PORT,
+    ENV_REQUEST_TIMEOUT,
+    ENV_TRACE_MAX,
     ENV_UPSTREAM,
     DEFAULT_HOST,
     DEFAULT_UPSTREAM,
@@ -248,6 +251,8 @@ class TestSettings:
             management_key="key",
             allow_non_loopback=False,
             trace_max=100,
+            request_timeout=45,
+            compact_timeout=120,
         )
         
         assert settings.base_url == "http://127.0.0.1:8080"
@@ -262,8 +267,10 @@ class TestSettings:
             management_key=None,
             allow_non_loopback=False,
             trace_max=100,
+            request_timeout=45,
+            compact_timeout=120,
         )
-        
+
         updated = original.with_port(9000)
         
         assert original.port == 8080  # Original unchanged
@@ -279,8 +286,10 @@ class TestSettings:
             management_key=None,
             allow_non_loopback=False,
             trace_max=100,
+            request_timeout=45,
+            compact_timeout=120,
         )
-        
+
         updated = original.with_management_key("new-key")
         
         assert original.management_key is None
@@ -297,12 +306,12 @@ class TestBuildSettingsPrecedence:
     def test_cli_args_override_env_vars(self, tmp_path: Path, monkeypatch):
         """CLI args should take precedence over env vars."""
         monkeypatch.setenv(ENV_HOST, "env-host")
-        
+
         settings = build_settings(
             auth_dir=str(tmp_path),
             host="cli-host",
         )
-        
+
         assert settings.host == "cli-host"
 
     def test_whitespace_stripped_from_values(self):
@@ -312,9 +321,48 @@ class TestBuildSettingsPrecedence:
             host="  127.0.0.1  ",
             upstream="  https://api.example.com  ",
         )
-        
+
         assert settings.host == "127.0.0.1"
         assert settings.upstream == "https://api.example.com"
+
+
+class TestBuildSettingsNumericResolution:
+    """Tests for numeric resolution precedence and clamping."""
+
+    def test_port_cli_override_takes_precedence(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(ENV_PORT, "8080")
+
+        settings = build_settings(auth_dir=str(tmp_path), port=9000)
+
+        assert settings.port == 9000
+
+    def test_port_cli_override_clamps_to_zero(self, tmp_path: Path):
+        settings = build_settings(auth_dir=str(tmp_path), port=-5)
+
+        assert settings.port == 0
+
+    def test_numeric_settings_fall_back_to_env(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(ENV_TRACE_MAX, "700")
+        monkeypatch.setenv(ENV_REQUEST_TIMEOUT, "60")
+        monkeypatch.setenv(ENV_COMPACT_TIMEOUT, "180")
+
+        settings = build_settings(auth_dir=str(tmp_path))
+
+        assert settings.trace_max == 700
+        assert settings.request_timeout == 60
+        assert settings.compact_timeout == 180
+
+    def test_numeric_cli_overrides_clamp_minimum(self, tmp_path: Path):
+        settings = build_settings(
+            auth_dir=str(tmp_path),
+            trace_max=0,
+            request_timeout=-10,
+            compact_timeout=0,
+        )
+
+        assert settings.trace_max == 1
+        assert settings.request_timeout == 1
+        assert settings.compact_timeout == 1
 
 
 # ============================================================================
