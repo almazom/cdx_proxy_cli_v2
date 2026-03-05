@@ -19,6 +19,7 @@ from cdx_proxy_cli_v2.observability.event_log import EventLogger
 from cdx_proxy_cli_v2.proxy.rules import (
     CHATGPT_HOSTS,
     build_forward_headers,
+    get_request_timeout,
     is_loopback_host,
     is_primary_responses_path,
     management_route,
@@ -51,6 +52,17 @@ def _extract_error_code(raw_body: bytes) -> Optional[str]:
         if isinstance(code, str) and code.strip():
             return code.strip()
     return None
+
+
+@dataclass
+class UpstreamAttemptResult:
+    status: int
+    headers: List[Tuple[str, str]]
+    body: bytes
+    error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    stream_response: Optional[http.client.HTTPResponse] = None
+    stream_connection: Optional[http.client.HTTPConnection] = None
 
 
 @dataclass
@@ -93,6 +105,8 @@ class ProxyRuntime:
             "log_request_preview": False,
             "management_key_required": bool(self.settings.management_key),
             "trace_max": self.trace_store.max_size,
+            "request_timeout": self.settings.request_timeout,
+            "compact_timeout": self.settings.compact_timeout,
             "pid": os.getpid(),
             "event_log_file": str(self.logger.path),
         }
@@ -208,44 +222,50 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(length)
 
-    def _parse_reset_params(self) -> tuple[Optional[str], Optional[str]]:
+    def _query_params(self) -> Dict[str, List[str]]:
+        query = urlsplit(self.path).query
+        if not query:
+            return {}
+        return parse_qs(query)
+
+    def _first_query_value(self, params: Dict[str, List[str]], key: str) -> Optional[str]:
+        values = params.get(key)
+        if not values:
+            return None
+        return values[0]
+
+    def _int_query_value(self, params: Dict[str, List[str]], key: str, default: int = 0) -> int:
+        raw_value = self._first_query_value(params, key)
+        if raw_value is None:
+            return default
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return default
+
+    def _parse_reset_params(self, params: Dict[str, List[str]]) -> tuple[Optional[str], Optional[str]]:
         """Parse reset query parameters from request path.
-        
+
         Returns:
             Tuple of (name, state) filters. Either may be None.
         """
-        query = urlsplit(self.path).query
-        if not query:
-            return None, None
-        params = parse_qs(query)
-        name = params.get("name", [None])[0]
-        state = params.get("state", [None])[0]
+        name = self._first_query_value(params, "name")
+        state = self._first_query_value(params, "state")
         return name, state
 
     def _handle_management(self, route: str) -> None:
         host, port = self.server.server_address[:2]
         runtime = self.server.runtime
+        params = self._query_params()
         if route == "debug":
             self._send_json(200, runtime.debug_payload(host=str(host), port=int(port)))
             return
         if route == "trace":
-            limit = 0
-            query = urlsplit(self.path).query
-            if query:
-                params = parse_qs(query)
-                if params.get("limit"):
-                    try:
-                        limit = int(params["limit"][0])
-                    except (ValueError, TypeError):
-                        limit = 0
+            limit = self._int_query_value(params, "limit", default=0)
             self._send_json(200, {"events": runtime.trace_events(limit=limit)})
             return
         if route == "health":
-            refresh = False
-            query = urlsplit(self.path).query
-            if query:
-                params = parse_qs(query)
-                refresh = params.get("refresh", ["0"])[0] == "1"
+            refresh = self._first_query_value(params, "refresh") == "1"
             self._send_json(200, runtime.health_snapshot(refresh=refresh))
             return
         if route == "auth-files":
@@ -260,7 +280,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if self.command.upper() != "POST":
                 self._send_json(405, {"error": "Method not allowed. Use POST."})
                 return
-            name, state = self._parse_reset_params()
+            name, state = self._parse_reset_params(params)
             count = runtime.auth_pool.reset_auth(name=name, state=state)
             self._send_json(200, {
                 "reset": count,
@@ -276,6 +296,76 @@ class ProxyHandler(BaseHTTPRequestHandler):
             )
             return
         self._send_json(404, {"error": "unknown management route"})
+
+    def _run_upstream_attempt(
+        self,
+        *,
+        scheme: str,
+        host: str,
+        port: int,
+        rewritten_path: str,
+        full_path: str,
+        body: bytes,
+        headers: Dict[str, str],
+        request_timeout: int,
+        compact_timeout: int,
+    ) -> UpstreamAttemptResult:
+        connection: Optional[http.client.HTTPConnection] = None
+        try:
+            conn_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+            timeout = get_request_timeout(
+                rewritten_path,
+                default=request_timeout,
+                compact=compact_timeout,
+            )
+            connection = conn_cls(host, port, timeout=timeout)
+            connection.request(self.command, full_path, body=body, headers=headers)
+            response = connection.getresponse()
+            status = response.status
+            response_headers = response.getheaders()
+            content_type = str(response.getheader("Content-Type") or "")
+            if "text/event-stream" in content_type.lower():
+                stream_connection = connection
+                connection = None
+                return UpstreamAttemptResult(
+                    status=status,
+                    headers=response_headers,
+                    body=b"",
+                    stream_response=response,
+                    stream_connection=stream_connection,
+                )
+
+            data = response.read(DEFAULT_MAX_RESPONSE_BODY + 1)
+            if len(data) > DEFAULT_MAX_RESPONSE_BODY:
+                return UpstreamAttemptResult(
+                    status=413,
+                    headers=[("Content-Type", "application/json")],
+                    body=json.dumps({"error": "response body too large"}).encode("utf-8"),
+                )
+
+            return UpstreamAttemptResult(
+                status=status,
+                headers=response_headers,
+                body=data,
+                error_code=_extract_error_code(data),
+            )
+        except Exception as exc:  # noqa: BLE001
+            error_message = str(exc)
+            return UpstreamAttemptResult(
+                status=502,
+                headers=[("Content-Type", "application/json")],
+                body=json.dumps(
+                    {"error": "upstream request failed", "detail": error_message}
+                ).encode("utf-8"),
+                error_message=error_message,
+                error_code="upstream_request_failed",
+            )
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
 
     def _proxy_request(self) -> None:
         runtime = self.server.runtime
@@ -319,6 +409,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             base_headers.setdefault("User-Agent", "codex-cli")
 
         max_attempts = max(1, runtime.auth_pool.count())
+        compact_timeout = runtime.settings.compact_timeout
         request_id = uuid.uuid4().hex[:12]
         client_ip = self.client_address[0] if self.client_address else None
 
@@ -339,65 +430,44 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if chatgpt_backend and auth_state.record.account_id:
                 set_header_case_insensitive(headers, "chatgpt-account-id", str(auth_state.record.account_id))
 
-            error_message: Optional[str] = None
-            error_code: Optional[str] = None
             start = time.time()
-            connection: Optional[http.client.HTTPConnection] = None
-            try:
-                conn_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
-                connection = conn_cls(host, port, timeout=25)
-                connection.request(self.command, full_path, body=body, headers=headers)
-                response = connection.getresponse()
-                final_status = response.status
-                final_headers = response.getheaders()
-                content_type = str(response.getheader("Content-Type") or "")
-                if "text/event-stream" in content_type.lower():
-                    stream_response = response
-                    stream_connection = connection
-                    connection = None
-                    final_body = b""
-                else:
-                    data = response.read(DEFAULT_MAX_RESPONSE_BODY + 1)
-                    if len(data) > DEFAULT_MAX_RESPONSE_BODY:
-                        final_status = 413
-                        final_headers = [("Content-Type", "application/json")]
-                        final_body = json.dumps({"error": "response body too large"}).encode("utf-8")
-                    else:
-                        final_body = data
-                        error_code = _extract_error_code(final_body)
-            except Exception as exc:  # noqa: BLE001
-                error_message = str(exc)
-                final_status = 502
-                final_headers = [("Content-Type", "application/json")]
-                final_body = json.dumps(
-                    {"error": "upstream request failed", "detail": error_message}
-                ).encode("utf-8")
-                error_code = "upstream_request_failed"
-            finally:
-                latency_ms = int((time.time() - start) * 1000)
-                runtime.record_attempt(
-                    request_id=request_id,
-                    method=self.command,
-                    path=self.path,
-                    route=route,
-                    status=final_status,
-                    latency_ms=latency_ms,
-                    auth_name=auth_state.record.name,
-                    auth_email=auth_state.record.email,
-                    attempt=attempt + 1,
-                    client_ip=client_ip,
-                    error=error_message,
-                )
-                runtime.auth_pool.mark_result(
-                    auth_state.record.name,
-                    status=final_status,
-                    error_code=error_code,
-                )
-                if connection is not None:
-                    try:
-                        connection.close()
-                    except Exception:
-                        pass
+            attempt_result = self._run_upstream_attempt(
+                scheme=scheme,
+                host=host,
+                port=port,
+                rewritten_path=rewritten_path,
+                full_path=full_path,
+                body=body,
+                headers=headers,
+                request_timeout=runtime.settings.request_timeout,
+                compact_timeout=compact_timeout,
+            )
+            latency_ms = int((time.time() - start) * 1000)
+
+            final_status = attempt_result.status
+            final_headers = attempt_result.headers
+            final_body = attempt_result.body
+            stream_response = attempt_result.stream_response
+            stream_connection = attempt_result.stream_connection
+
+            runtime.record_attempt(
+                request_id=request_id,
+                method=self.command,
+                path=self.path,
+                route=route,
+                status=final_status,
+                latency_ms=latency_ms,
+                auth_name=auth_state.record.name,
+                auth_email=auth_state.record.email,
+                attempt=attempt + 1,
+                client_ip=client_ip,
+                error=attempt_result.error_message,
+            )
+            runtime.auth_pool.mark_result(
+                auth_state.record.name,
+                status=final_status,
+                error_code=attempt_result.error_code,
+            )
 
             if final_status in {401, 403, 429}:
                 attempt += 1
@@ -501,6 +571,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--upstream", required=False)
     parser.add_argument("--management-key", required=False)
     parser.add_argument("--trace-max", type=int, required=False)
+    parser.add_argument("--request-timeout", type=int, required=False, help="Timeout in seconds for /responses endpoints (default: 45)")
+    parser.add_argument("--compact-timeout", type=int, required=False, help="Timeout in seconds for /compact endpoints (default: 120)")
     parser.add_argument("--allow-non-loopback", action="store_true")
     return parser
 
@@ -516,6 +588,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         management_key=args.management_key,
         allow_non_loopback=bool(args.allow_non_loopback),
         trace_max=args.trace_max,
+        request_timeout=args.request_timeout,
+        compact_timeout=args.compact_timeout,
     )
     run_proxy_server(settings)
     return 0
