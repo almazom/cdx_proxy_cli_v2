@@ -1,0 +1,158 @@
+{
+  "ssot": "simplification-kanban",
+  "version": "1.0.0",
+  "generated_from": "docs/SIMPLIFICATION_FUSION_REPORT.md",
+  "states": [
+    "todo",
+    "in_progress",
+    "done"
+  ],
+  "updated_at": "2026-03-05T10:29:00+03:00",
+  "cards": [
+    {
+      "id": "SIMPLIFY-001",
+      "title": "Isolate per-auth upstream attempt in proxy retry loop",
+      "file": "src/cdx_proxy_cli_v2/proxy/server.py",
+      "state": "done",
+      "priority": 1,
+      "plan": [
+        "Introduce attempt-result structure",
+        "Extract single upstream attempt helper",
+        "Keep retry loop orchestration-only",
+        "Keep response write path unchanged"
+      ],
+      "validation": [
+        "tests/proxy/test_server.py",
+        "tests/proxy/*",
+        "tests/taad/test_taad_traceability_contracts.py",
+        "tests/taad/test_taad_management_contracts.py"
+      ],
+      "implementation_evidence": [
+        "Added UpstreamAttemptResult dataclass in src/cdx_proxy_cli_v2/proxy/server.py",
+        "Added ProxyHandler._run_upstream_attempt helper",
+        "Simplified _proxy_request retry loop to orchestration + side effects only"
+      ],
+      "review_evidence": [
+        "pytest -q tests/proxy/test_server.py tests/taad/test_taad_traceability_contracts.py -> 31 passed",
+        "pytest -q tests/proxy -> 35 passed",
+        "pytest -q tests/taad/test_taad_traceability_contracts.py tests/taad/test_taad_management_contracts.py -> 3 passed"
+      ]
+    },
+    {
+      "id": "SIMPLIFY-002",
+      "title": "Extract shared healthy-proxy preflight for doctor/reset",
+      "file": "src/cdx_proxy_cli_v2/cli/main.py",
+      "state": "done",
+      "priority": 3,
+      "plan": [
+        "Create shared preflight helper",
+        "Replace duplicate blocks in doctor/reset",
+        "Preserve output text and exit codes"
+      ],
+      "validation": [
+        "tests/cli/test_main.py"
+      ],
+      "implementation_evidence": [
+        "Added _healthy_base_url_or_none(settings) helper in src/cdx_proxy_cli_v2/cli/main.py",
+        "Replaced duplicated doctor/reset preflight blocks with helper call",
+        "Kept identical unhealthy error message and early return semantics"
+      ],
+      "review_evidence": [
+        "pytest -q tests/cli/test_main.py -> 11 passed"
+      ]
+    },
+    {
+      "id": "SIMPLIFY-003",
+      "title": "Deduplicate numeric settings resolution",
+      "file": "src/cdx_proxy_cli_v2/config/settings.py",
+      "state": "done",
+      "priority": 2,
+      "plan": [
+        "Extract local numeric resolver",
+        "Parameterize parser behavior",
+        "Preserve CLI > env > default precedence"
+      ],
+      "validation": [
+        "tests/config/test_settings.py"
+      ],
+      "implementation_evidence": [
+        "Added local resolve_numeric_setting(...) helper inside build_settings in src/cdx_proxy_cli_v2/config/settings.py",
+        "Replaced repeated numeric branches for port/trace_max/request_timeout/compact_timeout with helper calls",
+        "Preserved precedence and clamping behavior (CLI > env > default)"
+      ],
+      "review_evidence": [
+        "pytest -q tests/config/test_settings.py -k \"BuildSettings or ParsePort or ParsePositiveInt\" -> 12 passed"
+      ]
+    },
+    {
+      "id": "SIMPLIFY-004",
+      "title": "Replace management route if-chain with mapping",
+      "file": "src/cdx_proxy_cli_v2/proxy/rules.py",
+      "state": "done",
+      "priority": 6,
+      "plan": [
+        "Add MANAGEMENT_ROUTES map",
+        "Replace conditional chain with dict lookup",
+        "Preserve Optional[str] behavior"
+      ],
+      "validation": [
+        "tests/proxy/test_rules.py"
+      ],
+      "implementation_evidence": [
+        "Added MANAGEMENT_ROUTES constant map in src/cdx_proxy_cli_v2/proxy/rules.py",
+        "Simplified management_route() to urlsplit path + dict lookup",
+        "Added management route lookup tests including querystring behavior in tests/proxy/test_rules.py"
+      ],
+      "review_evidence": [
+        "pytest -q tests/proxy/test_rules.py tests/proxy/test_server.py -> 37 passed"
+      ]
+    },
+    {
+      "id": "SIMPLIFY-005",
+      "title": "Deduplicate endpoint resolution in stop/status",
+      "file": "src/cdx_proxy_cli_v2/runtime/service.py",
+      "state": "done",
+      "priority": 4,
+      "plan": [
+        "Extract endpoint resolution helper",
+        "Use helper in stop_service",
+        "Use helper in service_status"
+      ],
+      "validation": [
+        "tests/runtime/test_service.py"
+      ],
+      "implementation_evidence": [
+        "Added _resolve_endpoint_from_state(settings, state) helper in src/cdx_proxy_cli_v2/runtime/service.py",
+        "Reused helper in stop_service() and service_status() to remove duplicated endpoint parsing/fallback logic",
+        "Kept host/port/base_url conversion behavior unchanged"
+      ],
+      "review_evidence": [
+        "pytest -q tests/runtime/test_service.py -> 17 passed"
+      ]
+    },
+    {
+      "id": "SIMPLIFY-006",
+      "title": "Remove unused timestamp formatting path in TUI",
+      "file": "src/cdx_proxy_cli_v2/observability/tui.py",
+      "state": "done",
+      "priority": 5,
+      "plan": [
+        "Remove _format_ts and datetime import",
+        "Drop ts from _event_line return",
+        "Update _build_view unpacking"
+      ],
+      "validation": [
+        "tests/observability/test_tui.py"
+      ],
+      "implementation_evidence": [
+        "Removed _format_ts helper and datetime import",
+        "Simplified _event_line tuple contract by removing unused ts",
+        "Updated _build_view row unpacking and aligned observability test"
+      ],
+      "review_evidence": [
+        "pytest -q tests/observability/test_tui.py tests/proxy/test_server.py -> 33 passed",
+        "pytest -q tests/taad/test_taad_traceability_contracts.py tests/taad/test_taad_management_contracts.py -> 3 passed"
+      ]
+    }
+  ]
+}
