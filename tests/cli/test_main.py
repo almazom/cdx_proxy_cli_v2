@@ -10,7 +10,9 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from cdx_proxy_cli_v2.cli.main import (
+    handle_doctor,
     handle_migrate,
+    handle_reset,
     handle_status,
     handle_stop,
     _settings_from_args,
@@ -163,6 +165,62 @@ class TestHandleStop:
             result = handle_stop(args)
         
         assert result == 0
+
+
+class TestDoctorResetPreflight:
+    """Tests for shared doctor/reset healthy proxy preflight."""
+
+    def test_handle_doctor_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": False,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            result = handle_doctor(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Proxy is not healthy/running" in captured.err
+        mock_fetch.assert_not_called()
+
+    def test_handle_reset_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            name=None,
+            state=None,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": False,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            result = handle_reset(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Proxy is not healthy/running" in captured.err
+        mock_fetch.assert_not_called()
 
 
 class TestSettingsFromArgs:

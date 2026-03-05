@@ -33,6 +33,7 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--upstream", default=None)
     parser.add_argument("--management-key", default=None)
     parser.add_argument("--trace-max", type=int, default=None)
+    parser.add_argument("--request-timeout", type=int, default=None, help="timeout seconds for /responses endpoints")
     parser.add_argument("--allow-non-loopback", action="store_true", default=None)
     parser.add_argument("--quiet", "-q", action="store_true", default=False, help="Suppress non-error output")
 
@@ -46,6 +47,7 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         management_key=getattr(args, "management_key", None),
         allow_non_loopback=getattr(args, "allow_non_loopback", None),
         trace_max=getattr(args, "trace_max", None),
+        request_timeout=getattr(args, "request_timeout", None),
     )
 
 
@@ -174,13 +176,20 @@ def _state_bucket(status: object) -> str:
     return "unknown"
 
 
-def handle_doctor(args: argparse.Namespace) -> int:
-    settings = _settings_from_args(args)
+def _healthy_base_url_or_none(settings: Settings) -> Optional[str]:
     status_payload = service_status(settings)
     base_url = str(status_payload.get("base_url") or settings.base_url)
     healthy = bool(status_payload.get("healthy"))
     if not healthy:
         print("Proxy is not healthy/running. Start with `cdx2 proxy` first.", file=sys.stderr)
+        return None
+    return base_url
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
+    settings = _settings_from_args(args)
+    base_url = _healthy_base_url_or_none(settings)
+    if base_url is None:
         return 1
 
     headers = _management_headers(settings)
@@ -352,11 +361,8 @@ def handle_run_server(args: argparse.Namespace) -> int:
 
 def handle_reset(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    status_payload = service_status(settings)
-    base_url = str(status_payload.get("base_url") or settings.base_url)
-    healthy = bool(status_payload.get("healthy"))
-    if not healthy:
-        print("Proxy is not healthy/running. Start with `cdx2 proxy` first.", file=sys.stderr)
+    base_url = _healthy_base_url_or_none(settings)
+    if base_url is None:
         return 1
 
     headers = _management_headers(settings)
