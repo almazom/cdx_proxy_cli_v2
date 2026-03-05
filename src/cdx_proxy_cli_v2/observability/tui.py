@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import time
 from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple
 
@@ -12,15 +11,6 @@ from rich.text import Text
 
 from cdx_proxy_cli_v2.proxy.http_client import fetch_json
 from cdx_proxy_cli_v2.proxy.rules import trace_route
-
-
-def _format_ts(ts: Optional[float]) -> str:
-    if ts is None:
-        return "??:??:??"
-    try:
-        return dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
-    except Exception:
-        return "??:??:??"
 
 
 def _format_age(ts: Optional[float]) -> str:
@@ -87,12 +77,13 @@ def trim_request_preview(value: object, width: int = 30) -> str:
 
 def _event_line(event: Dict[str, Any], show_preview: bool = False) -> Tuple[str, str, str, str, str]:
     age = _format_age(event.get("ts"))
-    ts = _format_ts(event.get("ts"))
-    account = _event_label(event, shorten=True)
+    # Show full account identity in table rows to avoid collisions like
+    # almazomam@gmail.com vs almazomru@gmail.com both becoming alma…@gmail.com.
+    account = _event_label(event, shorten=False)
     route = str(event.get("route") or trace_route(str(event.get("path") or "")))
     message = trim_request_preview(event.get("request_preview")) if show_preview else ""
     status = str(event.get("status") or "-")
-    return age, ts, account, status, message, route
+    return age, account, status, message, route
 
 
 def compute_distribution(events: List[Dict[str, Any]]) -> Tuple[Dict[str, int], int]:
@@ -193,7 +184,7 @@ def _build_view(
         table.add_column("MESSAGE", style="white", no_wrap=True)
     table.add_column("ROUTE", style="dim", no_wrap=True)
     for event in ordered[:20]:
-        age, ts, account, status, message, route = _event_line(event, show_preview=show_preview)
+        age, account, status, message, route = _event_line(event, show_preview=show_preview)
         ev_id = event.get("id")
         # Color-code status
         try:

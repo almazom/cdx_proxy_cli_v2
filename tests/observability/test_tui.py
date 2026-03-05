@@ -9,9 +9,8 @@ def test_trace_tui_event_line_falls_back_to_path_route() -> None:
         "auth_file": "a.json",
         "path": "/responses?x=1",
     }
-    age, ts, account, status, message, route = _event_line(event, show_preview=False)
+    age, account, status, message, route = _event_line(event, show_preview=False)
     assert age == "-"
-    assert ts == "??:??:??"
     assert account == "a.json"
     assert status == "-"
     assert message == ""
