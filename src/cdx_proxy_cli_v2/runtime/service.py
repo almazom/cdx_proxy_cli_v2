@@ -20,6 +20,7 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_MANAGEMENT_KEY,
     ENV_PORT,
     ENV_TRACE_MAX,
+    ENV_REQUEST_TIMEOUT,
     ENV_UPSTREAM,
     Settings,
     ensure_management_key,
@@ -272,6 +273,8 @@ def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.
         management_key,
         "--trace-max",
         str(settings.trace_max),
+        "--request-timeout",
+        str(settings.request_timeout),
     ]
     if settings.allow_non_loopback:
         argv.append("--allow-non-loopback")
@@ -285,6 +288,7 @@ def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.
     env[ENV_UPSTREAM] = settings.upstream
     env[ENV_MANAGEMENT_KEY] = management_key
     env[ENV_TRACE_MAX] = str(settings.trace_max)
+    env[ENV_REQUEST_TIMEOUT] = str(settings.request_timeout)
     with log_file.open("ab") as handle:
         process = subprocess.Popen(
             argv,
@@ -383,6 +387,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 "port": runtime_settings.port,
                 "base_url": runtime_settings.base_url,
                 "upstream": runtime_settings.upstream,
+                "request_timeout": runtime_settings.request_timeout,
             }
             _save_state(state_file, payload)
             upsert_env_values(
@@ -394,6 +399,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
                     ENV_UPSTREAM: runtime_settings.upstream,
                     ENV_MANAGEMENT_KEY: key,
                     ENV_TRACE_MAX: str(runtime_settings.trace_max),
+                    ENV_REQUEST_TIMEOUT: str(runtime_settings.request_timeout),
                 },
             )
             
@@ -431,6 +437,17 @@ def start_service(settings: Settings) -> ServiceStartResult:
     )
 
 
+def _resolve_endpoint_from_state(settings: Settings, state: Dict[str, object]) -> tuple[str, int, str]:
+    host = str(state.get("host") or settings.host)
+    port_raw = state.get("port")
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = settings.port
+    base_url = f"http://{host}:{port}" if port > 0 else settings.base_url
+    return host, port, base_url
+
+
 def stop_service(settings: Settings) -> bool:
     pid_file = pid_path(settings.auth_dir)
     state_file = state_path(settings.auth_dir)
@@ -440,13 +457,7 @@ def stop_service(settings: Settings) -> bool:
         return False
 
     state = _load_state(state_file)
-    host = str(state.get("host") or settings.host)
-    port_raw = state.get("port")
-    try:
-        port = int(port_raw)
-    except (TypeError, ValueError):
-        port = settings.port
-    base_url = f"http://{host}:{port}" if port > 0 else settings.base_url
+    host, port, base_url = _resolve_endpoint_from_state(settings, state)
 
     key = settings.management_key
     if key:
@@ -481,13 +492,7 @@ def service_status(settings: Settings) -> Dict[str, object]:
     pid = _read_pid(pid_path(settings.auth_dir))
     running_pid = _is_pid_running(pid)
 
-    host = str(state.get("host") or settings.host)
-    port_raw = state.get("port")
-    try:
-        port = int(port_raw)
-    except (TypeError, ValueError):
-        port = settings.port
-    base_url = f"http://{host}:{port}" if port > 0 else settings.base_url
+    host, port, base_url = _resolve_endpoint_from_state(settings, state)
     debug = probe_debug(base_url, settings.management_key)
     healthy = bool(isinstance(debug, dict) and debug.get("status") == "running")
 
