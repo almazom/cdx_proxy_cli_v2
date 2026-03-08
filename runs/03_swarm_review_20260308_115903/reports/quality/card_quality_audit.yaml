@@ -1,0 +1,25 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T12:32:00+03:00"
+audit_standard: "MASTER_TEMPLATE.md 15-point quality gate"
+cards:
+  CARD-001:
+    score: 14
+    passed: true
+    notes:
+      - "User story and impact are explicit"
+      - "Real file:line evidence provided across affected surfaces"
+      - "Verification commands are concrete"
+      - "Current/fixed code uses representative snippets across the atomic rename"
+  CARD-002:
+    score: 14
+    passed: true
+    notes:
+      - "Problem statement and risk are explicit"
+      - "Current/fixed code precisely capture the implementation delta"
+      - "Verification commands cover focused and broader suites"
+      - "Regression-test requirement is explicit"
+summary:
+  minimum_required: 13
+  cards_total: 2
+  cards_passed: 2
+  confidence_percent: 96

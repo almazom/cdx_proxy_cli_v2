@@ -1,0 +1,21 @@
+review_type: phase_5_quality_decision
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T12:35:00+03:00"
+decision_question: "Do the cards clear the 95% / 13+ quality gate and can we freeze the SSOT?"
+reviewers:
+  - agent_id: "019cccac-1bd5-7343-acfa-aa486fd9dbee"
+    verdict: PASS
+    confidence_percent: 96
+  - agent_id: "019cccac-30a7-7a00-ae97-6decc61243e7"
+    verdict: PASS
+    confidence_percent: 96
+  - agent_id: "019cccac-4011-7ef1-b6b3-bbc4aaf4b213"
+    verdict: PASS
+    confidence_percent: 95
+consolidated_verdict: PASS
+confidence_percent: 95.7
+quorum_met: true
+phase_transition:
+  from_phase: 5
+  to_phase: 6
+  allowed: true
