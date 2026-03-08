@@ -1,0 +1,21 @@
+run_id: "03_swarm_review_20260308_115903"
+phase: 10
+scope_source:
+  primary_observation: "git diff --name-only HEAD~1 HEAD contained only phase-9 checkpoint artifacts"
+  effective_scope_source: "reports/execution/implementation_report.yaml files_changed/files_removed"
+touched_files:
+  - pyproject.toml
+  - README.md
+  - docs/operations/runbook.md
+  - docs/architecture/overview.md
+  - src/cdx_proxy_cli_v2/cli/main.py
+  - src/cdx_proxy_cli_v2/runtime/service.py
+  - src/cdx_proxy_cli_v2/observability/all_dashboard.py
+  - src/cdx_proxy_cli_v2/proxy/server.py
+  - tests/cli/test_main.py
+  - tests/proxy/test_server.py
+  - proxy_debug_report.html
+  - cdx_documentation.html
+removed_files:
+  - scripts/cdx_wrapper.py
+  - tests/test_cdx_only.py

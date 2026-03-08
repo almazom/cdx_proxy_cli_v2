@@ -22,8 +22,8 @@ phase_plan:
   - { phase: 7, name: "Readiness", status: "COMPLETE" }
   - { phase: 8, name: "Workers", status: "COMPLETE" }
   - { phase: 9, name: "Final + PR", status: "COMPLETE" }
-  - { phase: 10, name: "Simplification Tail", status: "IN_PROGRESS" }
-  - { phase: 11, name: "HTML Assembly Tail", status: "PENDING" }
+  - { phase: 10, name: "Simplification Tail", status: "COMPLETE" }
+  - { phase: 11, name: "HTML Assembly Tail", status: "IN_PROGRESS" }
   - { phase: 12, name: "Publish Tail", status: "PENDING" }
   - { phase: 13, name: "Delivery Tail", status: "PENDING" }
 expected_terminal_status: "COMPLETE"
