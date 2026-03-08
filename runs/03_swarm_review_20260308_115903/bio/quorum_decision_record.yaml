@@ -1,0 +1,3 @@
+run_id: "03_swarm_review_20260308_115903"
+decisions:
+  - { phase_gate: phase_0_preflight, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T12:15:00+03:00" }

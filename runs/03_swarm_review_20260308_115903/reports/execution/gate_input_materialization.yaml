@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+phase_0_preflight_decision:
+  inputs:
+    - reports/preflight/environment_gate_report.yaml
+    - reports/preflight/flow_version_lock_report.yaml
+    - reports/preflight/mode_and_executability_report.yaml
+    - reports/preflight/cli_capabilities_snapshot.yaml
+    - reports/preflight/worktree_context_report.yaml
+    - reports/preflight/project_scope_manifest.yaml

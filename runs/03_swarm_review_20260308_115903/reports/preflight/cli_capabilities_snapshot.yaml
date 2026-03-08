@@ -1,0 +1,12 @@
+gate: cli_capabilities_snapshot
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: PASS
+commands:
+  publish_me: "/home/pets/bin/publish_me"
+  t2me: "/home/pets/.local/bin/t2me"
+  python3: "python3"
+  pytest: "pytest"
+notes:
+  - "publish_me dry-run probe returned FILE_ERROR for nonexistent path, which confirms command availability"
+  - "t2me shell wrapper is present for phase 13"

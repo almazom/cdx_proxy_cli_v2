@@ -1,0 +1,9 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T12:12:00+03:00"
+reports:
+  - { scout: 1, specialty: security, agent_id: "019cccac-1bd5-7343-acfa-aa486fd9dbee", artifact: "reports/expert/01_security_report.md" }
+  - { scout: 2, specialty: performance, agent_id: "019cccac-30a7-7a00-ae97-6decc61243e7", artifact: "reports/expert/02_performance_report.md" }
+  - { scout: 3, specialty: maintainability, agent_id: "019cccac-4011-7ef1-b6b3-bbc4aaf4b213", artifact: "reports/expert/03_maintainability_report.md" }
+  - { scout: 4, specialty: simplicity, agent_id: "019cccac-5210-7a01-8b99-609b31595dcc", artifact: "reports/expert/04_simplicity_report.md" }
+  - { scout: 5, specialty: testability, agent_id: "019cccac-65f7-7000-a43a-6a13f4f4d84c", artifact: "reports/expert/05_testability_report.md" }
+  - { scout: 6, specialty: api, agent_id: "019cccac-7e12-76a2-ac7d-f450c2839d56", artifact: "reports/expert/06_api_report.md" }

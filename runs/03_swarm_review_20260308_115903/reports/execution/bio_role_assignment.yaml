@@ -1,0 +1,8 @@
+run_id: "03_swarm_review_20260308_115903"
+roles:
+  - { phase: 2, caste: scout, specialty: security, agent_id: "019cccac-1bd5-7343-acfa-aa486fd9dbee", nickname: "Bohr" }
+  - { phase: 2, caste: scout, specialty: performance, agent_id: "019cccac-30a7-7a00-ae97-6decc61243e7", nickname: "Goodall" }
+  - { phase: 2, caste: scout, specialty: maintainability, agent_id: "019cccac-4011-7ef1-b6b3-bbc4aaf4b213", nickname: "Euler" }
+  - { phase: 2, caste: scout, specialty: simplicity, agent_id: "019cccac-5210-7a01-8b99-609b31595dcc", nickname: "Locke" }
+  - { phase: 2, caste: scout, specialty: testability, agent_id: "019cccac-65f7-7000-a43a-6a13f4f4d84c", nickname: "Bacon" }
+  - { phase: 2, caste: scout, specialty: api, agent_id: "019cccac-7e12-76a2-ac7d-f450c2839d56", nickname: "Faraday" }

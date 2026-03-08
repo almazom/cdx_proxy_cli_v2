@@ -1,0 +1,19 @@
+gate: mode_and_executability
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: PASS
+mode: implementation
+non_stop: true
+full_flow_target: true
+constraints:
+  md_only_flow_docs: true
+  honest_topology_required: true
+  auto_commit_required: true
+  no_fabrication_required: true
+executability:
+  can_spawn_parallel_agents: true
+  can_run_tests: true
+  can_edit_workspace: true
+  can_commit_git: true
+  can_publish_html: true
+  can_send_telegram: true

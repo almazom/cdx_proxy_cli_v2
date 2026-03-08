@@ -1,0 +1,34 @@
+manifest_type: run_bootstrap
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+flow_version: "v6.5.3"
+flow_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v6.5.3"
+project:
+  name: "cdx_proxy_cli_v2"
+  path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  type: "python_cli_package"
+  branch: "master"
+  head: "f703fb7dd653e4f74c28d9c1220339c14dc28e72"
+execution_mode: "implementation"
+language_default: "ru"
+phase_plan:
+  - { phase: 0, name: "Preflight", status: "COMPLETE" }
+  - { phase: 1, name: "Bootstrap", status: "PENDING" }
+  - { phase: 2, name: "Scouts x6", status: "PENDING" }
+  - { phase: 3, name: "Masticator", status: "PENDING" }
+  - { phase: 4, name: "Comb Builder", status: "PENDING" }
+  - { phase: 5, name: "Nurses", status: "PENDING" }
+  - { phase: 6, name: "SSOT Freeze", status: "PENDING" }
+  - { phase: 7, name: "Readiness", status: "PENDING" }
+  - { phase: 8, name: "Workers", status: "PENDING" }
+  - { phase: 9, name: "Final + PR", status: "PENDING" }
+  - { phase: 10, name: "Simplification Tail", status: "PENDING" }
+  - { phase: 11, name: "HTML Assembly Tail", status: "PENDING" }
+  - { phase: 12, name: "Publish Tail", status: "PENDING" }
+  - { phase: 13, name: "Delivery Tail", status: "PENDING" }
+expected_terminal_status: "COMPLETE"
+workspace_snapshot:
+  tracked_changes: 3
+  untracked_changes: 4
+  focused_failure: "tests/cli/test_main.py::TestCliContracts::test_pyproject_registers_cdx_and_cdx2_scripts"
+  current_scope_hint: "live cdx2→cdx migration plus chatgpt header normalization"

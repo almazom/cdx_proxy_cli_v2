@@ -1,0 +1,3 @@
+run_id: "03_swarm_review_20260308_115903"
+commits:
+  - { phase: checkpoint, sha: "f703fb7", message: "chore: checkpoint before swarm review v6.5.3" }

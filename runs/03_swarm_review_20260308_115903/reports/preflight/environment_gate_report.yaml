@@ -1,0 +1,17 @@
+gate: environment
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: PASS
+checks:
+  cwd: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  python: "Python 3.12.3"
+  pytest: "pytest 9.0.2"
+  filesystem_writable: true
+  network_enabled: true
+  sandbox_mode: "danger-full-access"
+  publish_me_present: true
+  t2me_present: true
+notes:
+  - "Repository is writable"
+  - "Tail wrappers required by v6.5.3 are available"
+  - "Live worktree is intentionally dirty and becomes review scope for this run"

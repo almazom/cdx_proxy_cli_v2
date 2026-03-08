@@ -1,0 +1,7 @@
+run_id: "03_swarm_review_20260308_115903"
+events:
+  - { event_id: 1, phase: 0, agent: orchestrator, type: created, artifact: metadata/run_manifest.yaml, timestamp: "2026-03-08T11:59:03+03:00" }
+  - { event_id: 2, phase: 0, agent: orchestrator, type: created, artifact: reports/preflight/environment_gate_report.yaml, timestamp: "2026-03-08T11:59:03+03:00" }
+  - { event_id: 3, phase: 0, agent: orchestrator, type: created, artifact: reports/preflight/worktree_context_report.yaml, timestamp: "2026-03-08T11:59:03+03:00" }
+  - { event_id: 4, phase: 2, agent: orchestrator, type: created, artifact: reports/expert/expert_index.yaml, timestamp: "2026-03-08T12:12:00+03:00" }
+  - { event_id: 5, phase: 0, agent: orchestrator, type: verified, artifact: reports/execution/reviews/phase_0_preflight_review.yaml, timestamp: "2026-03-08T12:15:00+03:00" }

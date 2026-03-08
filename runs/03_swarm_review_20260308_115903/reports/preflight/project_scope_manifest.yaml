@@ -1,0 +1,23 @@
+gate: project_scope_manifest
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: PASS
+scope:
+  source_roots:
+    - src/cdx_proxy_cli_v2
+    - tests
+    - README.md
+    - docs
+    - pyproject.toml
+    - cdx_documentation.html
+    - proxy_debug_report.html
+  excluded:
+    - node_modules
+    - dist
+    - build
+    - .venv
+  existing_prior_runs:
+    - runs/03_swarm_review_20260221_125112
+    - runs/03_swarm_review_20260221_162554
+    - runs/03_swarm_review_20260308_081622
+  initial_problem_statement: "Finish the live cdx2→cdx contract migration consistently and preserve the fixed ChatGPT header normalization behavior."

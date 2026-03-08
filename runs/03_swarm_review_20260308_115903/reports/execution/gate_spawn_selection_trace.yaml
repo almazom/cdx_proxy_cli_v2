@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+phase_0:
+  rationale:
+    - "Flow requires honest topology and >=3 agents for gate decisions"
+    - "Phase 2 requires six parallel scouts with distinct specialties"
+    - "Codex explorer subagents provide the traceable parallel swarm for this environment"
+  gate_review_agent_type: "explorer"
+  scout_agent_type: "explorer"
+  note: "Agent binary availability is abstracted via Codex subagents; all spawned agents are recorded explicitly."

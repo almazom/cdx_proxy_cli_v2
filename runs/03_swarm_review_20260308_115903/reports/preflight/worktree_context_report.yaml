@@ -1,0 +1,24 @@
+gate: worktree_context
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: PASS
+worktree_context:
+  worktree_path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  branch: "master"
+  head: "f703fb7dd653e4f74c28d9c1220339c14dc28e72"
+  separate_worktree: false
+  uncommitted_changes: true
+  note: "The run intentionally starts from a live dirty tree. Scope is the in-progress cdx-only migration and header normalization work already present in the repo."
+tracked_modified:
+  - pyproject.toml
+  - src/cdx_proxy_cli_v2/cli/main.py
+  - src/cdx_proxy_cli_v2/proxy/server.py
+untracked:
+  - cdx_documentation.html
+  - proxy_debug_report.html
+  - scripts/cdx_wrapper.py
+  - tests/test_cdx_only.py
+focused_failure:
+  command: "python3 -m pytest -q tests/cli/test_main.py tests/test_cdx_only.py tests/proxy/test_server.py"
+  result: "1 failed, 58 passed"
+  failing_test: "tests/cli/test_main.py::TestCliContracts::test_pyproject_registers_cdx_and_cdx2_scripts"

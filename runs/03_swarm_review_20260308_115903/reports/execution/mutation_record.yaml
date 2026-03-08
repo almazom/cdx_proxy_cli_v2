@@ -1,0 +1,6 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T11:59:03+03:00"
+status: in_progress
+observations:
+  - phase: 0
+    observation: "Dirty worktree captured as explicit scope instead of hidden state."
