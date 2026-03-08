@@ -26,6 +26,6 @@ lanes:
   - lane_id: phase_11_html_assembly
     status: complete
   - lane_id: phase_12_publish
-    status: in_progress
+    status: complete
   - lane_id: phase_13_delivery
-    status: pending
+    status: in_progress

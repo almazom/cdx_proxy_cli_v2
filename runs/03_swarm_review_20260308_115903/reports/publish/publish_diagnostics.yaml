@@ -1,0 +1,14 @@
+run_id: "03_swarm_review_20260308_115903"
+phase: 12
+status: COMPLETE_WITH_LIMITATION
+provider: vps
+observations:
+  - "All dry-runs succeeded."
+  - "All real publishes returned ok=true."
+  - "The provider reused the same final URL/output path for every child page and the master landing."
+limitations:
+  child_urls_unique: false
+  limitation_reason: "`publish_me -vps --direct -j` resolved every target to the same VPS page URL in this environment."
+  impact: "Child pages do not have distinct public URLs even though publish commands succeeded."
+recommended_follow_up:
+  - "Investigate whether the wrapper/provider supports per-file slugs or separate namespaces."

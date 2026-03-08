@@ -1,0 +1,15 @@
+run_id: "03_swarm_review_20260308_115903"
+note: "Provider returned the same VPS URL for every published target; entries are preserved honestly as observed."
+cards:
+  - { card_id: "CARD-001", path: "reports/publish/cards/CARD-001.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { card_id: "CARD-002", path: "reports/publish/cards/CARD-002.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+subagents:
+  - { name: "Bohr", path: "reports/publish/subagents/Bohr.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Goodall", path: "reports/publish/subagents/Goodall.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Euler", path: "reports/publish/subagents/Euler.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Locke", path: "reports/publish/subagents/Locke.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Bacon", path: "reports/publish/subagents/Bacon.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Faraday", path: "reports/publish/subagents/Faraday.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Descartes", path: "reports/publish/subagents/Descartes.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+  - { name: "Pasteur", path: "reports/publish/subagents/Pasteur.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published_same_url" }
+master: { path: "reports/publish/swarm_master_landing.ru.html", provider: "vps", url: "http://107.174.231.22:18888/paper/manuscript.html", status: "published" }
