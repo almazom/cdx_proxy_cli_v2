@@ -8,9 +8,9 @@ lanes:
   - lane_id: phase_2_scouts
     status: complete
   - lane_id: phase_3_fusion
-    status: in_progress
+    status: complete
   - lane_id: phase_4_cards
-    status: pending
+    status: in_progress
   - lane_id: phase_5_quality
     status: pending
   - lane_id: phase_6_ssot

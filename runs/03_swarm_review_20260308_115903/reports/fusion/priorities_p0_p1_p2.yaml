@@ -1,0 +1,30 @@
+run_id: "03_swarm_review_20260308_115903"
+phase: 3
+timestamp: "2026-03-08T12:23:00+03:00"
+priorities:
+  P0:
+    - finding_id: cli.cdx_contract_drift
+      summary: "The repo is red because tracked tests, docs, and runtime guidance still expect `cdx2` while the package exposes only `cdx`."
+      evidence:
+        - pyproject.toml
+        - tests/cli/test_main.py
+        - README.md
+        - docs/operations/runbook.md
+        - src/cdx_proxy_cli_v2/runtime/service.py
+        - src/cdx_proxy_cli_v2/observability/all_dashboard.py
+      action: "Create one card to finish the `cdx`-only migration atomically and drop scratch wrapper/test artifacts."
+  P1:
+    - finding_id: proxy.chatgpt_header_casefold_override
+      summary: "Forced ChatGPT headers are now stronger than `setdefault`, but case-sensitive assignment still allows lowercase duplicates to survive."
+      evidence:
+        - src/cdx_proxy_cli_v2/proxy/server.py
+        - src/cdx_proxy_cli_v2/proxy/rules.py
+        - tests/proxy/test_server.py
+      action: "Create one card to use case-insensitive replacement helpers and add regression tests."
+  P2:
+    - finding_id: security.eval_path_ambiguity
+      summary: "Using `cdx` in eval hints could be ambiguous on PATH, but fixing it now would change the newly chosen public CLI contract."
+      disposition: deferred
+    - finding_id: maintainability.all_dashboard_deeper_cleanup
+      summary: "`all_dashboard.py` may be stale, but only string alignment is needed for the current migration run."
+      disposition: deferred

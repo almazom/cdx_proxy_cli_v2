@@ -1,0 +1,8 @@
+run_id: "03_swarm_review_20260308_115903"
+rejections:
+  - finding_id: security.eval_path_ambiguity
+    disposition: deferred
+    reason: "Not enough evidence of immediate exploit inside the repo; changing eval semantics now would broaden the user-facing CLI contract change."
+  - finding_id: maintainability.all_dashboard_deeper_cleanup
+    disposition: deferred
+    reason: "Structural cleanup is outside the minimum change set; only string alignment is needed for this run."

@@ -1,0 +1,4 @@
+run_id: "03_swarm_review_20260308_115903"
+cards:
+  - { id: CARD-001, priority: P0, title: "Finish the `cdx`-only contract atomically", complexity_hours: 2.5 }
+  - { id: CARD-002, priority: P1, title: "Force ChatGPT headers with case-insensitive replacement and tests", complexity_hours: 1.5 }
