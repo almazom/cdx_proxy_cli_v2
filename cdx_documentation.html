@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDX Proxy CLI - Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a25;
+            --bg-elevated: #222230;
+            --text-primary: #f0f0f5;
+            --text-secondary: #a0a0b0;
+            --text-muted: #6a6a7a;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --accent-yellow: #f59e0b;
+            --accent-pink: #ec4899;
+            --border: #2a2a3a;
+            --border-light: #3a3a4a;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            --gradient-hero: linear-gradient(180deg, rgba(99, 102, 241, 0.15) 0%, transparent 100%);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --sidebar-width: 280px;
+            --toc-width: 240px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        /* Hero Section */
+        .hero {
+            background: var(--gradient-hero);
+            border-bottom: 1px solid var(--border);
+            padding: 4rem 2rem 3rem;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.1) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-light);
+            padding: 0.375rem 0.875rem;
+            border-radius: 999px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-badge .dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .hero p {
+            font-size: 1.125rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: center;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--border-light);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+        }
+
+        /* Layout */
+        .layout {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr var(--toc-width);
+            gap: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: sticky;
+            top: 2rem;
+            height: calc(100vh - 4rem);
+            overflow-y: auto;
+            padding-right: 1rem;
+        }
+
+        .sidebar::-webkit-scrollbar { width: 4px; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .nav-group { margin-bottom: 1.5rem; }
+        .nav-group-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            padding-left: 0.75rem;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--bg-elevated);
+            color: var(--accent-primary);
+            font-weight: 500;
+        }
+
+        .nav-item .icon {
+            font-size: 1rem;
+            width: 20px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main { min-width: 0; }
+
+        .search-container {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            margin-bottom: 2rem;
+            background: var(--bg-primary);
+            padding: 1rem 0;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            transition: all 0.2s;
+        }
+
+        .search-box:focus-within {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        .search-box input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .search-box input::placeholder { color: var(--text-muted); }
+
+        .search-shortcut {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .kbd {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.125rem 0.375rem;
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+
+        /* Sections */
+        section {
+            margin-bottom: 4rem;
+            scroll-margin-top: 2rem;
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 2rem 0 1rem;
+        }
+
+        h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        p { color: var(--text-secondary); margin-bottom: 1rem; }
+
+        /* Cards */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            transition: all 0.2s;
+        }
+
+        .card:hover {
+            border-color: var(--border-light);
+            transform: translateY(-2px);
+        }
+
+        .card.success { border-left: 3px solid var(--accent-green); }
+        .card.info { border-left: 3px solid var(--accent-blue); }
+        .card.warning { border-left: 3px solid var(--accent-yellow); }
+        .card.purple { border-left: 3px solid var(--accent-secondary); }
+
+        .card-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Code Blocks */
+        .code-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.625rem 1rem;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-title {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .copy-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+        }
+
+        .copy-btn:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .copy-btn.copied {
+            color: var(--accent-green);
+        }
+
+        pre {
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
+        }
+
+        .inline-code {
+            background: var(--bg-tertiary);
+            padding: 0.125rem 0.375rem;
+            border-radius: 4px;
+            color: var(--accent-pink);
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:hover { background: var(--bg-tertiary); }
+
+        /* TOC */
+        .toc {
+            position: sticky;
+            top: 2rem;
+            height: calc(100vh - 4rem);
+            overflow-y: auto;
+            padding-left: 1rem;
+            border-left: 1px solid var(--border);
+        }
+
+        .toc-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .toc-link {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.375rem 0;
+            transition: color 0.15s;
+            border-left: 2px solid transparent;
+            padding-left: 0.75rem;
+            margin-left: -1px;
+        }
+
+        .toc-link:hover { color: var(--text-primary); }
+        .toc-link.active {
+            color: var(--accent-primary);
+            border-left-color: var(--accent-primary);
+        }
+
+        /* Quick Start Highlight */
+        .quick-start {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .quick-start h3 {
+            margin-top: 0;
+            color: var(--accent-primary);
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 1px solid var(--border);
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-top: 4rem;
+        }
+
+        /* Mobile */
+        @media (max-width: 1200px) {
+            .layout { grid-template-columns: var(--sidebar-width) 1fr; }
+            .toc { display: none; }
+        }
+
+        @media (max-width: 768px) {
+            .layout { grid-template-columns: 1fr; padding: 1rem; }
+            .sidebar { display: none; }
+            .hero h1 { font-size: 2rem; }
+            .hero { padding: 2rem 1rem; }
+        }
+
+        /* Command Palette */
+        .command-palette {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: flex-start;
+            justify-content: center;
+            padding-top: 15vh;
+        }
+
+        .command-palette.active { display: flex; }
+
+        .command-palette-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 600px;
+            box-shadow: var(--shadow);
+        }
+
+        .command-palette-input {
+            width: 100%;
+            padding: 1rem 1.25rem;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 1rem;
+            outline: none;
+        }
+
+        .command-results {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+
+        .command-result {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .command-result:hover { background: var(--bg-tertiary); }
+        .command-result kbd { margin-left: auto; }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="hero-badge">
+            <span class="dot"></span>
+            <span>Latest Version • March 2026</span>
+        </div>
+        <h1>CDX Proxy CLI</h1>
+        <p>Round-robin auth rotation with request traceability for Codex CLI</p>
+        <div class="hero-actions">
+            <a href="#quickstart" class="btn btn-primary">
+                <span>⚡</span> Quick Start
+            </a>
+            <a href="#commands" class="btn btn-secondary">
+                <span>📚</span> Commands
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="layout">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="nav-group">
+                <div class="nav-group-title">Getting Started</div>
+                <a href="#quickstart" class="nav-item active">
+                    <span class="icon">⚡</span> Quick Start
+                </a>
+                <a href="#installation" class="nav-item">
+                    <span class="icon">📦</span> Installation
+                </a>
+                <a href="#configuration" class="nav-item">
+                    <span class="icon">⚙️</span> Configuration
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <div class="nav-group-title">Core Commands</div>
+                <a href="#proxy" class="nav-item">
+                    <span class="icon">🔄</span> cdx proxy
+                </a>
+                <a href="#status" class="nav-item">
+                    <span class="icon">📊</span> cdx status
+                </a>
+                <a href="#doctor" class="nav-item">
+                    <span class="icon">🩺</span> cdx doctor
+                </a>
+                <a href="#all" class="nav-item">
+                    <span class="icon">🎯</span> cdx all
+                </a>
+                <a href="#trace" class="nav-item">
+                    <span class="icon">📈</span> cdx trace
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <div class="nav-group-title">Codex CLI</div>
+                <a href="#codex-exec" class="nav-item">
+                    <span class="icon">🤖</span> codex exec
+                </a>
+                <a href="#codex-flags" class="nav-item">
+                    <span class="icon">🏷️</span> Flags & Options
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <div class="nav-group-title">Reference</div>
+                <a href="#env-vars" class="nav-item">
+                    <span class="icon">📝</span> Environment
+                </a>
+                <a href="#troubleshooting" class="nav-item">
+                    <span class="icon">🔧</span> Troubleshooting
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Search -->
+            <div class="search-container">
+                <div class="search-box">
+                    <span>🔍</span>
+                    <input type="text" id="searchInput" placeholder="Search commands, flags, options...">
+                    <div class="search-shortcut">
+                        <span class="kbd">⌘</span><span class="kbd">K</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Start -->
+            <section id="quickstart">
+                <h2><span>⚡</span> Quick Start</h2>
+                
+                <div class="quick-start">
+                    <h3>🚀 One-Liner: Start & Run</h3>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-title">bash</span>
+                            <button class="copy-btn" onclick="copyCode(this)">
+                                <span>📋</span> Copy
+                            </button>
+                        </div>
+                        <pre><code>eval "$(cdx proxy --print-env-only)" && codex exec "your prompt here"</code></pre>
+                    </div>
+                </div>
+
+                <div class="card-grid">
+                    <div class="card success">
+                        <div class="card-title">🎯 Session Mode</div>
+                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">Set up once per shell session</p>
+                        <div class="code-block" style="margin: 0;">
+                            <pre><code>eval "$(cdx proxy --print-env-only)"
+codex exec "task 1"
+codex exec "task 2"</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="card info">
+                        <div class="card-title">🔧 Permanent Setup</div>
+                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">Auto-start in ~/.zshrc</p>
+                        <div class="code-block" style="margin: 0;">
+                            <pre><code>eval "$(cdx proxy --print-env-only 2>/dev/null)"</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="card purple">
+                        <div class="card-title">🏃 Full Auto Mode</div>
+                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">No approvals, full speed</p>
+                        <div class="code-block" style="margin: 0;">
+                            <pre><code>codex exec --full-auto \
+  --dangerously-bypass-approvals-and-sandbox \
+  "refactor this"</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>🔑 Recommended Shell Aliases</h3>
+                <div class="code-block">
+                    <div class="code-header">
+                        <span class="code-title">~/.zshrc</span>
+                        <button class="copy-btn" onclick="copyCode(this)">
+                            <span>📋</span> Copy
+                        </button>
+                    </div>
+                    <pre><code># Quick proxy setup
+alias cdxup='eval "$(cdx proxy --print-env-only)"'
+
+# Full-auto codex
+alias codex-auto='codex exec --full-auto --dangerously-bypass-approvals-and-sandbox'
+
+# Status check
+alias cdx-status='cdx status --json | jq -r "\"\(.healthy) | \(.auth_count) keys\""'
+
+# Usage: cdxup && codex-auto "your task"</code></pre>
+                </div>
+            </section>
+
+            <!-- Installation -->
+            <section id="installation">
+                <h2><span>📦</span> Installation</h2>
+                <div class="code-block">
+                    <div class="code-header">
+                        <span class="code-title">bash</span>
+                        <button class="copy-btn" onclick="copyCode(this)">
+                            <span>📋</span> Copy
+                        </button>
+                    </div>
+                    <pre><code>cd /path/to/cdx_proxy_cli_v2
+pip install -e .
+
+# Verify installation
+cdx --help
+cdx --version</code></pre>
+                </div>
+            </section>
+
+            <!-- Configuration -->
+            <section id="configuration">
+                <h2><span>⚙️</span> Configuration</h2>
+                <h3>Environment File</h3>
+                <p>Location: <code class="inline-code">~/.codex/_auths/.env</code></p>
+                <div class="code-block">
+                    <div class="code-header">
+                        <span class="code-title">.env</span>
+                        <button class="copy-btn" onclick="copyCode(this)">
+                            <span>📋</span> Copy
+                        </button>
+                    </div>
+                    <pre><code>CLIPROXY_AUTH_DIR=/home/pets/.codex/_auths
+CLIPROXY_HOST=127.0.0.1
+CLIPROXY_PORT=55983
+CLIPROXY_MANAGEMENT_KEY=test-key
+CLIPROXY_UPSTREAM=https://chatgpt.com/backend-api
+CLIPROXY_REQUEST_TIMEOUT=60
+CLIPROXY_TRACE_MAX=500</code></pre>
+                </div>
+            </section>
+
+            <!-- Commands -->
+            <section id="commands">
+                <h2><span>📟</span> Core Commands</h2>
+            </section>
+
+            <section id="proxy">
+                <h3><code class="inline-code">cdx proxy</code></h3>
+                <p>Start or reuse the proxy service.</p>
+                
+                <div class="card-grid">
+                    <div class="card info">
+                        <div class="card-title">Print Environment</div>
+                        <div class="code-block" style="margin: 0.5rem 0 0;">
+                            <pre><code>cdx proxy --print-env-only</code></pre>
+                        </div>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">Custom Port</div>
+                        <div class="code-block" style="margin: 0.5rem 0 0;">
+                            <pre><code>cdx proxy --port 8080</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>Options</h4>
+                <table>
+                    <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+                    <tr><td><code class="inline-code">--print-env</code></td><td>Print exports + status</td><td>-</td></tr>
+                    <tr><td><code class="inline-code">--print-env-only</code></td><td>Only export lines (safe for eval)</td><td>-</td></tr>
+                    <tr><td><code class="inline-code">--port</code></td><td>Bind port</td><td>55983</td></tr>
+                    <tr><td><code class="inline-code">--host</code></td><td>Bind host</td><td>127.0.0.1</td></tr>
+                </table>
+            </section>
+
+            <section id="status">
+                <h3><code class="inline-code">cdx status</code></h3>
+                <p>Show running status and runtime details.</p>
+                <div class="code-block">
+                    <pre><code>cdx status --json
+{
+  "pid": 1385283,
+  "healthy": true,
+  "base_url": "http://127.0.0.1:55983",
+  "auth_count": 3
+}</code></pre>
+                </div>
+            </section>
+
+            <section id="doctor">
+                <h3><code class="inline-code">cdx doctor</code></h3>
+                <p>Show key rotation state (whitelist/cooldown/blacklist).</p>
+                <div class="code-block">
+                    <pre><code>cdx doctor
+┏━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
+┃ File     ┃ Status ┃ Cooldown ┃ Blacklist ┃ Probation ┃ Used ┃ Errors ┃
+┡━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
+│ almazom… │ OK     │ -        │ -         │ 2/2      │ 13   │ 0      │
+│ almazom… │ OK     │ -        │ -         │ 2/2      │ 12   │ 0      │
+│ onr55_e… │ OK     │ -        │ -         │ 2/2      │ 12   │ 0      │
+└──────────┴────────┴──────────┴───────────┴──────────┴──────┴────────┘</code></pre>
+                </div>
+            </section>
+
+            <section id="all">
+                <h3><code class="inline-code">cdx all</code></h3>
+                <p>Show all key cards dashboard.</p>
+                <div class="code-block">
+                    <div class="code-header">
+                        <span class="code-title">JSON Output</span>
+                        <button class="copy-btn" onclick="copyCode(this)">
+                            <span>📋</span> Copy
+                        </button>
+                    </div>
+                    <pre><code>cdx all --json | jq '.accounts[] | {email, status, used: .five_hour.used_percent}'</code></pre>
+                </div>
+            </section>
+
+            <section id="trace">
+                <h3><code class="inline-code">cdx trace</code></h3>
+                <p>Open live trace TUI to monitor requests in real-time.</p>
+                <div class="card warning">
+                    <div class="card-title">⌨️ Keyboard Shortcuts</div>
+                    <p style="font-size: 0.875rem; margin: 0.5rem 0 0;"><code class="inline-code">q</code> Quit &nbsp;•&nbsp; <code class="inline-code">r</code> Refresh &nbsp;•&nbsp; <code class="inline-code">c</code> Clear</p>
+                </div>
+            </section>
+
+            <!-- Codex CLI -->
+            <section id="codex-exec">
+                <h2><span>🤖</span> Codex CLI</h2>
+                
+                <h3><code class="inline-code">codex exec</code></h3>
+                <p>Run Codex non-interactively.</p>
+
+                <div class="quick-start">
+                    <h4>🎯 Common Patterns</h4>
+                    <div class="code-block" style="margin: 0.5rem 0 0;">
+                        <pre><code># Full automation (no approvals)
+codex exec --full-auto "refactor this function"
+
+# With specific model
+codex exec -m gpt-5.3-codex --model-reasoning-effort xhigh "optimize"
+
+# In specific directory
+codex exec -C /path/to/project "add tests"
+
+# Danger mode (no sandbox, no approvals)
+codex exec --dangerously-bypass-approvals-and-sandbox "deploy"</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <section id="codex-flags">
+                <h3>Flags & Options</h3>
+                <table>
+                    <tr><th>Flag</th><th>Description</th></tr>
+                    <tr><td><code class="inline-code">-m, --model</code></td><td>Model (default: gpt-5.3-codex)</td></tr>
+                    <tr><td><code class="inline-code">-s, --sandbox</code></td><td>Sandbox: read-only, workspace-write, danger-full-access</td></tr>
+                    <tr><td><code class="inline-code">-a, --ask-for-approval</code></td><td>Approval: untrusted, on-request, never</td></tr>
+                    <tr><td><code class="inline-code">-C, --cd</code></td><td>Working directory</td></tr>
+                    <tr><td><code class="inline-code">--full-auto</code></td><td>-a on-request + --sandbox workspace-write</td></tr>
+                    <tr><td><code class="inline-code">--model-reasoning-effort</code></td><td>low, medium, high, xhigh</td></tr>
+                </table>
+            </section>
+
+            <!-- Environment -->
+            <section id="env-vars">
+                <h2><span>📝</span> Environment Variables</h2>
+                <table>
+                    <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
+                    <tr><td><code class="inline-code">CLIPROXY_AUTH_DIR</code></td><td>Auth files directory</td><td>~/.codex/_auths</td></tr>
+                    <tr><td><code class="inline-code">CLIPROXY_HOST</code></td><td>Proxy bind host</td><td>127.0.0.1</td></tr>
+                    <tr><td><code class="inline-code">CLIPROXY_PORT</code></td><td>Proxy bind port</td><td>55983</td></tr>
+                    <tr><td><code class="inline-code">OPENAI_BASE_URL</code></td><td>Set by proxy</td><td>http://127.0.0.1:55983</td></tr>
+                </table>
+            </section>
+
+            <!-- Troubleshooting -->
+            <section id="troubleshooting">
+                <h2><span>🔧</span> Troubleshooting</h2>
+                
+                <div class="card-grid">
+                    <div class="card warning">
+                        <div class="card-title">⚠️ All Keys Blacklisted</div>
+                        <p style="font-size: 0.875rem;">Run <code class="inline-code">cdx reset</code> to reset all keys</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">ℹ️ Proxy Not Starting</div>
+                        <p style="font-size: 0.875rem;">Remove stale PID: <code class="inline-code">rm ~/.codex/_auths/rr_proxy_v2.pid</code></p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">✅ Check Health</div>
+                        <p style="font-size: 0.875rem;"><code class="inline-code">cdx status --json | jq .healthy</code></p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Footer -->
+            <footer class="footer">
+                <p>CDX Proxy CLI Documentation • Generated March 8, 2026</p>
+                <p style="margin-top: 0.5rem;">Logs: <code class="inline-code">~/.codex/_auths/rr_proxy_v2.log</code></p>
+            </footer>
+        </main>
+
+        <!-- Table of Contents -->
+        <aside class="toc">
+            <div class="toc-title">On This Page</div>
+            <a href="#quickstart" class="toc-link active">Quick Start</a>
+            <a href="#installation" class="toc-link">Installation</a>
+            <a href="#configuration" class="toc-link">Configuration</a>
+            <a href="#proxy" class="toc-link">cdx proxy</a>
+            <a href="#status" class="toc-link">cdx status</a>
+            <a href="#doctor" class="toc-link">cdx doctor</a>
+            <a href="#all" class="toc-link">cdx all</a>
+            <a href="#trace" class="toc-link">cdx trace</a>
+            <a href="#codex-exec" class="toc-link">codex exec</a>
+            <a href="#codex-flags" class="toc-link">Flags & Options</a>
+            <a href="#env-vars" class="toc-link">Environment</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+        </aside>
+    </div>
+
+    <!-- Command Palette -->
+    <div class="command-palette" id="commandPalette">
+        <div class="command-palette-content">
+            <input type="text" class="command-palette-input" placeholder="Type a command..." id="commandInput">
+            <div class="command-results" id="commandResults"></div>
+        </div>
+    </div>
+
+    <script>
+        // Copy to clipboard
+        function copyCode(btn) {
+            const code = btn.closest('.code-block').querySelector('code').textContent;
+            navigator.clipboard.writeText(code);
+            btn.classList.add('copied');
+            btn.innerHTML = '<span>✓</span> Copied!';
+            setTimeout(() => {
+                btn.classList.remove('copied');
+                btn.innerHTML = '<span>📋</span> Copy';
+            }, 2000);
+        }
+
+        // Search functionality
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            document.querySelectorAll('section').forEach(section => {
+                const text = section.textContent.toLowerCase();
+                section.style.display = text.includes(term) ? '' : 'none';
+            });
+        });
+
+        // Command palette (Cmd+K)
+        const commandPalette = document.getElementById('commandPalette');
+        const commandInput = document.getElementById('commandInput');
+        
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                commandPalette.classList.add('active');
+                commandInput.focus();
+            }
+            if (e.key === 'Escape') {
+                commandPalette.classList.remove('active');
+            }
+        });
+
+        commandPalette.addEventListener('click', (e) => {
+            if (e.target === commandPalette) {
+                commandPalette.classList.remove('active');
+            }
+        });
+
+        // Active TOC highlighting
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const id = entry.target.id;
+                    document.querySelectorAll('.toc-link, .nav-item').forEach(link => {
+                        link.classList.toggle('active', link.getAttribute('href') === `#${id}`);
+                    });
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('section').forEach(section => observer.observe(section));
+
+        // Smooth scroll for nav links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

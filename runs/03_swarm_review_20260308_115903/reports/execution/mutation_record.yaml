@@ -1,6 +1,8 @@
 run_id: "03_swarm_review_20260308_115903"
-timestamp: "2026-03-08T11:59:03+03:00"
-status: in_progress
+timestamp: "2026-03-08T12:48:00+03:00"
+status: implementation_complete
 observations:
   - phase: 0
     observation: "Dirty worktree captured as explicit scope instead of hidden state."
+  - phase: 8
+    observation: "`cdx` contract completed atomically across package/docs/runtime/tests; ChatGPT header override hardened case-insensitively with regression tests."

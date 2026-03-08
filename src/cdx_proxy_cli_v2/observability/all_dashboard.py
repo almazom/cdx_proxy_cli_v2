@@ -199,7 +199,7 @@ def render_all_dashboard(*, payload: Dict[str, Any]) -> None:
     summary = payload.get("summary", {})
     rows = payload.get("keys", [])
 
-    summary_table = Table(title="cdx2 all | summary")
+    summary_table = Table(title="cdx all | summary")
     summary_table.add_column("Field")
     summary_table.add_column("Value")
     summary_table.add_row("Proxy running", "yes" if bool(summary.get("proxy_running")) else "no")
@@ -209,7 +209,7 @@ def render_all_dashboard(*, payload: Dict[str, Any]) -> None:
     summary_table.add_row("Recent events source", str(summary.get("events_file") or "-"))
     console.print(summary_table)
 
-    key_table = Table(title="cdx2 all | keys")
+    key_table = Table(title="cdx all | keys")
     key_table.add_column("KEY", no_wrap=True)
     key_table.add_column("HEALTH")
     key_table.add_column("COOLDOWN")

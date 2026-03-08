@@ -404,9 +404,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if body and not any(key.lower() == "content-type" for key in base_headers.keys()):
             set_header_case_insensitive(base_headers, "Content-Type", self.headers.get("Content-Type", "application/json"))
         if chatgpt_backend:
-            base_headers.setdefault("Origin", "https://chatgpt.com")
-            base_headers.setdefault("Referer", "https://chatgpt.com/")
-            base_headers.setdefault("User-Agent", "codex-cli")
+            forced_chatgpt_headers = (
+                ("Origin", "https://chatgpt.com"),
+                ("Referer", "https://chatgpt.com/"),
+                ("User-Agent", "codex-cli"),
+            )
+            forced_chatgpt_keys = {key.lower() for key, _ in forced_chatgpt_headers}
+            for existing_key in list(base_headers.keys()):
+                if existing_key.lower() in forced_chatgpt_keys:
+                    base_headers.pop(existing_key, None)
+            for key, value in forced_chatgpt_headers:
+                set_header_case_insensitive(base_headers, key, value)
 
         max_attempts = max(1, runtime.auth_pool.count())
         compact_timeout = runtime.settings.compact_timeout

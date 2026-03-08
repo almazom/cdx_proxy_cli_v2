@@ -287,13 +287,12 @@ class TestCliContracts:
         assert result == 2
         assert "port must be between 0 and 65535" in captured.err
 
-    def test_pyproject_registers_cdx_and_cdx2_scripts(self):
+    def test_pyproject_registers_cdx_script_only(self):
         pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
         data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
 
         scripts = data["project"]["scripts"]
-        assert scripts["cdx"] == "cdx_proxy_cli_v2.cli.main:main"
-        assert scripts["cdx2"] == "cdx_proxy_cli_v2.cli.main:main"
+        assert scripts == {"cdx": "cdx_proxy_cli_v2.cli.main:main"}
 
 
 class TestFormatShellExports:

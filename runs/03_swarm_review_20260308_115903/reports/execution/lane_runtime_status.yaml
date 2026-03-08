@@ -18,9 +18,9 @@ lanes:
   - lane_id: phase_7_readiness
     status: complete
   - lane_id: phase_8_workers
-    status: in_progress
+    status: complete
   - lane_id: phase_9_final
-    status: pending
+    status: in_progress
   - lane_id: phase_10_simplification
     status: pending
   - lane_id: phase_11_html_assembly

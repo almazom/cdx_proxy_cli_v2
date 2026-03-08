@@ -1,6 +1,7 @@
 """Comprehensive tests for proxy server module."""
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from io import BytesIO
 from typing import Any, Dict, Optional
@@ -11,7 +12,7 @@ import pytest
 from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.auth.rotation import RoundRobinAuthPool
 from cdx_proxy_cli_v2.config.settings import Settings
-from cdx_proxy_cli_v2.proxy.server import _extract_error_code
+from cdx_proxy_cli_v2.proxy.server import ProxyHandler, ProxyRuntime, UpstreamAttemptResult, _extract_error_code
 
 
 # ============================================================================
@@ -31,6 +32,8 @@ def test_settings(tmp_path) -> Settings:
         management_key="test-management-key-12345",
         allow_non_loopback=False,
         trace_max=100,
+        request_timeout=45,
+        compact_timeout=120,
     )
 
 
@@ -52,6 +55,38 @@ def mock_auth_pool(sample_auth_record) -> RoundRobinAuthPool:
     pool = RoundRobinAuthPool()
     pool.load([sample_auth_record])
     return pool
+
+
+def _build_runtime(settings: Settings, auth_record: AuthRecord) -> ProxyRuntime:
+    """Create a proxy runtime seeded with a single auth record."""
+    runtime = ProxyRuntime(settings=settings)
+    runtime.auth_pool.load([auth_record])
+    return runtime
+
+
+def _build_proxy_handler(
+    *,
+    runtime: ProxyRuntime,
+    path: str,
+    headers: Dict[str, str],
+    body: bytes = b"",
+    method: str = "POST",
+) -> ProxyHandler:
+    """Create a proxy handler instance with mocked network I/O."""
+    handler = ProxyHandler.__new__(ProxyHandler)
+    handler.server = MagicMock()
+    handler.server.runtime = runtime
+    handler.path = path
+    handler.command = method
+    handler.headers = headers
+    handler.client_address = ("127.0.0.1", 43123)
+    handler.rfile = BytesIO(body)
+    handler.wfile = BytesIO()
+    handler.send_response = MagicMock()
+    handler.send_header = MagicMock()
+    handler.end_headers = MagicMock()
+    handler._read_body = MagicMock(return_value=body)
+    return handler
 
 
 # ============================================================================
@@ -236,6 +271,92 @@ class TestHeaderHandling:
         drop_header_case_insensitive(headers, "content-type")
         assert "Content-Type" not in headers
         assert "content-length" in headers
+
+    def test_chatgpt_backend_headers_are_replaced_case_insensitively(self, test_settings, sample_auth_record):
+        """ChatGPT backend should replace conflicting header variants with canonical values."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://chatgpt.com/backend-api"),
+            sample_auth_record,
+        )
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/conversation",
+            headers={
+                "Origin": "https://app.example.com",
+                "origin": "https://lower.example.com",
+                "Referer": "https://app.example.com/chat",
+                "referer": "https://lower.example.com/chat",
+                "User-Agent": "Desktop Browser",
+                "user-agent": "mobile-browser",
+                "X-Trace-Id": "trace-123",
+            },
+        )
+        captured_headers: Dict[str, str] = {}
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            captured_headers.update(dict(kwargs["headers"]))
+            return UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert captured_headers["Origin"] == "https://chatgpt.com"
+        assert captured_headers["Referer"] == "https://chatgpt.com/"
+        assert captured_headers["User-Agent"] == "codex-cli"
+        assert "origin" not in captured_headers
+        assert "referer" not in captured_headers
+        assert "user-agent" not in captured_headers
+        assert captured_headers["X-Trace-Id"] == "trace-123"
+        assert captured_headers["Authorization"] == f"Bearer {sample_auth_record.token}"
+        assert captured_headers["chatgpt-account-id"] == str(sample_auth_record.account_id)
+
+    def test_non_chatgpt_backend_preserves_caller_header_variants(self, test_settings, sample_auth_record):
+        """Non-ChatGPT upstreams should keep caller-provided header casing and values."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://api.example.com/v1"),
+            sample_auth_record,
+        )
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/conversation",
+            headers={
+                "Origin": "https://app.example.com",
+                "origin": "https://lower.example.com",
+                "Referer": "https://app.example.com/chat",
+                "referer": "https://lower.example.com/chat",
+                "User-Agent": "Desktop Browser",
+                "user-agent": "mobile-browser",
+                "X-Trace-Id": "trace-123",
+            },
+        )
+        captured_headers: Dict[str, str] = {}
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            captured_headers.update(dict(kwargs["headers"]))
+            return UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert captured_headers["Origin"] == "https://app.example.com"
+        assert captured_headers["origin"] == "https://lower.example.com"
+        assert captured_headers["Referer"] == "https://app.example.com/chat"
+        assert captured_headers["referer"] == "https://lower.example.com/chat"
+        assert captured_headers["User-Agent"] == "Desktop Browser"
+        assert captured_headers["user-agent"] == "mobile-browser"
+        assert captured_headers["X-Trace-Id"] == "trace-123"
+        assert captured_headers["Authorization"] == f"Bearer {sample_auth_record.token}"
+        assert "chatgpt-account-id" not in captured_headers
 
 
 # ============================================================================

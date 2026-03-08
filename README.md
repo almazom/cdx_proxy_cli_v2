@@ -28,39 +28,39 @@ This V2 keeps behavior similar while splitting complexity into narrow modules:
 ```bash
 cd /home/pets/TOOLS/cdx_proxy_cli_v2
 pip install -e .
-cdx2 proxy
+cdx proxy
 ```
 
 Export proxy env in your current shell:
 
 ```bash
-eval "$(cdx2 proxy --print-env-only)"
+eval "$(cdx proxy --print-env-only)"
 ```
 
 Open trace TUI:
 
 ```bash
-cdx2 trace
+cdx trace
 ```
 
 Stop proxy:
 
 ```bash
-cdx2 stop
+cdx stop
 ```
 
 ## Commands
 
-- `cdx2 proxy`: start/reuse service
-- `cdx2 proxy --print-env`: print shell exports for current terminal (includes status line on stderr)
-- `cdx2 proxy --print-env-only`: print only `export ...` lines (safe for `eval`)
-- `cdx2 status`: show running status and runtime details
-- `cdx2 doctor`: show key rotation state (`whitelist/probation/cooldown/blacklist`)
-- `cdx2 trace`: open live trace TUI
-- `cdx2 all`: show all key cards dashboard (same style as v1)
-- `cdx2 all --json`: machine-readable variant for AI agents/automation
-- `cdx2 stop`: shutdown proxy
-- `cdx2 logs --lines 120`: tail proxy log file
+- `cdx proxy`: start/reuse service
+- `cdx proxy --print-env`: print shell exports for current terminal (includes status line on stderr)
+- `cdx proxy --print-env-only`: print only `export ...` lines (safe for `eval`)
+- `cdx status`: show running status and runtime details
+- `cdx doctor`: show key rotation state (`whitelist/probation/cooldown/blacklist`)
+- `cdx trace`: open live trace TUI
+- `cdx all`: show all key cards dashboard (same style as v1)
+- `cdx all --json`: machine-readable variant for AI agents/automation
+- `cdx stop`: shutdown proxy
+- `cdx logs --lines 120`: tail proxy log file
 
 ## Runtime Files
 

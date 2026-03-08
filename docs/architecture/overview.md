@@ -23,7 +23,7 @@
 - `src/cdx_proxy_cli_v2/observability/event_log.py`
   - durable JSONL audit stream
 - `src/cdx_proxy_cli_v2/observability/all_dashboard.py`
-  - `cdx2 all` summary and per-key dashboard
+  - `cdx all` summary and per-key dashboard
 - `src/cdx_proxy_cli_v2/observability/tui.py`
   - live trace rendering
 

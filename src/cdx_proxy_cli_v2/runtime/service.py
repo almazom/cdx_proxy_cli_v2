@@ -455,7 +455,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 import warnings
                 warnings.warn(
                     f"Port {requested_port} was in use, using port {port} instead. "
-                    f"Run 'cdx2 stop' to clean up stale processes.",
+                    f"Run 'cdx stop' to clean up stale processes.",
                     RuntimeWarning,
                 )
             
@@ -480,7 +480,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
     log_file = log_path(runtime_settings.auth_dir)
     raise RuntimeError(
         f"{last_error}; inspect {log_file} for details. "
-        f"Try running 'cdx2 stop' first to clean up stale processes."
+        f"Try running 'cdx stop' first to clean up stale processes."
     )
 
 

@@ -29,7 +29,6 @@ dependencies = [
 
 [project.scripts]
 cdx = "cdx_proxy_cli_v2.cli.main:main"
-cdx2 = "cdx_proxy_cli_v2.cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

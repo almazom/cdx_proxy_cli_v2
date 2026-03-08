@@ -72,7 +72,7 @@ def _management_headers(settings: Settings) -> Dict[str, str]:
 
 def _proxy_eval_hint(settings: Settings) -> str:
     auth_dir = shlex.quote(settings.auth_dir)
-    return f'eval "$(cdx2 proxy --auth-dir {auth_dir} --print-env-only)"'
+    return f'eval "$(cdx proxy --auth-dir {auth_dir} --print-env-only)"'
 
 
 def _load_codex_auth_identity() -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -132,7 +132,7 @@ def handle_proxy(args: argparse.Namespace) -> int:
             print(f"Proxy already running on {result.base_url}", file=sys.stderr)
         print(f"Auth dir: {settings.auth_dir}", file=sys.stderr)
         print(f"One-line shell setup: {_proxy_eval_hint(settings)}", file=sys.stderr)
-        print("Next: run `cdx2 trace` or use `codex` in this shell", file=sys.stderr)
+        print("Next: run `cdx trace` or use `codex` in this shell", file=sys.stderr)
     return 0
 
 
@@ -144,7 +144,7 @@ def handle_status(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
     
-    table = Table(title="cdx2 service status")
+    table = Table(title="cdx service status")
     table.add_column("Field")
     table.add_column("Value")
     for key in [
@@ -182,7 +182,7 @@ def _healthy_base_url_or_none(settings: Settings) -> Optional[str]:
     base_url = str(status_payload.get("base_url") or settings.base_url)
     healthy = bool(status_payload.get("healthy"))
     if not healthy:
-        print("Proxy is not healthy/running. Start with `cdx2 proxy` first.", file=sys.stderr)
+        print("Proxy is not healthy/running. Start with `cdx proxy` first.", file=sys.stderr)
         return None
     return base_url
 
@@ -234,7 +234,7 @@ def handle_doctor(args: argparse.Namespace) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
-    table = Table(title="cdx2 doctor | auth rotation state")
+    table = Table(title="cdx doctor | auth rotation state")
     table.add_column("File")
     table.add_column("Status")
     table.add_column("Cooldown")
@@ -295,7 +295,7 @@ def handle_trace(args: argparse.Namespace) -> int:
         if "log_request_preview" in debug:
             log_request_preview = bool(debug.get("log_request_preview"))
     except Exception:
-        print("Proxy not running. Run `cdx2 proxy` first.", file=sys.stderr)
+        print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
         return 1
     try:
         run_trace_tui(
@@ -487,13 +487,13 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Quick one-liners:\n"
             "  start only:\n"
-            "    cdx2 proxy --auth-dir ~/.codex/_auths\n"
+            "    cdx proxy --auth-dir ~/.codex/_auths\n"
             "  safe env export into current shell:\n"
-            "    eval \"$(cdx2 proxy --auth-dir ~/.codex/_auths --print-env-only)\"\n"
+            "    eval \"$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)\"\n"
             "  full setup + trace in one line:\n"
-            "    eval \"$(cdx2 proxy --auth-dir ~/.codex/_auths --print-env-only)\" && cdx2 trace --auth-dir ~/.codex/_auths --limit 20\n"
+            "    eval \"$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)\" && cdx trace --auth-dir ~/.codex/_auths --limit 20\n"
             "  then open trace:\n"
-            "    cdx2 trace --auth-dir ~/.codex/_auths --limit 20\n"
+            "    cdx trace --auth-dir ~/.codex/_auths --limit 20\n"
         ),
     )
     _add_runtime_options(proxy_parser)
@@ -577,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """Main entry point for cdx2 CLI.
+    """Main entry point for cdx CLI.
     
     Exit codes:
         0: Success

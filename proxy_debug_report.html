@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDX Proxy CLI v2 - Debug & Investigation Report</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-green: #2ea043;
+            --accent-red: #da3633;
+            --accent-yellow: #d29922;
+            --accent-blue: #58a6ff;
+            --accent-purple: #a371f7;
+            --border: #30363d;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; color: var(--accent-blue); }
+        h2 { font-size: 1.5rem; margin: 2rem 0 1rem; color: var(--accent-purple); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        h3 { font-size: 1.2rem; margin: 1.5rem 0 0.75rem; color: var(--text-primary); }
+        .subtitle { color: var(--text-secondary); margin-bottom: 2rem; }
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        .card.success { border-left: 4px solid var(--accent-green); }
+        .card.error { border-left: 4px solid var(--accent-red); }
+        .card.warning { border-left: 4px solid var(--accent-yellow); }
+        .card.info { border-left: 4px solid var(--accent-blue); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        .status-ok { background: rgba(46, 160, 67, 0.2); color: var(--accent-green); }
+        .status-cooldown { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .status-blacklist { background: rgba(218, 54, 51, 0.2); color: var(--accent-red); }
+        code, pre {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            background: var(--bg-tertiary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }
+        pre {
+            padding: 1rem;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+        }
+        .code-block { background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; border: 1px solid var(--border); }
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; }
+        tr:hover { background: var(--bg-tertiary); }
+        .nav-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .nav-tab {
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+        .nav-tab:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .nav-tab.active { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .root-cause { background: linear-gradient(135deg, rgba(218, 54, 51, 0.1), rgba(210, 153, 34, 0.1)); }
+        .fix-applied { background: linear-gradient(135deg, rgba(46, 160, 67, 0.1), rgba(88, 166, 255, 0.1)); }
+        .timeline { position: relative; padding-left: 2rem; }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 0.5rem;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border);
+        }
+        .timeline-item { position: relative; margin-bottom: 1.5rem; }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -1.25rem;
+            top: 0.25rem;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            border: 3px solid var(--bg-primary);
+        }
+        .timeline-item.success::before { background: var(--accent-green); }
+        .timeline-item.error::before { background: var(--accent-red); }
+        .diff-old { color: var(--accent-red); text-decoration: line-through; }
+        .diff-new { color: var(--accent-green); }
+        .env-var { display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-tertiary); border-radius: 4px; margin: 0.25rem 0; }
+        .env-var-name { font-family: monospace; color: var(--accent-blue); }
+        .env-var-value { font-family: monospace; color: var(--text-secondary); }
+        .collapsible { cursor: pointer; }
+        .collapsible::before { content: '▶ '; display: inline-block; margin-right: 0.5rem; transition: transform 0.2s; }
+        .collapsible.open::before { transform: rotate(90deg); }
+        .collapsible-content { display: none; margin-left: 1.5rem; }
+        .collapsible.open + .collapsible-content { display: block; }
+        .search-box {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+        .search-box:focus { outline: none; border-color: var(--accent-blue); }
+        .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-secondary); text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 CDX Proxy CLI v2 - Debug & Investigation Report</h1>
+        <p class="subtitle">Generated: <span id="timestamp"></span> | Investigation Date: March 8, 2026</p>
+
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="overview">📋 Overview</button>
+            <button class="nav-tab" data-tab="root-cause">🐛 Root Cause</button>
+            <button class="nav-tab" data-tab="fixes">✅ Fixes Applied</button>
+            <button class="nav-tab" data-tab="unset-issue">⚠️ Unset Investigation</button>
+            <button class="nav-tab" data-tab="proxy-status">📊 Proxy Status</button>
+            <button class="nav-tab" data-tab="auth-keys">🔑 Auth Keys</button>
+            <button class="nav-tab" data-tab="codex-commands">📟 Codex Commands</button>
+            <button class="nav-tab" data-tab="official-codex">📚 Official Codex Reference</button>
+        </nav>
+
+        <!-- Overview Tab -->
+        <div class="tab-content active" id="overview">
+            <h2>Executive Summary</h2>
+            <div class="card success">
+                <h3>✅ Issue Resolved</h3>
+                <p>All 3 authentication keys are now working correctly through the proxy. The root cause was Cloudflare blocking requests with incorrect <code>User-Agent</code> headers.</p>
+            </div>
+
+            <div class="grid">
+                <div class="card info">
+                    <h3>🔧 Proxy Status</h3>
+                    <p><strong>Running:</strong> Yes (PID 1385283)</p>
+                    <p><strong>Host:</strong> 127.0.0.1:55983</p>
+                    <p><strong>Auth Count:</strong> 3</p>
+                    <p><strong>Upstream:</strong> https://chatgpt.com/backend-api</p>
+                </div>
+                <div class="card warning">
+                    <h3>⚠️ Rate Limit Status</h3>
+                    <p><strong>Available:</strong> 1 key</p>
+                    <p><strong>Cooldown:</strong> 2 keys</p>
+                    <p><strong>Next Available:</strong> ~105 minutes</p>
+                </div>
+                <div class="card success">
+                    <h3>📈 API Health</h3>
+                    <p><strong>Models Endpoint:</strong> Working (14 models)</p>
+                    <p><strong>Responses Endpoint:</strong> Working</p>
+                    <p><strong>Cloudflare:</strong> No challenges</p>
+                </div>
+            </div>
+
+            <h2>Quick Navigation</h2>
+            <ul>
+                <li><a href="#root-cause" onclick="switchTab('root-cause')">Root Cause Analysis</a> - Why 403 errors were occurring</li>
+                <li><a href="#fixes" onclick="switchTab('fixes')">Fixes Applied</a> - Code changes made</li>
+                <li><a href="#unset-issue" onclick="switchTab('unset-issue')">Unset Investigation</a> - Why codex can't run without proxy</li>
+                <li><a href="#auth-keys" onclick="switchTab('auth-keys')">Auth Keys Dashboard</a> - Current key status</li>
+            </ul>
+        </div>
+
+        <!-- Root Cause Tab -->
+        <div class="tab-content" id="root-cause">
+            <h2>🐛 Root Cause Analysis</h2>
+            
+            <div class="card error root-cause">
+                <h3>The Problem</h3>
+                <p>All 3 authentication keys were being <strong>blacklisted</strong> with 403 errors, even though the tokens were valid.</p>
+            </div>
+
+            <h3>Timeline of Discovery</h3>
+            <div class="timeline">
+                <div class="timeline-item error">
+                    <strong>Symptom:</strong> All keys blacklisted with "forbidden" status
+                    <p>Proxy logs showed 403 responses from Cloudflare for all requests</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Investigation:</strong> Direct API calls work
+                    <p>Testing tokens directly against chatgpt.com returned 200 OK</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Discovery:</strong> Cloudflare challenge headers
+                    <p>Response included <code>cf-mitigated: challenge</code> header</p>
+                </div>
+                <div class="timeline-item success">
+                    <strong>Root Cause Found:</strong> Wrong User-Agent header
+                    <p>Proxy was forwarding <code>curl/8.5.0</code> instead of <code>codex-cli</code></p>
+                </div>
+            </div>
+
+            <h3>Technical Details</h3>
+            <div class="grid">
+                <div class="card">
+                    <h4>What Cloudflare Expected</h4>
+                    <pre>User-Agent: codex-cli
+Origin: https://chatgpt.com
+Referer: https://chatgpt.com/
+Authorization: Bearer &lt;valid_token&gt;</pre>
+                </div>
+                <div class="card error">
+                    <h4>What Proxy Was Sending</h4>
+                    <pre>User-Agent: curl/8.5.0  ❌
+Origin: (missing)  ❌
+Referer: (missing)  ❌
+Authorization: Bearer &lt;valid_token&gt; ✓</pre>
+                </div>
+            </div>
+
+            <h3>Why This Happened</h3>
+            <div class="card warning">
+                <ol style="margin-left: 1.5rem; margin-top: 1rem;">
+                    <li><strong>Upstream URL missing <code>/backend-api</code></strong>: The proxy's <code>chatgpt_backend</code> flag was <code>False</code> because upstream was <code>https://chatgpt.com</code> instead of <code>https://chatgpt.com/backend-api</code></li>
+                    <li><strong><code>setdefault()</code> doesn't override</strong>: Even when headers were being set, <code>setdefault()</code> couldn't override the incoming <code>User-Agent</code> that was already copied from the client request</li>
+                    <li><strong>Cloudflare WAF blocks suspicious User-Agents</strong>: Requests with <code>curl</code> User-Agent to <code>/backend-api</code> endpoints trigger Cloudflare challenges</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Fixes Tab -->
+        <div class="tab-content" id="fixes">
+            <h2>✅ Fixes Applied</h2>
+
+            <div class="card success fix-applied">
+                <h3>Fix #1: Upstream URL Configuration</h3>
+                <p><strong>File:</strong> <code>~/.codex/_auths/.env</code></p>
+                <div class="code-block">
+                    <span class="diff-old">- CLIPROXY_UPSTREAM=https://chatgpt.com</span><br>
+                    <span class="diff-new">+ CLIPROXY_UPSTREAM=https://chatgpt.com/backend-api</span>
+                </div>
+                <p style="margin-top: 0.5rem;"><strong>Impact:</strong> Enables <code>chatgpt_backend</code> mode which sets required headers</p>
+            </div>
+
+            <div class="card success fix-applied">
+                <h3>Fix #2: Header Override Logic</h3>
+                <p><strong>File:</strong> <code>src/cdx_proxy_cli_v2/proxy/server.py</code> (line ~414)</p>
+                <div class="code-block">
+                    <span class="diff-old">- base_headers.setdefault("Origin", "https://chatgpt.com")</span><br>
+                    <span class="diff-new">+ base_headers["Origin"] = "https://chatgpt.com"</span><br><br>
+                    <span class="diff-old">- base_headers.setdefault("Referer", "https://chatgpt.com/")</span><br>
+                    <span class="diff-new">+ base_headers["Referer"] = "https://chatgpt.com/"</span><br><br>
+                    <span class="diff-old">- base_headers.setdefault("User-Agent", "codex-cli")</span><br>
+                    <span class="diff-new">+ base_headers["User-Agent"] = "codex-cli"</span>
+                </div>
+                <p style="margin-top: 0.5rem;"><strong>Impact:</strong> Forces correct headers regardless of incoming request headers</p>
+            </div>
+
+            <h3>Verification</h3>
+            <div class="card success">
+                <pre>$ .venv/bin/cdx doctor
+┏━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+┃ File     ┃ Status ┃ Cooldown ┃ Blacklist ┃ Probation ┃ Used ┃ Errors ┃ Reason ┃
+┡━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+│ almazom… │ OK     │ -        │ -         │ -         │ 0    │ 0      │ -      │
+│ almazom… │ OK     │ -        │ -         │ -         │ 0    │ 0      │ -      │
+│ onr55_e… │ OK     │ -        │ -         │ -         │ 0    │ 0      │ -      │
+└──────────┴────────┴──────────┴───────────┴───────────┴──────┴────────┴────────┘</pre>
+            </div>
+        </div>
+
+        <!-- Unset Issue Tab -->
+        <div class="tab-content" id="unset-issue">
+            <h2>⚠️ Why Codex Cannot Run Without Proxy</h2>
+
+            <div class="card warning">
+                <h3>Root Cause: Shell Function Override</h3>
+                <p>The <code>codex</code> command is wrapped by a shell function in <code>~/.zshrc</code> that <strong>automatically sets proxy environment variables</strong> every time codex is invoked.</p>
+            </div>
+
+            <h3>Shell Function in ~/.zshrc</h3>
+            <div class="code-block">
+<pre># Codex CLI with auto-proxy
+codex() {
+  # Auto-start proxy and export env vars to this shell
+  eval "$(cdx proxy --print-env-only 2>/dev/null)"
+  # Run the real codex with proxy environment set
+  command codex "$@"
+}</pre>
+            </div>
+
+            <h3>Why <code>unset</code> Doesn't Work</h3>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <strong>Step 1:</strong> User runs <code>unset HTTP_PROXY HTTPS_PROXY</code>
+                    <p>Environment variables are cleared</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 2:</strong> User runs <code>codex exec "hello"</code>
+                    <p>Shell function intercepts the call</p>
+                </div>
+                <div class="timeline-item error">
+                    <strong>Step 3:</strong> Function executes <code>eval "$(cdx proxy --print-env-only)"</code>
+                    <p>Proxy environment variables are re-set automatically</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 4:</strong> <code>command codex</code> runs with proxy vars
+                    <p>Real codex binary uses proxy regardless of prior unset</p>
+                </div>
+            </div>
+
+            <h3>How to Run Codex Without Proxy</h3>
+            <div class="card info">
+                <h4>Option 1: Use <code>command</code> Directly</h4>
+                <div class="code-block"><pre>command codex exec "hello"</pre></div>
+                <p>Bypasses the shell function entirely</p>
+            </div>
+
+            <div class="card info">
+                <h4>Option 2: Temporarily Disable Function</h4>
+                <div class="code-block"><pre>unset -f codex  # Remove the function
+codex exec "hello"  # Now runs without proxy</pre></div>
+            </div>
+
+            <div class="card info">
+                <h4>Option 3: Use Full Path</h4>
+                <div class="code-block"><pre>/home/pets/.npm-global/bin/codex exec "hello"</pre></div>
+            </div>
+
+            <div class="card warning">
+                <h4>⚠️ Important Note</h4>
+                <p>Running codex without proxy requires valid direct authentication. If your account has rate limits or the direct API is blocked in your region, you may encounter errors like:</p>
+                <pre>ERROR: You've hit your usage limit. Upgrade to Plus to continue using Codex</pre>
+            </div>
+
+            <h3>Environment Variables Set by Proxy</h3>
+            <div class="card">
+                <div class="env-var"><span class="env-var-name">CLIPROXY_AUTH_DIR</span><span class="env-var-value">/home/pets/.codex/_auths</span></div>
+                <div class="env-var"><span class="env-var-name">CLIPROXY_HOST</span><span class="env-var-value">127.0.0.1</span></div>
+                <div class="env-var"><span class="env-var-name">CLIPROXY_PORT</span><span class="env-var-value">55983</span></div>
+                <div class="env-var"><span class="env-var-name">OPENAI_BASE_URL</span><span class="env-var-value">http://127.0.0.1:55983</span></div>
+                <div class="env-var"><span class="env-var-name">OPENAI_API_BASE</span><span class="env-var-value">http://127.0.0.1:55983</span></div>
+            </div>
+        </div>
+
+        <!-- Proxy Status Tab -->
+        <div class="tab-content" id="proxy-status">
+            <h2>📊 Proxy Service Status</h2>
+
+            <div class="card success">
+                <h3>Service Health</h3>
+                <table>
+                    <tr><th>Property</th><th>Value</th></tr>
+                    <tr><td>PID</td><td>1385283</td></tr>
+                    <tr><td>Running</td><td><span class="status-badge status-ok">Yes</span></td></tr>
+                    <tr><td>Healthy</td><td><span class="status-badge status-ok">Yes</span></td></tr>
+                    <tr><td>Base URL</td><td><code>http://127.0.0.1:55983</code></td></tr>
+                    <tr><td>Host</td><td>127.0.0.1</td></tr>
+                    <tr><td>Port</td><td>55983</td></tr>
+                    <tr><td>Auth Count</td><td>3</td></tr>
+                    <tr><td>State</td><td>running</td></tr>
+                    <tr><td>Log File</td><td><code>/home/pets/.codex/_auths/rr_proxy_v2.log</code></td></tr>
+                    <tr><td>Events File</td><td><code>/home/pets/.codex/_auths/rr_proxy_v2.events.jsonl</code></td></tr>
+                </table>
+            </div>
+
+            <h3>Configuration</h3>
+            <div class="card">
+                <table>
+                    <tr><th>Setting</th><th>Value</th></tr>
+                    <tr><td>Upstream</td><td><code>https://chatgpt.com/backend-api</code></td></tr>
+                    <tr><td>Management Key</td><td>Required (test-key)</td></tr>
+                    <tr><td>Request Timeout</td><td>60 seconds</td></tr>
+                    <tr><td>Trace Max</td><td>500</td></tr>
+                    <tr><td>Allow Non-Loopback</td><td>No</td></tr>
+                </table>
+            </div>
+
+            <h3>Management Endpoints</h3>
+            <div class="card">
+                <ul style="margin-left: 1.5rem;">
+                    <li><code>GET /debug</code> - Service debug information</li>
+                    <li><code>GET /trace?limit=N</code> - Request trace history</li>
+                    <li><code>GET /health?refresh=1</code> - Auth health snapshot</li>
+                    <li><code>GET /auth-files</code> - List auth files</li>
+                    <li><code>POST /shutdown</code> - Stop proxy service</li>
+                    <li><code>POST /reset</code> - Reset auth key penalties</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Auth Keys Tab -->
+        <div class="tab-content" id="auth-keys">
+            <h2>🔑 Authentication Keys Dashboard</h2>
+
+            <div class="card warning">
+                <h3>Aggregate Status</h3>
+                <p><strong>Status:</strong> <span class="status-badge status-cooldown">COOLDOWN</span></p>
+                <p><strong>Available Now:</strong> 1 key | <strong>On Cooldown:</strong> 2 keys</p>
+                <p><strong>Global Exhaustion:</strong> 55.4%</p>
+                <p><strong>Next Key Available:</strong> ~105 minutes (almazomru_auth.json)</p>
+            </div>
+
+            <h3>Individual Key Status</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Plan</th>
+                        <th>5-Hour Used</th>
+                        <th>Weekly Used</th>
+                        <th>Reset In</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>almazomam@gmail.com</td>
+                        <td><span class="status-badge status-ok">OK</span></td>
+                        <td>Plus</td>
+                        <td>36%</td>
+                        <td>11%</td>
+                        <td>~33 minutes</td>
+                    </tr>
+                    <tr>
+                        <td>almazomru@gmail.com</td>
+                        <td><span class="status-badge status-cooldown">COOLDOWN</span></td>
+                        <td>Plus</td>
+                        <td>100%</td>
+                        <td>30%</td>
+                        <td>~105 minutes</td>
+                    </tr>
+                    <tr>
+                        <td>onr55@serbia.edu.rs</td>
+                        <td><span class="status-badge status-cooldown">COOLDOWN</span></td>
+                        <td>Free (Edu)</td>
+                        <td>-</td>
+                        <td>100%</td>
+                        <td>~70 hours</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Rotation Policy</h3>
+            <div class="card">
+                <ul style="margin-left: 1.5rem;">
+                    <li><strong>401/403:</strong> Key is blacklisted (outlier ejection)</li>
+                    <li><strong>429:</strong> Key gets exponential cooldown</li>
+                    <li><strong>Re-entry:</strong> Blacklisted key must pass probation before whitelist return</li>
+                    <li><strong>Thresholds:</strong> Warn at 70%, Cooldown at 90%</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Codex Commands Tab -->
+        <div class="tab-content" id="codex-commands">
+            <h2>📟 Codex CLI Commands Reference</h2>
+
+            <h3>Basic Commands</h3>
+            <div class="grid">
+                <div class="card">
+                    <h4>codex --help</h4>
+                    <p>Main CLI entry point</p>
+                    <pre>Usage: codex [OPTIONS] [PROMPT]
+       codex [OPTIONS] &lt;COMMAND&gt;</pre>
+                </div>
+                <div class="card">
+                    <h4>codex exec</h4>
+                    <p>Run Codex non-interactively</p>
+                    <pre>codex exec "your prompt here"</pre>
+                </div>
+                <div class="card">
+                    <h4>codex login</h4>
+                    <p>Manage authentication</p>
+                    <pre>codex login status
+codex login --with-api-key</pre>
+                </div>
+            </div>
+
+            <h3>Advanced Commands</h3>
+            <table>
+                <tr><th>Command</th><th>Description</th></tr>
+                <tr><td><code>codex review</code></td><td>Run a code review non-interactively</td></tr>
+                <tr><td><code>codex mcp</code></td><td>Manage external MCP servers</td></tr>
+                <tr><td><code>codex mcp-server</code></td><td>Start Codex as an MCP server (stdio)</td></tr>
+                <tr><td><code>codex completion</code></td><td>Generate shell completion scripts</td></tr>
+                <tr><td><code>codex sandbox</code></td><td>Run commands within sandbox</td></tr>
+                <tr><td><code>codex debug</code></td><td>Debugging tools</td></tr>
+                <tr><td><code>codex apply</code></td><td>Apply latest diff as git apply</td></tr>
+                <tr><td><code>codex resume</code></td><td>Resume previous interactive session</td></tr>
+                <tr><td><code>codex fork</code></td><td>Fork a previous session</td></tr>
+                <tr><td><code>codex features</code></td><td>Inspect feature flags</td></tr>
+            </table>
+
+            <h3>Key Options</h3>
+            <div class="card">
+                <table>
+                    <tr><th>Option</th><th>Description</th></tr>
+                    <tr><td><code>-m, --model &lt;MODEL&gt;</code></td><td>Model to use (default: gpt-5.3-codex)</td></tr>
+                    <tr><td><code>-s, --sandbox &lt;MODE&gt;</code></td><td>Sandbox policy (read-only, workspace-write, danger-full-access)</td></tr>
+                    <tr><td><code>-a, --ask-for-approval &lt;POLICY&gt;</code></td><td>Approval policy (untrusted, on-request, never)</td></tr>
+                    <tr><td><code>-C, --cd &lt;DIR&gt;</code></td><td>Working directory</td></tr>
+                    <tr><td><code>--full-auto</code></td><td>Low-friction mode (-a on-request, --sandbox workspace-write)</td></tr>
+                    <tr><td><code>--dangerously-bypass-approvals-and-sandbox</code></td><td>Skip all confirmations</td></tr>
+                </table>
+            </div>
+
+            <h3>Feature Flags</h3>
+            <div class="card">
+                <p><strong>Enabled Features:</strong></p>
+                <ul style="margin-left: 1.5rem;">
+                    <li><code>apps</code> (experimental)</li>
+                    <li><code>js_repl</code> (experimental)</li>
+                    <li><code>multi_agent</code> (experimental)</li>
+                    <li><code>personality</code> (stable)</li>
+                    <li><code>prevent_idle_sleep</code> (experimental)</li>
+                    <li><code>shell_snapshot</code> (stable)</li>
+                    <li><code>shell_tool</code> (stable)</li>
+                    <li><code>skill_mcp_dependency_install</code> (stable)</li>
+                    <li><code>sqlite</code> (stable)</li>
+                    <li><code>undo</code> (stable)</li>
+                    <li><code>unified_exec</code> (stable)</li>
+                    <li><code>use_linux_sandbox_bwrap</code> (experimental)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Official Codex Reference Tab -->
+        <div class="tab-content" id="official-codex">
+            <h2>📚 Official Codex Reference</h2>
+
+            <div class="card info">
+                <h3>Source: github.com/openai/codex</h3>
+                <p>Analysis of official Codex CLI source code (cloned March 8, 2026)</p>
+            </div>
+
+            <h3>Backend Client Behavior</h3>
+            <div class="card">
+                <h4>Auto-appends /backend-api</h4>
+                <p>From <code>codex-rs/backend-client/src/client.rs</code>:</p>
+                <div class="code-block">
+<pre>if (base_url.starts_with("https://chatgpt.com")
+    || base_url.starts_with("https://chat.openai.com"))
+    && !base_url.contains("/backend-api")
+{
+    base_url = format!("{base_url}/backend-api");
+}</pre>
+                </div>
+            </div>
+
+            <div class="card">
+                <h4>Hardcoded User-Agent</h4>
+                <p>From <code>codex-rs/backend-client/src/client.rs</code>:</p>
+                <div class="code-block">
+<pre>fn headers(&self) -> HeaderMap {
+    let mut h = HeaderMap::new();
+    if let Some(ua) = &self.user_agent {
+        h.insert(USER_AGENT, ua.clone());
+    } else {
+        h.insert(USER_AGENT, HeaderValue::from_static("codex-cli"));  // ← Hardcoded!
+    }
+    // ...
+}</pre>
+                </div>
+            </div>
+
+            <h3>Path Style Detection</h3>
+            <div class="card">
+                <table>
+                    <tr><th>Base URL Pattern</th><th>Path Style</th><th>API Endpoints</th></tr>
+                    <tr><td>Contains <code>/backend-api</code></td><td>ChatGptApi</td><td><code>/wham/...</code></td></tr>
+                    <tr><td>Other</td><td>CodexApi</td><td><code>/api/codex/...</code></td></tr>
+                </table>
+            </div>
+
+            <h3>Key Endpoints</h3>
+            <div class="card">
+                <table>
+                    <tr><th>Endpoint</th><th>ChatGptApi Path</th><th>Description</th></tr>
+                    <tr><td>Rate Limits</td><td><code>/wham/usage</code></td><td>Get usage/rate limit info</td></tr>
+                    <tr><td>List Tasks</td><td><code>/wham/tasks/list</code></td><td>List codex tasks</td></tr>
+                    <tr><td>Task Details</td><td><code>/wham/tasks/{id}</code></td><td>Get task details</td></tr>
+                    <tr><td>Create Task</td><td><code>/wham/tasks</code></td><td>Create new task (user turn)</td></tr>
+                    <tr><td>Config Requirements</td><td><code>/wham/config/requirements</code></td><td>Get managed requirements</td></tr>
+                </table>
+            </div>
+
+            <h3>Comparison: Proxy vs Official Client</h3>
+            <div class="card">
+                <table>
+                    <tr><th>Aspect</th><th>Official Codex</th><th>CDX Proxy v2 (Fixed)</th></tr>
+                    <tr><td>Base URL</td><td>Auto-appends /backend-api</td><td>Configured explicitly</td></tr>
+                    <tr><td>User-Agent</td><td>Hardcoded "codex-cli"</td><td>Forced "codex-cli"</td></tr>
+                    <tr><td>Origin/Referer</td><td>Set automatically</td><td>Forced for chatgpt_backend</td></tr>
+                    <tr><td>Auth Rotation</td><td>Single token</td><td>Round-robin with cooldown</td></tr>
+                    <tr><td>Rate Limit Handling</td><td>Direct API errors</td><td>Automatic key rotation</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Report generated by CDX Proxy CLI v2 Debug Tool</p>
+            <p>For questions or issues, check proxy logs at <code>~/.codex/_auths/rr_proxy_v2.log</code></p>
+        </div>
+    </div>
+
+    <script>
+        // Set timestamp
+        document.getElementById('timestamp').textContent = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+
+        // Tab switching
+        function switchTab(tabId) {
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        // Collapsible sections
+        document.querySelectorAll('.collapsible').forEach(el => {
+            el.addEventListener('click', function() {
+                this.classList.toggle('open');
+                const content = this.nextElementSibling;
+                content.style.display = content.style.display === 'block' ? 'none' : 'block';
+            });
+        });
+
+        // Search functionality
+        const searchBox = document.querySelector('.search-box');
+        if (searchBox) {
+            searchBox.addEventListener('input', function(e) {
+                const term = e.target.value.toLowerCase();
+                document.querySelectorAll('table tr, .card').forEach(el => {
+                    const text = el.textContent.toLowerCase();
+                    el.style.display = text.includes(term) ? '' : 'none';
+                });
+            });
+        }
+    </script>
+</body>
+</html>
