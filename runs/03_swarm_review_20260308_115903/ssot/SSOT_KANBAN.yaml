@@ -1,0 +1,51 @@
+kanban_type: ssot
+run_id: "03_swarm_review_20260308_115903"
+phase: 6
+timestamp: "2026-03-08T12:37:00+03:00"
+project:
+  name: "cdx_proxy_cli_v2"
+  flow_version: "v6.5.3"
+  run_mode: "implementation"
+lanes:
+  - name: backlog
+    cards:
+      - CARD-001
+      - CARD-002
+  - name: in_progress
+    cards: []
+  - name: blocked
+    cards: []
+  - name: review
+    cards: []
+  - name: done
+    cards: []
+cards:
+  CARD-001:
+    title: "Finish the `cdx`-only contract atomically"
+    priority: P0
+    complexity_hours: 2.5
+    status: backlog
+    blocked_by: []
+  CARD-002:
+    title: "Force ChatGPT headers with case-insensitive replacement and tests"
+    priority: P1
+    complexity_hours: 1.5
+    status: backlog
+    blocked_by: []
+statistics:
+  total_cards: 2
+  done: 0
+  backlog: 2
+  in_progress: 0
+  blocked: 0
+  review: 0
+  total_hours: 4.0
+  p0_hours: 2.5
+  p1_hours: 1.5
+freeze:
+  frozen_at: "2026-03-08T12:37:00+03:00"
+  frozen_by: "swarm_review_v6.5.3"
+  reason: "Phase 6 SSOT freeze before implementation"
+deferred_findings:
+  - security.eval_path_ambiguity
+  - maintainability.all_dashboard_deeper_cleanup
