@@ -1,0 +1,30 @@
+{
+  "command": "send",
+  "status": "ok",
+  "result": {
+    "mode": "text",
+    "dry_run": true,
+    "target": "@almazom",
+    "message": "*Исправление публикации swarm review*\n\nПересобрал и перепубликовал landing.\n\n• Новый master URL: http://107.174.231.22:18888/swarm-20260308-115903-master/manuscript.html\n• Теперь у карточек и сабагентов есть отдельные URL\n• На master landing теперь встроены public-safe prompt summaries для каждого spawned subagent\n\nСм. manifest: `runs/03_swarm_review_20260308_115903/reports/publish/published_links.yaml`"
+  },
+  "route": {
+    "sender_required": "@almazomkz",
+    "sender_active": "@almazomkz",
+    "target_locked": "@almazom"
+  }
+}
+{
+  "command": "send",
+  "status": "ok",
+  "result": {
+    "mode": "text",
+    "dry_run": false,
+    "target": "@almazom",
+    "message_id": 6481
+  },
+  "route": {
+    "sender_required": "@almazomkz",
+    "sender_active": "@almazomkz",
+    "target_locked": "@almazom"
+  }
+}

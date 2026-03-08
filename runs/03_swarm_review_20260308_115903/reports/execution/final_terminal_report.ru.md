@@ -3,7 +3,7 @@
 
 **Run ID**: 03_swarm_review_20260308_115903  
 **Дата**: 8 марта 2026  
-**Терминальный статус**: ✅ COMPLETE_WITH_LIMITATIONS  
+**Терминальный статус**: ✅ COMPLETE  
 **Режим**: implementation
 
 ---
@@ -12,7 +12,7 @@
 
 Выполнен полный непрерывный прогон `03_swarm_review` по проекту `cdx_proxy_cli_v2`: preflight, 6 scout-агентов, fusion, card design, quality gate, SSOT freeze, implementation, simplification tail, HTML assembly, publish, delivery.
 
-Run завершён честно: кодовая цель достигнута, тесты зелёные, rich HTML bundle собран и опубликован, Telegram delivery сохранён. Ограничение: текущий publish provider вернул один и тот же URL для child pages и master landing.
+Run завершён честно: кодовая цель достигнута, тесты зелёные, rich HTML bundle собран и опубликован, отдельные child pages получили свои URL, Telegram delivery сохранён.
 
 ---
 
@@ -46,10 +46,10 @@ Run завершён честно: кодовая цель достигнута,
 
 ## Публикация и доставка
 
-- Master landing URL: http://107.174.231.22:18888/paper/manuscript.html
-- Publish limitation: provider reused the same URL for child pages and master landing
+- Master landing URL: http://107.174.231.22:18888/swarm-20260308-115903-master/manuscript.html
+- Child publish URLs: unique URLs restored for cards and subagents; see `published_links.yaml`
 - Telegram target: `@almazom`
-- Telegram message_id: `6480`
+- Telegram message_id: `6480` (initial) + correction message pending below
 - Delivery transcript: `runs/03_swarm_review_20260308_115903/reports/delivery/t2me_transcript.txt`
 - Delivery receipt: `runs/03_swarm_review_20260308_115903/reports/delivery/delivery_receipt.yaml`
 
@@ -59,7 +59,6 @@ Run завершён честно: кодовая цель достигнута,
 
 - `security.eval_path_ambiguity`
 - `maintainability.all_dashboard_deeper_cleanup`
-- Возможность unique publish URLs / slug support в текущем publish wrapper
 
 ---
 
