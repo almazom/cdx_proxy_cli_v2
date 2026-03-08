@@ -1,3 +1,17 @@
 run_id: "03_swarm_review_20260308_115903"
 commits:
   - { phase: checkpoint, sha: "f703fb7", message: "chore: checkpoint before swarm review v6.5.3" }
+  - { phase: 0, sha: "03b61bb", message: "Phase 0: Preflight ✓" }
+  - { phase: 1, sha: "b521eb4", message: "Phase 1: Bootstrap ✓" }
+  - { phase: 2, sha: "1b67b8c", message: "Phase 2: 6 scouts ✓" }
+  - { phase: 3, sha: "09337df", message: "Phase 3: Fusion ✓" }
+  - { phase: 4, sha: "d497ddf", message: "Phase 4: Cards ✓" }
+  - { phase: 5, sha: "6705e4e", message: "Phase 5: Quality ✓" }
+  - { phase: 6, sha: "b861e13", message: "Phase 6: SSOT ✓" }
+  - { phase: 7, sha: "af53096", message: "Phase 7: Ready ✓" }
+  - { phase: 8, sha: "d06c19a", message: "Phase 8: Code ✓" }
+  - { phase: 9, sha: "d50ac2c", message: "Phase 9: Final + PR ✓" }
+  - { phase: 10, sha: "c69a226", message: "Phase 10: Simplification Tail ✓" }
+  - { phase: 11, sha: "44b8e57", message: "Phase 11: HTML Assembly Tail ✓" }
+  - { phase: 12, sha: "7d6fa50", message: "Phase 12: Publish Tail ✓" }
+  - { phase: 13, sha: "HEAD", message: "Phase 13: Delivery Tail ✓" }

@@ -28,4 +28,4 @@ lanes:
   - lane_id: phase_12_publish
     status: complete
   - lane_id: phase_13_delivery
-    status: in_progress
+    status: complete

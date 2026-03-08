@@ -1,0 +1,30 @@
+{
+  "command": "send",
+  "status": "ok",
+  "result": {
+    "mode": "text",
+    "dry_run": true,
+    "target": "@almazom",
+    "message": "*Swarm review завершён*\n\n• Статус: COMPLETE_WITH_LIMITATIONS\n• Flow: v6.5.3\n• Основной rich HTML / статус publish: http://107.174.231.22:18888/paper/manuscript.html\n• Карточки / manifest: child pages published, но provider вернул тот же URL для всех целей; см. `published_links.yaml`\n• Сабагенты / manifest: child pages published, но provider вернул тот же URL для всех целей; см. `published_links.yaml`\n\n*Что внутри лендинга:*\n• структура swarm-а\n• timeline / train-station всего pipeline\n• безопасные public prompt'ы сабагентов\n• отдельные страницы сабагентов\n• все Trello-карты в полном public-safe виде\n• отдельные страницы карточек\n\n*Упрощение кода:*\nPhase 10 — noop: дополнительные behavior-preserving правки не понадобились; downstream core artifacts остались свежими.\n\n*HTML сборка и публикация:*\nHTML bundle собран. `publish_me` dry-run и real publish прошли успешно, но текущий VPS provider вернул один и тот же URL для child pages и master landing, поэтому публикация завершена с явным ограничением.\n\n*Короткий итог:*\nПроект теперь сознательно использует только `cdx` без `cdx2`; ChatGPT forced headers hardening закрыт и покрыт регрессиями; общий тестовый контур зелёный (`172 passed`).\n\n*Следующая сессия:*\n• разобраться с уникальными publish URLs / slug support\n• при желании отдельно решить `security.eval_path_ambiguity`\n• при желании сделать deeper cleanup observability/dashboard debt"
+  },
+  "route": {
+    "sender_required": "@almazomkz",
+    "sender_active": "@almazomkz",
+    "target_locked": "@almazom"
+  }
+}
+{
+  "command": "send",
+  "status": "ok",
+  "result": {
+    "mode": "text",
+    "dry_run": false,
+    "target": "@almazom",
+    "message_id": 6480
+  },
+  "route": {
+    "sender_required": "@almazomkz",
+    "sender_active": "@almazomkz",
+    "target_locked": "@almazom"
+  }
+}

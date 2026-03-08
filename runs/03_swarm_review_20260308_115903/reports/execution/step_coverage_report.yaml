@@ -1,0 +1,79 @@
+run_id: "03_swarm_review_20260308_115903"
+phases:
+  0:
+    status: complete
+    artifacts:
+      - reports/preflight/environment_gate_report.yaml
+      - reports/preflight/flow_version_lock_report.yaml
+      - reports/preflight/mode_and_executability_report.yaml
+      - reports/execution/reviews/phase_0_preflight_review.yaml
+  1:
+    status: complete
+    artifacts:
+      - reports/execution/bootstrap_summary.yaml
+      - colony_memory/lessons.yaml
+  2:
+    status: complete
+    artifacts:
+      - reports/expert/expert_index.yaml
+      - reports/execution/scout_consensus_summary.md
+  3:
+    status: complete
+    artifacts:
+      - reports/fusion/fusion_report.md
+      - reports/fusion/priorities_p0_p1_p2.yaml
+      - reports/execution/reviews/phase_3_fusion_review.yaml
+  4:
+    status: complete
+    artifacts:
+      - cards/CARD-001.md
+      - cards/CARD-002.md
+      - reports/execution/card_build_report.yaml
+  5:
+    status: complete
+    artifacts:
+      - reports/quality/card_quality_audit.yaml
+      - reports/execution/reviews/phase_5_quality_95_review.yaml
+  6:
+    status: complete
+    artifacts:
+      - ssot/SSOT_KANBAN.yaml
+  7:
+    status: complete
+    artifacts:
+      - reports/execution/implementation_readiness.yaml
+  8:
+    status: complete
+    artifacts:
+      - reports/execution/implementation_report.yaml
+      - reports/execution/reviews/phase_8_implementation_review.yaml
+  9:
+    status: complete
+    artifacts:
+      - reports/execution/final_terminal_report.ru.md
+      - reports/execution/pr_checkpoint.md
+      - reports/execution/reviews/phase_9_final_readiness_review.yaml
+  10:
+    status: complete
+    artifacts:
+      - reports/simplification/simplification_report.md
+      - reports/simplification/noop.yaml
+      - reports/simplification/downstream_refresh.yaml
+  11:
+    status: complete
+    artifacts:
+      - reports/publish/swarm_master_landing.ru.html
+      - reports/publish/landing_manifest.yaml
+      - reports/publish/publish_targets.paths.txt
+  12:
+    status: complete
+    artifacts:
+      - reports/publish/publish_me_results.jsonl
+      - reports/publish/published_links.yaml
+      - reports/publish/publish_diagnostics.yaml
+  13:
+    status: complete
+    artifacts:
+      - reports/delivery/telegram_message.ru.md
+      - reports/delivery/t2me_transcript.txt
+      - reports/delivery/delivery_receipt.yaml

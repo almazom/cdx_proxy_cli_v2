@@ -25,7 +25,7 @@ phase_plan:
   - { phase: 10, name: "Simplification Tail", status: "COMPLETE" }
   - { phase: 11, name: "HTML Assembly Tail", status: "COMPLETE" }
   - { phase: 12, name: "Publish Tail", status: "COMPLETE" }
-  - { phase: 13, name: "Delivery Tail", status: "IN_PROGRESS" }
+  - { phase: 13, name: "Delivery Tail", status: "COMPLETE" }
 expected_terminal_status: "COMPLETE"
 workspace_snapshot:
   tracked_changes: 3

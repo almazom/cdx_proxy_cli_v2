@@ -1,0 +1,8 @@
+status: ok
+target: @almazom
+dry_run_validated: true
+message_id: 6480
+primary_url: http://107.174.231.22:18888/paper/manuscript.html
+parse_status: json
+transcript_path: runs/03_swarm_review_20260308_115903/reports/delivery/t2me_transcript.txt
+skipped_reason: null
