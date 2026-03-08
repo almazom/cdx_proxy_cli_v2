@@ -14,8 +14,8 @@ language_default: "ru"
 phase_plan:
   - { phase: 0, name: "Preflight", status: "COMPLETE" }
   - { phase: 1, name: "Bootstrap", status: "COMPLETE" }
-  - { phase: 2, name: "Scouts x6", status: "IN_PROGRESS" }
-  - { phase: 3, name: "Masticator", status: "PENDING" }
+  - { phase: 2, name: "Scouts x6", status: "COMPLETE" }
+  - { phase: 3, name: "Masticator", status: "IN_PROGRESS" }
   - { phase: 4, name: "Comb Builder", status: "PENDING" }
   - { phase: 5, name: "Nurses", status: "PENDING" }
   - { phase: 6, name: "SSOT Freeze", status: "PENDING" }
