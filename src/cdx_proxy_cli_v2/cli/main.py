@@ -360,6 +360,19 @@ def handle_run_server(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_reset_path(*, name: Optional[str], state: Optional[str]) -> str:
+    params: Dict[str, str] = {}
+    if name:
+        params["name"] = str(name)
+    if state:
+        params["state"] = str(state)
+
+    query = urlencode(params)
+    if not query:
+        return "/reset"
+    return f"/reset?{query}"
+
+
 def handle_reset(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     base_url = _healthy_base_url_or_none(settings)
@@ -367,20 +380,11 @@ def handle_reset(args: argparse.Namespace) -> int:
         return 1
 
     headers = _management_headers(settings)
-    
-    # Build query params
-    params: Dict[str, str] = {}
-    name = getattr(args, "name", None)
-    state = getattr(args, "state", None)
-    if name:
-        params["name"] = str(name)
-    if state:
-        params["state"] = str(state)
+    path = _build_reset_path(
+        name=getattr(args, "name", None),
+        state=getattr(args, "state", None),
+    )
 
-    path = "/reset"
-    if params:
-        path += "?" + urlencode(params)
-    
     try:
         result = fetch_json(
             base_url=base_url,
