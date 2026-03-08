@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_115903"
+phase: 4
+timestamp: "2026-03-08T12:30:00+03:00"
+status: COMPLETE
+cards_built:
+  - CARD-001
+  - CARD-002
+notes:
+  - "Cards use actual repo evidence and concrete verification commands"
+  - "Deferred findings were recorded separately in fusion/rejection_log.yaml"

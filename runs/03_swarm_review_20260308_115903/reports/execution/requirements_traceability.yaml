@@ -1,0 +1,26 @@
+run_id: "03_swarm_review_20260308_115903"
+traceability:
+  CARD-001:
+    requirements:
+      - package exposes only the `cdx` entrypoint
+      - tracked tests reflect the `cdx`-only contract
+      - docs/runtime/dashboard strings use `cdx`
+      - scratch wrapper/test artifacts are removed from the change set
+    code:
+      - pyproject.toml
+      - README.md
+      - docs/operations/runbook.md
+      - src/cdx_proxy_cli_v2/runtime/service.py
+      - src/cdx_proxy_cli_v2/observability/all_dashboard.py
+      - proxy_debug_report.html
+    tests:
+      - tests/cli/test_main.py
+  CARD-002:
+    requirements:
+      - ChatGPT forced headers replace conflicting values case-insensitively
+      - lowercase duplicates do not survive the forwarded header map
+      - targeted proxy tests lock the behavior
+    code:
+      - src/cdx_proxy_cli_v2/proxy/server.py
+    tests:
+      - tests/proxy/test_server.py

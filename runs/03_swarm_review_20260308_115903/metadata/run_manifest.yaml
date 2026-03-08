@@ -16,8 +16,8 @@ phase_plan:
   - { phase: 1, name: "Bootstrap", status: "COMPLETE" }
   - { phase: 2, name: "Scouts x6", status: "COMPLETE" }
   - { phase: 3, name: "Masticator", status: "COMPLETE" }
-  - { phase: 4, name: "Comb Builder", status: "IN_PROGRESS" }
-  - { phase: 5, name: "Nurses", status: "PENDING" }
+  - { phase: 4, name: "Comb Builder", status: "COMPLETE" }
+  - { phase: 5, name: "Nurses", status: "IN_PROGRESS" }
   - { phase: 6, name: "SSOT Freeze", status: "PENDING" }
   - { phase: 7, name: "Readiness", status: "PENDING" }
   - { phase: 8, name: "Workers", status: "PENDING" }
