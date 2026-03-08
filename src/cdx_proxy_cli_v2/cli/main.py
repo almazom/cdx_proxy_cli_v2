@@ -7,6 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 from rich.console import Console
 from rich.table import Table
@@ -368,17 +369,17 @@ def handle_reset(args: argparse.Namespace) -> int:
     headers = _management_headers(settings)
     
     # Build query params
-    params = []
+    params: Dict[str, str] = {}
     name = getattr(args, "name", None)
     state = getattr(args, "state", None)
     if name:
-        params.append(f"name={name}")
+        params["name"] = str(name)
     if state:
-        params.append(f"state={state}")
-    
+        params["state"] = str(state)
+
     path = "/reset"
     if params:
-        path += "?" + "&".join(params)
+        path += "?" + urlencode(params)
     
     try:
         result = fetch_json(

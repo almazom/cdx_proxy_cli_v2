@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tomllib
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -17,6 +18,7 @@ from cdx_proxy_cli_v2.cli.main import (
     handle_stop,
     _settings_from_args,
     format_shell_exports,
+    main,
 )
 
 
@@ -222,6 +224,32 @@ class TestDoctorResetPreflight:
         assert "Proxy is not healthy/running" in captured.err
         mock_fetch.assert_not_called()
 
+    def test_handle_reset_urlencodes_query_params(self, temp_auth_dir):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            name="foo&state=blacklist.json",
+            state="probation",
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {"reset": 1}
+            result = handle_reset(args)
+
+        assert result == 0
+        assert mock_fetch.call_args.kwargs["path"] == "/reset?name=foo%26state%3Dblacklist.json&state=probation"
+
 
 class TestSettingsFromArgs:
     """Tests for _settings_from_args function."""
@@ -245,8 +273,27 @@ class TestSettingsFromArgs:
         )
         
         settings = _settings_from_args(args)
-        
+
         assert settings.auth_dir == temp_auth_dir  # CLI override
+
+
+class TestCliContracts:
+    """Tests for user-facing CLI contracts."""
+
+    def test_main_returns_user_error_for_invalid_cli_port(self, capsys):
+        result = main(["status", "--port", "70000"])
+
+        captured = capsys.readouterr()
+        assert result == 2
+        assert "port must be between 0 and 65535" in captured.err
+
+    def test_pyproject_registers_cdx_and_cdx2_scripts(self):
+        pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+        scripts = data["project"]["scripts"]
+        assert scripts["cdx"] == "cdx_proxy_cli_v2.cli.main:main"
+        assert scripts["cdx2"] == "cdx_proxy_cli_v2.cli.main:main"
 
 
 class TestFormatShellExports:

@@ -195,6 +195,8 @@ def build_settings(
         env_parser=parse_port,
         min_cli_value=0,
     )
+    if not (0 <= resolved_port <= 65535):
+        raise ValueError("port must be between 0 and 65535")
 
     resolved_upstream = (upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM).strip() or DEFAULT_UPSTREAM
     raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
@@ -264,4 +266,3 @@ def format_shell_exports(values: Dict[str, str]) -> str:
         escaped = re.sub(r"'", "'\"'\"'", value)
         lines.append(f"export {key}='{escaped}'")
     return "\n".join(lines)
-

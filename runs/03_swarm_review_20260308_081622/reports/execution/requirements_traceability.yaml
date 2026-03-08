@@ -1,0 +1,28 @@
+run_id: "03_swarm_review_20260308_081622"
+traceability:
+  CARD-001:
+    requirements:
+      - verify process identity before shutdown/termination
+      - keep management key out of child argv
+    code:
+      - src/cdx_proxy_cli_v2/runtime/service.py
+    tests:
+      - tests/runtime/test_service.py
+  CARD-002:
+    requirements:
+      - package documented cdx2 entrypoint
+      - encode reset query params
+      - validate CLI port range early
+    code:
+      - pyproject.toml
+      - src/cdx_proxy_cli_v2/cli/main.py
+      - src/cdx_proxy_cli_v2/config/settings.py
+    tests:
+      - tests/cli/test_main.py
+  CARD-003:
+    requirements:
+      - reject prefix-confusable symlink escapes
+    code:
+      - src/cdx_proxy_cli_v2/auth/store.py
+    tests:
+      - tests/auth/test_keyring_store.py

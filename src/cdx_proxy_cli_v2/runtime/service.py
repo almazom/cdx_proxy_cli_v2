@@ -189,13 +189,56 @@ def _find_pid_using_port(host: str, port: int) -> Optional[int]:
     return None
 
 
-def _kill_stale_proxy_on_port(host: str, port: int, management_key: str) -> bool:
+def _read_process_cmdline(pid: Optional[int]) -> Optional[str]:
+    if pid is None:
+        return None
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    try:
+        raw = proc_cmdline.read_bytes()
+    except OSError:
+        raw = b""
+    if raw:
+        return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    cmdline = result.stdout.strip()
+    return cmdline or None
+
+
+def _is_expected_proxy_process(pid: Optional[int], auth_dir: str) -> bool:
+    if not _is_pid_running(pid):
+        return False
+    cmdline = _read_process_cmdline(pid)
+    if not cmdline:
+        return False
+    normalized_auth_dir = str(resolve_path(auth_dir))
+    return (
+        "cdx_proxy_cli_v2" in cmdline
+        and "run-server" in cmdline
+        and normalized_auth_dir in cmdline
+    )
+
+
+def _kill_stale_proxy_on_port(host: str, port: int, management_key: str, auth_dir: str) -> bool:
     """
     Attempt to kill a stale proxy process on the given port.
     Returns True if we believe the port is now free.
     """
+    stale_pid = _find_pid_using_port(host, port)
+    if not _is_expected_proxy_process(stale_pid, auth_dir):
+        return False
+
     base_url = f"http://{host}:{port}"
-    
+
     # First try graceful shutdown via management API
     try:
         fetch_json(
@@ -211,15 +254,10 @@ def _kill_stale_proxy_on_port(host: str, port: int, management_key: str) -> bool
             return True
     except Exception:
         pass
-    
-    # Try to find and kill the process
-    stale_pid = _find_pid_using_port(host, port)
-    if stale_pid:
-        _terminate_pid(stale_pid, timeout_seconds=5.0)
-        time.sleep(0.3)
-        return not _is_port_in_use(host, port)
-    
-    return False
+
+    _terminate_pid(stale_pid, timeout_seconds=5.0)
+    time.sleep(0.3)
+    return not _is_port_in_use(host, port)
 
 
 def pick_free_port(host: str) -> int:
@@ -269,8 +307,6 @@ def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.
         str(port),
         "--upstream",
         settings.upstream,
-        "--management-key",
-        management_key,
         "--trace-max",
         str(settings.trace_max),
         "--request-timeout",
@@ -320,7 +356,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
     current_state = _load_state(state_file)
 
     # Check if already running and healthy
-    if _is_pid_running(current_pid):
+    if _is_expected_proxy_process(current_pid, runtime_settings.auth_dir):
         state_base_url = str(current_state.get("base_url") or runtime_settings.base_url)
         debug = probe_debug(state_base_url, key)
         if isinstance(debug, dict) and debug.get("status") == "running":
@@ -335,6 +371,8 @@ def start_service(settings: Settings) -> ServiceStartResult:
             )
         # PID exists but not responding - kill it
         _terminate_pid(current_pid, timeout_seconds=5.0)
+    elif _is_pid_running(current_pid):
+        _remove_file(pid_file)
 
     # Determine port to use
     requested_port = runtime_settings.port
@@ -357,7 +395,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
         # Check if port is in use by a stale process
         if _is_port_in_use(runtime_settings.host, port):
             # Try to kill the stale process
-            if _kill_stale_proxy_on_port(runtime_settings.host, port, key):
+            if _kill_stale_proxy_on_port(runtime_settings.host, port, key, runtime_settings.auth_dir):
                 # Port should be free now, proceed
                 pass
             elif not use_free_port:
@@ -453,6 +491,9 @@ def stop_service(settings: Settings) -> bool:
     state_file = state_path(settings.auth_dir)
     current_pid = _read_pid(pid_file)
     if not _is_pid_running(current_pid):
+        _remove_file(pid_file)
+        return False
+    if not _is_expected_proxy_process(current_pid, settings.auth_dir):
         _remove_file(pid_file)
         return False
 

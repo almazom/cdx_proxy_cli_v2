@@ -7,7 +7,13 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from cdx_proxy_cli_v2.auth.store import load_auth_records, save_auth_record, AuthRecord, KEYRING_AVAILABLE
+from cdx_proxy_cli_v2.auth.store import (
+    load_auth_records,
+    save_auth_record,
+    iter_auth_json_files,
+    AuthRecord,
+    KEYRING_AVAILABLE,
+)
 
 
 @pytest.fixture
@@ -85,6 +91,29 @@ def test_load_auth_records_without_keyring(tmp_path):
     
     assert len(records) == 1
     assert records[0].token == "plain-token"
+
+
+def test_iter_auth_json_files_rejects_prefix_confusable_path(tmp_path):
+    """Test symlink containment rejects /auth2 when root is /auth."""
+    auth_dir = tmp_path / "auth"
+    auth_dir.mkdir()
+    outside_dir = tmp_path / "auth2"
+    outside_dir.mkdir()
+
+    outside_file = outside_dir / "evil.json"
+    outside_file.write_text('{"access_token": "evil"}')
+    (auth_dir / "legit.json").write_text('{"access_token": "legit"}')
+
+    symlink = auth_dir / "link.json"
+    try:
+        symlink.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("symlinks not supported in this environment")
+
+    files = [path.name for path in iter_auth_json_files(str(auth_dir))]
+
+    assert "legit.json" in files
+    assert "link.json" not in files
 
 
 @pytest.mark.skipif(not KEYRING_AVAILABLE, reason="keyring not installed")

@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from cdx_proxy_cli_v2.runtime import service as service_module
 from cdx_proxy_cli_v2.runtime.service import (
     start_service,
     stop_service,
@@ -146,14 +147,41 @@ class TestStartService:
         }
         state_file.write_text(json.dumps(state_data))
         
-        with patch('cdx_proxy_cli_v2.runtime.service.probe_debug') as mock_probe:
-            mock_probe.return_value = {"status": "running", "port": 9999, "host": "127.0.0.1"}
-            
-            from cdx_proxy_cli_v2.config.settings import build_settings
-            settings = build_settings()
-            result = start_service(settings)
+        with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=True):
+            with patch('cdx_proxy_cli_v2.runtime.service.probe_debug') as mock_probe:
+                mock_probe.return_value = {"status": "running", "port": 9999, "host": "127.0.0.1"}
+                
+                from cdx_proxy_cli_v2.config.settings import build_settings
+                settings = build_settings()
+                result = start_service(settings)
         
         assert result.started is False
+
+    def test_start_service_does_not_kill_unverified_pid(self, temp_auth_dir, monkeypatch):
+        """Test start_service does not terminate unrelated reused PID."""
+        monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
+        monkeypatch.setenv("CLIPROXY_HOST", "127.0.0.1")
+        monkeypatch.setenv("CLIPROXY_PORT", "0")
+        monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
+        monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "test-key")
+
+        pid_file = Path(temp_auth_dir) / "rr_proxy_v2.pid"
+        pid_file.write_text("4242")
+
+        with patch('cdx_proxy_cli_v2.runtime.service._is_pid_running') as mock_running:
+            mock_running.side_effect = lambda pid: pid == 4242
+            with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=False):
+                with patch('cdx_proxy_cli_v2.runtime.service._spawn') as mock_spawn:
+                    mock_process = MagicMock()
+                    mock_process.pid = 99999
+                    mock_spawn.return_value = mock_process
+                    with patch('cdx_proxy_cli_v2.runtime.service._wait_for_ready', return_value={"status": "running"}):
+                        with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
+                            from cdx_proxy_cli_v2.config.settings import build_settings
+                            result = start_service(build_settings())
+
+        assert result.started is True
+        mock_terminate.assert_not_called()
 
 
 class TestStopService:
@@ -170,11 +198,12 @@ class TestStopService:
         from cdx_proxy_cli_v2.config.settings import build_settings
         settings = build_settings()
         
-        with patch('cdx_proxy_cli_v2.runtime.service.fetch_json') as mock_fetch:
-            mock_fetch.return_value = {"status": "shutting_down"}
-            with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
-                with patch('cdx_proxy_cli_v2.runtime.service._remove_file'):
-                    result = stop_service(settings)
+        with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=True):
+            with patch('cdx_proxy_cli_v2.runtime.service.fetch_json') as mock_fetch:
+                mock_fetch.return_value = {"status": "shutting_down"}
+                with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
+                    with patch('cdx_proxy_cli_v2.runtime.service._remove_file'):
+                        result = stop_service(settings)
         
         assert result is True
         mock_fetch.assert_called_once()
@@ -187,6 +216,67 @@ class TestStopService:
         settings = build_settings()
         result = stop_service(settings)
         assert result is False
+
+    def test_stop_service_ignores_unverified_pid(self, temp_auth_dir, monkeypatch):
+        """Test stop_service does not terminate unrelated reused PID."""
+        monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
+
+        pid_file = Path(temp_auth_dir) / "rr_proxy_v2.pid"
+        pid_file.write_text("4242")
+
+        from cdx_proxy_cli_v2.config.settings import build_settings
+        settings = build_settings()
+
+        with patch('cdx_proxy_cli_v2.runtime.service._is_pid_running', return_value=True):
+            with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=False):
+                with patch('cdx_proxy_cli_v2.runtime.service.fetch_json') as mock_fetch:
+                    with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
+                        result = stop_service(settings)
+
+        assert result is False
+        mock_fetch.assert_not_called()
+        mock_terminate.assert_not_called()
+
+
+class TestServiceHardening:
+    """Tests for process verification hardening."""
+
+    def test_kill_stale_proxy_on_port_skips_unverified_listener(self):
+        """Test we do not send management key or kill unknown listeners."""
+        with patch('cdx_proxy_cli_v2.runtime.service._find_pid_using_port', return_value=4242):
+            with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=False):
+                with patch('cdx_proxy_cli_v2.runtime.service.fetch_json') as mock_fetch:
+                    with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
+                        result = service_module._kill_stale_proxy_on_port(
+                            "127.0.0.1",
+                            8080,
+                            "secret-key",
+                            "/tmp/auths",
+                        )
+
+        assert result is False
+        mock_fetch.assert_not_called()
+        mock_terminate.assert_not_called()
+
+    def test_spawn_uses_environment_for_management_key(self, temp_auth_dir, monkeypatch):
+        """Test spawned process does not receive secret in argv."""
+        monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
+        monkeypatch.setenv("CLIPROXY_HOST", "127.0.0.1")
+        monkeypatch.setenv("CLIPROXY_PORT", "0")
+        monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
+        monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "env-key")
+
+        from cdx_proxy_cli_v2.config.settings import build_settings
+        settings = build_settings()
+
+        with patch('cdx_proxy_cli_v2.runtime.service.subprocess.Popen') as mock_popen:
+            mock_popen.return_value = MagicMock()
+            service_module._spawn(settings, port=8080, management_key="secret-key")
+
+        argv = mock_popen.call_args.args[0]
+        env = mock_popen.call_args.kwargs["env"]
+        assert "--management-key" not in argv
+        assert env["CLIPROXY_MANAGEMENT_KEY"] == "secret-key"
 
 
 class TestServiceStatus:
