@@ -32,7 +32,7 @@ def iter_auth_json_files(auth_dir: str) -> List[Path]:
         try:
             resolved = entry.resolve()
             # Prevent symlink attacks - ensure file is within auth directory
-            if os.path.commonpath([str(root), str(resolved)]) != str(root):
+            if not resolved.is_relative_to(root):
                 continue
             if resolved.is_file() and resolved.suffix.lower() == ".json":
                 files.append(resolved)
