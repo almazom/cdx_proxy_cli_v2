@@ -1,0 +1,21 @@
+review_type: phase_3_fusion_decision
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:31:39+03:00"
+decision_question: "Does the fusion correctly prioritize the current findings into a safe, implementable card set?"
+reviewers:
+  - agent_id: "019ccbe0-3193-73a3-b4ce-ad1dd622cd26"
+    verdict: PASS
+    confidence_percent: 90
+  - agent_id: "019ccbe0-458b-7fc0-b05c-b3788902aa58"
+    verdict: PASS
+    confidence_percent: 92
+  - agent_id: "019ccbe0-6288-7a70-bfac-4be8a17665ad"
+    verdict: PASS
+    confidence_percent: 94
+consolidated_verdict: PASS
+confidence_percent: 92.0
+quorum_met: true
+phase_transition:
+  from_phase: 3
+  to_phase: 4
+  allowed: true

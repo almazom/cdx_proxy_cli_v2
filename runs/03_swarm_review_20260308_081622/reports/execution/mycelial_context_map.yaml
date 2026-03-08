@@ -1,0 +1,32 @@
+run_id: "03_swarm_review_20260308_081622"
+links:
+  - finding: security.stale_port_cleanup
+    card: CARD-001
+    files:
+      - src/cdx_proxy_cli_v2/runtime/service.py
+      - tests/runtime/test_service.py
+  - finding: security.management_key_argv
+    card: CARD-001
+    files:
+      - src/cdx_proxy_cli_v2/runtime/service.py
+      - tests/runtime/test_service.py
+  - finding: api.command_name_drift
+    card: CARD-002
+    files:
+      - pyproject.toml
+      - tests/cli/test_main.py
+  - finding: api.reset_query_encoding
+    card: CARD-002
+    files:
+      - src/cdx_proxy_cli_v2/cli/main.py
+      - tests/cli/test_main.py
+  - finding: api.cli_port_validation
+    card: CARD-002
+    files:
+      - src/cdx_proxy_cli_v2/config/settings.py
+      - tests/cli/test_main.py
+  - finding: security.auth_path_containment
+    card: CARD-003
+    files:
+      - src/cdx_proxy_cli_v2/auth/store.py
+      - tests/auth/test_keyring_store.py

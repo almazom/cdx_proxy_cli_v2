@@ -1,0 +1,25 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:29:30+03:00"
+priorities:
+  P0:
+    - card_id: CARD-001
+      title: Harden service lifecycle ownership and secret handling
+      findings:
+        - security.stale_port_cleanup
+        - security.management_key_argv
+        - testability.lifecycle_branch_coverage
+  P1:
+    - card_id: CARD-002
+      title: Align CLI command and request contracts
+      findings:
+        - api.command_name_drift
+        - api.reset_query_encoding
+        - api.cli_port_validation
+    - card_id: CARD-003
+      title: Tighten auth symlink containment
+      findings:
+        - security.auth_path_containment
+  P2:
+    - deferred: performance.connection_pooling
+    - deferred: performance.sync_event_logging
+    - deferred: maintainability.proxy_runtime_drift
