@@ -32,3 +32,9 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated run artifacts
+runs/*/reports/execution/*.html
+runs/*/reports/execution/*_publish.json
+runs/*/reports/execution/*.publish*.json
+runs/*/reports/execution/simplification_step.md
