@@ -1,0 +1,21 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:30:39+03:00"
+cards:
+  CARD-001:
+    score: 15
+    confidence_percent: 97
+    status: PASS
+  CARD-002:
+    score: 15
+    confidence_percent: 97
+    status: PASS
+  CARD-003:
+    score: 15
+    confidence_percent: 96
+    status: PASS
+summary:
+  min_required_score: 13
+  min_required_confidence: 95
+  pass: true
+  average_score: 15
+  average_confidence_percent: 96.7
