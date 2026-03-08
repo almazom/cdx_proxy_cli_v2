@@ -1,0 +1,11 @@
+gate: flow_version_lock
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:17:39+03:00"
+status: PASS
+flow:
+  version: "v6.0.1"
+  start_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v6.0.1/START.md"
+  expectations_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v6.0.1/EXPECTATIONS.md"
+  agents_index_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v6.0.1/agents/INDEX.md"
+  template_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v6.0.1/templates/trello_cards/MASTER_TEMPLATE.md"
+phase_span: "0->9"

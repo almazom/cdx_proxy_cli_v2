@@ -1,0 +1,17 @@
+gate: project_scope_manifest
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:17:39+03:00"
+status: PASS
+scope:
+  source_roots:
+    - src/cdx_proxy_cli_v2
+    - tests
+    - README.md
+    - pyproject.toml
+  excluded:
+    - node_modules
+    - dist
+    - build
+  existing_prior_runs:
+    - runs/03_swarm_review_20260221_125112
+    - runs/03_swarm_review_20260221_162554

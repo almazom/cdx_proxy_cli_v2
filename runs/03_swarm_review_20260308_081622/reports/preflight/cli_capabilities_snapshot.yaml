@@ -1,0 +1,15 @@
+gate: cli_capabilities_snapshot
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:17:39+03:00"
+status: PASS
+binaries:
+  kimi: "/home/pets/.local/bin/kimi"
+  qwen: "/home/pets/.npm-global/bin/qwen"
+  codex: "/home/pets/.npm-global/bin/codex"
+  gemini: "/home/pets/.npm-global/bin/gemini"
+  pi: "/home/pets/.npm-global/bin/pi"
+  claude: "/home/pets/.npm-global/bin/claude"
+agent_runtime:
+  primary_orchestrator: "codex_cli"
+  parallel_scout_strategy: "spawn_agent explorers"
+  gate_review_strategy: "spawn_agent explorers"

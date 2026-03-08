@@ -1,0 +1,12 @@
+gate: worktree_context
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:17:39+03:00"
+status: PASS
+git:
+  branch: "master"
+  head: "e117211ad3335418629f64bc705158e82a82614e"
+  status_after_checkpoint: "clean except new run artifacts in progress"
+checkpoint_commit: "e117211"
+notes:
+  - "Checkpoint commit created before flow start"
+  - "Subsequent commits belong to this run"

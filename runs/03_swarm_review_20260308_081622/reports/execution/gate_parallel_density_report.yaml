@@ -1,0 +1,7 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:17:39+03:00"
+phase_0:
+  required_min_agents: 3
+  planned_gate_reviewers: 3
+  planned_scouts: 6
+  honest_parallel_claim: true
