@@ -1,0 +1,64 @@
+# CLI Capabilities Snapshot
+# Mutation_001 requirement - captured before first gate
+
+snapshot_timestamp: "2026-02-21T16:25:54+03:00"
+run_id: "03_swarm_review_20260221_162554"
+
+cli_availability:
+  kimi:
+    available: true
+    version_hint: "Kimi CLI agent"
+    command: "kimi"
+    supports_non_interactive: true
+    tested_at: "2026-02-21T16:26:00+03:00"
+  
+  pi:
+    available: true
+    version_hint: "pi - AI coding assistant"
+    command: "pi"
+    supports_non_interactive: true
+    tested_at: "2026-02-21T16:26:00+03:00"
+  
+  codex:
+    available: true
+    version_hint: "Codex CLI"
+    command: "codex"
+    supports_non_interactive: true
+    tested_at: "2026-02-21T16:26:00+03:00"
+  
+  qwen:
+    available: true
+    version_hint: "Qwen Code"
+    command: "qwen"
+    supports_non_interactive: true
+    tested_at: "2026-02-21T16:26:00+03:00"
+  
+  gemini:
+    available: true
+    version_hint: "Gemini CLI"
+    command: "gemini"
+    supports_non_interactive: true
+    tested_at: "2026-02-21T16:26:00+03:00"
+
+parallel_spawn_capability:
+  min_distinct_producers: 5
+  available_count: 5
+  baseline_set_satisfied: true
+  notes: "All baseline agents (Kimi, Qwen, Codex, Pi, Gemini) are available for control gates"
+
+lane_readiness:
+  - lane: kimi
+    status: ready
+    last_check: "2026-02-21T16:26:00+03:00"
+  - lane: pi
+    status: ready
+    last_check: "2026-02-21T16:26:00+03:00"
+  - lane: codex
+    status: ready
+    last_check: "2026-02-21T16:26:00+03:00"
+  - lane: qwen
+    status: ready
+    last_check: "2026-02-21T16:26:00+03:00"
+  - lane: gemini
+    status: ready
+    last_check: "2026-02-21T16:26:00+03:00"

@@ -1,0 +1,9 @@
+---
+status: pass
+detected_flow_version: "4.0.18"
+detected_start_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v4.0.18/START.md"
+resolved_protocol_root: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v4.0.18/protocols"
+mixed_version_references: []
+required_protocol_files_present: true
+failure_reason: null
+generated_at: "2026-02-21T10:45:01+03:00"

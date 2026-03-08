@@ -1,0 +1,79 @@
+# Regression Swarm Suite
+# Phase 9 - Fixed replay suite of known degradation scenarios
+
+suite_type: regression_swarm
+run_id: "03_swarm_review_20260221_162554"
+phase: 9
+timestamp: "2026-02-21T16:34:00+03:00"
+
+## Required Scenarios
+
+required_scenarios:
+  - scenario_id: "RS-001"
+    name: "non_stop_break"
+    description: "Flow stops before terminal phase without integrity escalation"
+    status: PASS
+    evidence:
+      - "All phases 0-9 executed"
+      - "No early termination"
+      - "Terminal status: ANALYSIS_READY"
+      
+  - scenario_id: "RS-002"
+    name: "silent_skip"
+    description: "Critical expected steps are skipped silently"
+    status: PASS
+    evidence:
+      - "Phase 0: 3 gates passed"
+      - "Phase 2: 6 expert reports generated"
+      - "Phase 3: Fusion with P0/P1/P2"
+      - "Phase 4: 26 cards designed"
+      - "Phase 5: Quality 96% >= 95%"
+      - "Phase 6: SSOT frozen"
+      - "Phase 9: Final verification"
+      
+  - scenario_id: "RS-003"
+    name: "fabricated_parallel_claim"
+    description: "Claiming parallel execution without distinct producers"
+    status: PASS
+    evidence:
+      - "topology_mode: strategy_variations"
+      - "distinct_producers: 1"
+      - "parallel_claim: false"
+      - "quorum_claim: false"
+      - "Exception registered in gate_parallel_density_report"
+      
+  - scenario_id: "RS-004"
+    name: "quorum_not_met_transition"
+    description: "Phase transition without quorum achievement"
+    status: PASS
+    evidence:
+      - "Phase 0: quorum 1.0 (PASS)"
+      - "Phase 3: quorum 0.94 (PASS)"
+      - "Phase 5: quorum 1.0 (PASS)"
+      - "All quorum thresholds met"
+      
+  - scenario_id: "RS-005"
+    name: "expectation_drift"
+    description: "Locked expectations not preserved"
+    status: PASS
+    evidence:
+      - "All 28 mandatory expectations checked"
+      - "expectation_invariant_lock created"
+      - "No expectation modifications"
+
+## Critical Failures
+
+critical_failures_count: 0
+
+## Pass Summary
+
+summary:
+  scenarios_run: 5
+  scenarios_passed: 5
+  scenarios_failed: 0
+  critical_failures: 0
+  
+pass_rule:
+  critical_failures_count_eq_0: true
+  
+verdict: PASS

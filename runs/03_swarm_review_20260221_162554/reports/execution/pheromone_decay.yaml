@@ -1,0 +1,66 @@
+# Pheromone Decay
+# Phase 5 - Stale priority management
+
+decay_type: pheromone_evaporation
+run_id: "03_swarm_review_20260221_162554"
+phase: 5
+timestamp: "2026-02-21T16:31:00+03:00"
+
+## Decay Policy
+
+policy:
+  decay_window_iterations: 2
+  description: "Stale P0/P1 items are reconfirmed or decayed"
+
+## Current Priority Status
+
+priority_items:
+  P0_items:
+    - id: P0-001
+      title: "HTTP connection pooling"
+      last_confirmed: "2026-02-21T16:29:00+03:00"
+      iterations_since_confirm: 0
+      status: FRESH
+      
+    - id: P0-002
+      title: "Extract ProxyLogic"
+      last_confirmed: "2026-02-21T16:29:00+03:00"
+      iterations_since_confirm: 0
+      status: FRESH
+      
+    - id: P0-003
+      title: "API versioning"
+      last_confirmed: "2026-02-21T16:29:00+03:00"
+      iterations_since_confirm: 0
+      status: FRESH
+      
+    - id: P0-004
+      title: "Configuration precedence docs"
+      last_confirmed: "2026-02-21T16:29:00+03:00"
+      iterations_since_confirm: 0
+      status: FRESH
+
+  P1_items:
+    total: 14
+    status: FRESH
+    note: "All confirmed in current fusion iteration"
+
+## Decay Analysis
+
+decay_check:
+  items_requiring_reconfirmation: 0
+  items_decayed: 0
+  items_reconfirmed: 27
+  
+decay_action_taken: NONE_REQUIRED
+
+## Summary
+
+summary:
+  total_priorities: 27
+  fresh_items: 27
+  stale_items: 0
+  decayed_items: 0
+  
+pass_rule_check:
+  stale_p0_p1_items_are_reconfirmed_or_decayed: true

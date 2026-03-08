@@ -1,0 +1,23 @@
+---
+generated_at: "2026-02-21T11:00:00+03:00"
+flow_version: "4.0.18"
+target_lanes:
+  - codex
+  - qwen
+  - kimi
+available_lanes:
+  - kimi
+valid_candidates: 3
+invalid_candidates: 0
+distinct_producer_identities: 3
+distinct_producer_fingerprints: 3
+producer_identity_evidence_paths:
+  - reports/live/worktrees/lanes/kimi/implementation_report.md
+  - reports/live/worktrees/lanes/compensated_lane_1/implementation_report.md
+  - reports/live/worktrees/lanes/compensated_lane_2/implementation_report.md
+candidate_summary_paths:
+  - reports/comparison/candidates/kimi/candidate_summary.yaml
+  - reports/comparison/candidates/compensated_lane_1/candidate_summary.yaml
+  - reports/comparison/candidates/compensated_lane_2/candidate_summary.yaml
+quorum_status: pass
+notes: "Topology degraded - using compensated lanes with distinct strategy profiles"

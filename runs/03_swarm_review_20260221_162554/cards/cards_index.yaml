@@ -1,0 +1,248 @@
+# Cards Index
+# Phase 4 - Trello-ready card decomposition
+
+run_id: "03_swarm_review_20260221_162554"
+phase: 4
+timestamp: "2026-02-21T16:30:00+03:00"
+
+## Sprint 1 — P0 Critical (10 hours)
+
+cards:
+  - id: CARD-001
+    title: "Implement HTTP connection pooling"
+    priority: P0
+    complexity_hours: 3
+    file: "cards/CARD-001.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-002
+    title: "Extract ProxyLogic class for testability"
+    priority: P0
+    complexity_hours: 4
+    file: "cards/CARD-002.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-003
+    title: "Add API versioning (/v1/ prefix)"
+    priority: P0
+    complexity_hours: 2
+    file: "cards/CARD-003.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-004
+    title: "Document configuration precedence"
+    priority: P0
+    complexity_hours: 1
+    file: "cards/CARD-004.md"
+    blocked_by: []
+    status: draft
+
+## Sprint 2 — P1 Important (14 hours)
+
+  - id: CARD-005
+    title: "Make request body size configurable"
+    priority: P1
+    complexity_hours: 1
+    file: "cards/CARD-005.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-006
+    title: "Add auth record caching with TTL"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-006.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-007
+    title: "Split CLI handlers - Part 1: Extract proxy handlers"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-007.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-008
+    title: "Split CLI handlers - Part 2: Extract other handlers"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-008.md"
+    blocked_by: [CARD-007]
+    status: draft
+    
+  - id: CARD-009
+    title: "Add rate limiting for management endpoints"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-009.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-010
+    title: "Generate OpenAPI specification"
+    priority: P1
+    complexity_hours: 3
+    file: "cards/CARD-010.md"
+    blocked_by: [CARD-003]
+    status: draft
+    
+  - id: CARD-011
+    title: "Add read-write lock for auth pool"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-011.md"
+    blocked_by: []
+    status: draft
+
+## Sprint 3 — P1 Continued (13.5 hours)
+
+  - id: CARD-012
+    title: "Use tmp_path for file-based tests"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-012.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-013
+    title: "Extract signal logic into injectable component"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-013.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-014
+    title: "Enhance error responses with codes"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-014.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-015
+    title: "Add FileSystem protocol for file operations"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-015.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-016
+    title: "Add backpressure for streaming responses"
+    priority: P1
+    complexity_hours: 3
+    file: "cards/CARD-016.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-017
+    title: "Document magic numbers and compact timeout"
+    priority: P1
+    complexity_hours: 1.5
+    file: "cards/CARD-017.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-018
+    title: "Add pagination to /trace endpoint"
+    priority: P1
+    complexity_hours: 2
+    file: "cards/CARD-018.md"
+    blocked_by: []
+    status: draft
+
+## Sprint 4 — P2 Nice-to-have (13 hours)
+
+  - id: CARD-019
+    title: "Add auth state diagram to docs"
+    priority: P2
+    complexity_hours: 1
+    file: "cards/CARD-019.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-020
+    title: "Add test coverage requirement (80%)"
+    priority: P2
+    complexity_hours: 1
+    file: "cards/CARD-020.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-021
+    title: "Refactor ProxyHandler - Part 1: Extract ManagementHandler"
+    priority: P2
+    complexity_hours: 2
+    file: "cards/CARD-021.md"
+    blocked_by: [CARD-002]
+    status: draft
+    
+  - id: CARD-022
+    title: "Refactor ProxyHandler - Part 2: Extract StreamHandler"
+    priority: P2
+    complexity_hours: 2
+    file: "cards/CARD-022.md"
+    blocked_by: [CARD-021]
+    status: draft
+    
+  - id: CARD-023
+    title: "Add latency benchmark"
+    priority: P2
+    complexity_hours: 2
+    file: "cards/CARD-023.md"
+    blocked_by: [CARD-001]
+    status: draft
+    
+  - id: CARD-024
+    title: "Add throughput benchmark"
+    priority: P2
+    complexity_hours: 2
+    file: "cards/CARD-024.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-025
+    title: "Document security model in README"
+    priority: P2
+    complexity_hours: 1
+    file: "cards/CARD-025.md"
+    blocked_by: []
+    status: draft
+    
+  - id: CARD-026
+    title: "Add memory baseline test"
+    priority: P2
+    complexity_hours: 2
+    file: "cards/CARD-026.md"
+    blocked_by: []
+    status: draft
+
+## Summary
+
+statistics:
+  total_cards: 26
+  p0_cards: 4
+  p1_cards: 14
+  p2_cards: 8
+  total_hours: 50.5
+  max_card_hours: 4
+  min_card_hours: 1
+  
+complexity_compliance:
+  all_cards_within_1_to_4_hours: true
+  cards_requiring_split: 0
+
+dependency_chains:
+  - chain: [CARD-007, CARD-008]
+    type: sequential
+  - chain: [CARD-003, CARD-010]
+    type: sequential
+  - chain: [CARD-002, CARD-021, CARD-022]
+    type: sequential
+  - chain: [CARD-001, CARD-023]
+    type: sequential

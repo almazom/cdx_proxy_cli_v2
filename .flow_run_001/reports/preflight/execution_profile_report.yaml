@@ -1,0 +1,10 @@
+---
+status: pass
+active_profile: "release_candidate"
+profile_source: "RUN_PROFILE_env"
+non_release_acknowledgement_present: false
+profile_auto_downgraded: false
+downgrade_reason: null
+downgrade_attestation_path: null
+failure_reason: null
+generated_at: "2026-02-21T10:45:01+03:00"

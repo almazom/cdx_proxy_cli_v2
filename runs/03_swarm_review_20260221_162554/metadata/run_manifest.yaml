@@ -1,0 +1,94 @@
+# Run Manifest
+# Phase 1 - Run bootstrap and metadata
+
+manifest_type: run_bootstrap
+run_id: "03_swarm_review_20260221_162554"
+timestamp: "2026-02-21T16:26:00+03:00"
+flow_version: "v5.0.2.fork"
+flow_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork"
+
+project:
+  name: "cdx_proxy_cli_v2"
+  path: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  type: "python_cli_package"
+
+execution_mode: "analysis_only"
+language_default: "ru"
+
+phase_plan:
+  - phase: 0
+    name: "Preflight"
+    status: COMPLETE
+  - phase: 1
+    name: "Run Bootstrap"
+    status: IN_PROGRESS
+  - phase: 2
+    name: "Expert Analysis"
+    status: PENDING
+  - phase: 3
+    name: "Fusion"
+    status: PENDING
+  - phase: 4
+    name: "Card Design"
+    status: PENDING
+  - phase: 5
+    name: "Quality Loop"
+    status: PENDING
+  - phase: 6
+    name: "SSOT Freeze"
+    status: PENDING
+  - phase: 7
+    name: "Implementation Readiness"
+    status: PENDING
+  - phase: 8
+    name: "Implementation"
+    status: PENDING
+  - phase: 9
+    name: "Final Verification"
+    status: PENDING
+
+expected_terminal_status: "ANALYSIS_READY"
+
+artifacts_created:
+  phase_0:
+    - "reports/preflight/environment_gate_report.yaml"
+    - "reports/preflight/flow_version_lock_report.yaml"
+    - "reports/preflight/mode_and_executability_report.yaml"
+    - "reports/preflight/cli_capabilities_snapshot.yaml"
+    - "reports/preflight/worktree_context_report.yaml"
+    - "reports/preflight/project_scope_manifest.yaml"
+    - "reports/execution/expectation_invariant_lock.yaml"
+    - "reports/execution/gate_input_materialization.yaml"
+    - "reports/execution/reviews/phase_0_preflight_review.yaml"
+    - "reports/execution/gate_spawn_selection_trace.yaml"
+    - "reports/execution/gate_parallel_density_report.yaml"
+
+mandatory_expectations_locked:
+  - E01_run_isolation
+  - E02_six_expert_parallel_analysis
+  - E03_fusion_priorities
+  - E04_card_complexity_limit
+  - E05_card_quality_95
+  - E06_ssot_kanban
+  - E07_non_stop
+  - E08_multi_engine_support
+  - E09_honest_topology
+  - E10_gitflow_traceability
+  - E11_final_russian_report
+  - E12_no_fabricated_evidence
+  - E13_decision_gate_parallel_review
+  - E14_control_gate_parallel_density
+  - E15_stigmergy_signal_coordination
+  - E16_quorum_sensing_gate
+  - E17_mycelial_context_transport
+  - E18_dynamic_role_differentiation
+  - E19_evolution_mutation_record
+  - E20_pheromone_evaporation
+  - E21_waggle_recruitment_burst
+  - E22_agent_fitness_allocation
+  - E23_stop_signal_safety
+  - E24_graveyard_quarantine
+  - E25_bridge_card_deadlock_relief
+  - E26_queen_invariant_lock
+  - E27_regression_swarm_suite
+  - E28_lane_runtime_stabilization

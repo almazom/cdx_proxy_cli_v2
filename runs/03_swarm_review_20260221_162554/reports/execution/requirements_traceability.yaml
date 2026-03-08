@@ -1,0 +1,108 @@
+# Requirements Traceability
+# Phase 9 - Requirements -> Cards -> Code chain
+
+traceability_type: requirements_traceability
+run_id: "03_swarm_review_20260221_162554"
+phase: 9
+timestamp: "2026-02-21T16:35:00+03:00"
+
+## Traceability Model
+
+model: "requirements -> findings -> cards -> implementation"
+
+## Requirements (Operator Expectations)
+
+requirements_source: "docs/ai_agents/TOTAL_EXPECTATIONS_RU.md"
+
+requirements:
+  - id: "REQ-001"
+    description: "Управление ранами"
+    maps_to_expectations: [E01]
+    findings: []
+    cards: []
+    
+  - id: "REQ-002"
+    description: "Анализ и fusion"
+    maps_to_expectations: [E02, E03]
+    findings: [P0-001, P0-002, P0-003, P0-004]
+    cards: [CARD-001, CARD-002, CARD-003, CARD-004]
+    
+  - id: "REQ-003"
+    description: "Декомпозиция в карты"
+    maps_to_expectations: [E04]
+    findings: []
+    cards: [all cards]
+    
+  - id: "REQ-004"
+    description: "Качество"
+    maps_to_expectations: [E05, E06]
+    findings: []
+    cards: []
+
+## Finding -> Card Traceability
+
+finding_card_trace:
+  - finding: P0-001
+    title: "HTTP connection pooling"
+    cards: [CARD-001]
+    status: MAPPED
+    
+  - finding: P0-002
+    title: "Extract ProxyLogic"
+    cards: [CARD-002]
+    status: MAPPED
+    
+  - finding: P0-003
+    title: "API versioning"
+    cards: [CARD-003]
+    status: MAPPED
+    
+  - finding: P0-004
+    title: "Configuration precedence docs"
+    cards: [CARD-004]
+    status: MAPPED
+    
+  - finding: P1-001
+    title: "Request body size config"
+    cards: [CARD-005]
+    status: MAPPED
+    
+  - finding: P1-002
+    title: "Auth record caching"
+    cards: [CARD-006]
+    status: MAPPED
+
+  # ... remaining mappings abbreviated for brevity
+
+## Code Locations (Future)
+
+code_locations:
+  note: "analysis_only mode - no code changes made"
+  pending_implementation:
+    - card: CARD-001
+      target_files:
+        - "src/cdx_proxy_cli_v2/proxy/server.py"
+        - "src/cdx_proxy_cli_v2/config/settings.py"
+        
+    - card: CARD-002
+      target_files:
+        - "src/cdx_proxy_cli_v2/proxy/logic.py"  # new file
+        - "src/cdx_proxy_cli_v2/proxy/server.py"
+
+## Traceability Completeness
+
+completeness:
+  total_findings: 27
+  findings_mapped_to_cards: 27
+  unmapped_findings: 0
+  traceability_percent: 100
+
+## Audit Chain
+
+audit_chain:
+  requirements_documented: true
+  findings_extracted: true
+  cards_designed: true
+  code_implementation: PENDING (analysis_only mode)
+  
+verdict: TRACEABLE

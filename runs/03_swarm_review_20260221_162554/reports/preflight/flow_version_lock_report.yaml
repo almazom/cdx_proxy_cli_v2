@@ -1,0 +1,60 @@
+# Flow Version Lock Gate Report
+# Phase 0 - Preflight Gate 2
+
+gate_id: flow_version_lock_gate
+phase: 0
+status: PASS
+timestamp: "2026-02-21T16:26:00+03:00"
+
+checks:
+  - id: active_start_file_version
+    description: "Validate active START file is v5.0.2.fork"
+    status: PASS
+    expected: "v5.0.2.fork"
+    actual: "v5.0.2.fork"
+    file: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/START.md"
+    
+  - id: protocols_directory
+    description: "Validate protocols are loaded from v5.0.2.fork"
+    status: PASS
+    protocols_path: "/home/pets/.Flows_Lifecycle_Stand/flows/03_swarm_review/v5.0.2.fork/docs/ai_agents/protocols"
+    protocols_found:
+      - "EVOLUTION_REGRESSION_GUARD.md"
+      - "NON_STOP_CONTINUITY_GUARD.md"
+      - "STEP_COVERAGE_GUARD.md"
+      - "MODE_AND_EXECUTABILITY_GUARD.md"
+      - "EVIDENCE_INTEGRITY_GUARD.md"
+      - "CARD_QUALITY_95_GUARD.md"
+      - "DECISION_GATE_PARALLEL_REVIEW_GUARD.md"
+      - "STIGMERGY_COORDINATION_GUARD.md"
+      - "QUORUM_SENSING_GUARD.md"
+      - "MYCELIAL_CONTEXT_TRANSPORT_GUARD.md"
+      - "PHEROMONE_EVAPORATION_GUARD.md"
+      - "WAGGLE_RECRUITMENT_BURST_GUARD.md"
+      - "AGENT_FITNESS_ALLOCATION_GUARD.md"
+      - "STOP_SIGNAL_GUARD.md"
+      - "GRAVEYARD_QUARANTINE_GUARD.md"
+      - "BRIDGE_CARD_FORMATION_GUARD.md"
+      - "QUEEN_INVARIANT_GUARD.md"
+      - "REGRESSION_SWARM_SUITE_GUARD.md"
+      - "LANE_RUNTIME_STABILIZATION_GUARD.md"
+    total_protocols: 19
+
+  - id: mandatory_phase_span
+    description: "Validate mandatory phase span 0->9"
+    status: PASS
+    expected: "0->9"
+    actual: "0->9"
+
+  - id: md_only_constraint
+    description: "Validate MD-only executability structure"
+    status: PASS
+    note: "All phase sections contain Intent, Inputs, Commands, Expected Artifacts, Pass/Fail subsections"
+
+summary:
+  total_checks: 4
+  passed: 4
+  failed: 0
+  pass_rate_percent: 100
+
+verdict: PASS

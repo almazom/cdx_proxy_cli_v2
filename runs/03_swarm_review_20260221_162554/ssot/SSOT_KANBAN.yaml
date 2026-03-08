@@ -1,0 +1,187 @@
+# SSOT KANBAN
+# Phase 6 - Single source of truth for card status
+
+kanban_type: ssot
+run_id: "03_swarm_review_20260221_162554"
+phase: 6
+timestamp: "2026-02-21T16:32:00+03:00"
+
+## Project Information
+
+project:
+  name: "cdx_proxy_cli_v2"
+  flow_version: "v5.0.2.fork"
+  run_mode: "analysis_only"
+
+## Lanes
+
+lanes:
+  - name: "backlog"
+    description: "Cards not yet started"
+    cards:
+      - CARD-001
+      - CARD-002
+      - CARD-003
+      - CARD-004
+      - CARD-005
+      - CARD-006
+      - CARD-007
+      - CARD-008
+      - CARD-009
+      - CARD-010
+      - CARD-011
+      - CARD-012
+      - CARD-013
+      - CARD-014
+      - CARD-015
+      - CARD-016
+      - CARD-017
+      - CARD-018
+      - CARD-019
+      - CARD-020
+      - CARD-021
+      - CARD-022
+      - CARD-023
+      - CARD-024
+      - CARD-025
+      - CARD-026
+      
+  - name: "in_progress"
+    description: "Currently being worked on"
+    cards: []
+    
+  - name: "blocked"
+    description: "Waiting on dependencies"
+    cards: []
+    
+  - name: "review"
+    description: "Ready for code review"
+    cards: []
+    
+  - name: "done"
+    description: "Completed and verified"
+    cards: []
+
+## Card Details
+
+cards:
+  CARD-001:
+    title: "Implement HTTP connection pooling"
+    priority: P0
+    complexity_hours: 3
+    status: backlog
+    blocked_by: []
+    
+  CARD-002:
+    title: "Extract ProxyLogic class for testability"
+    priority: P0
+    complexity_hours: 4
+    status: backlog
+    blocked_by: []
+    
+  CARD-003:
+    title: "Add API versioning (/v1/ prefix)"
+    priority: P0
+    complexity_hours: 2
+    status: backlog
+    blocked_by: []
+    
+  CARD-004:
+    title: "Document configuration precedence"
+    priority: P0
+    complexity_hours: 1
+    status: backlog
+    blocked_by: []
+    
+  CARD-005:
+    title: "Make request body size configurable"
+    priority: P1
+    complexity_hours: 1
+    status: backlog
+    blocked_by: []
+    
+  CARD-006:
+    title: "Add auth record caching with TTL"
+    priority: P1
+    complexity_hours: 2
+    status: backlog
+    blocked_by: []
+    
+  CARD-007:
+    title: "Split CLI handlers - Part 1"
+    priority: P1
+    complexity_hours: 2
+    status: backlog
+    blocked_by: []
+    
+  CARD-008:
+    title: "Split CLI handlers - Part 2"
+    priority: P1
+    complexity_hours: 2
+    status: backlog
+    blocked_by: [CARD-007]
+    
+  CARD-009:
+    title: "Add rate limiting for management endpoints"
+    priority: P1
+    complexity_hours: 2
+    status: backlog
+    blocked_by: []
+    
+  CARD-010:
+    title: "Generate OpenAPI specification"
+    priority: P1
+    complexity_hours: 3
+    status: backlog
+    blocked_by: [CARD-003]
+    
+  CARD-011:
+    title: "Add read-write lock for auth pool"
+    priority: P1
+    complexity_hours: 2
+    status: backlog
+    blocked_by: []
+
+## Statistics
+
+statistics:
+  total_cards: 26
+  backlog: 26
+  in_progress: 0
+  blocked: 0
+  review: 0
+  done: 0
+  
+  total_hours: 50.5
+  p0_hours: 10
+  p1_hours: 27.5
+  p2_hours: 13
+
+## Dependency Graph
+
+dependencies:
+  - from: CARD-008
+    to: CARD-007
+    type: sequential
+    
+  - from: CARD-010
+    to: CARD-003
+    type: sequential
+    
+  - from: CARD-021
+    to: CARD-002
+    type: sequential
+    
+  - from: CARD-022
+    to: CARD-021
+    type: sequential
+    
+  - from: CARD-023
+    to: CARD-001
+    type: sequential
+
+## Freeze Attestation
+
+frozen_at: "2026-02-21T16:32:00+03:00"
+frozen_by: "swarm_review_v5.0.2.fork"
+freeze_reason: "Phase 6 SSOT freeze for analysis_only mode"

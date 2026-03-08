@@ -1,0 +1,243 @@
+# Priorities P0/P1/P2
+# Phase 3 - Fusion prioritization
+
+run_id: "03_swarm_review_20260221_162554"
+phase: 3
+timestamp: "2026-02-21T16:29:00+03:00"
+
+## P0 — Critical (4 items)
+
+- id: P0-001
+  title: "Implement HTTP connection pooling"
+  source: "02_performance_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "+50-200ms latency per request without pooling"
+  recommendation: "Use urllib3 PoolManager for connection reuse"
+  estimated_hours: 3
+  blocked_by: []
+  
+- id: P0-002
+  title: "Extract ProxyLogic for testability"
+  source: "05_testability_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Requires full HTTP stack for testing business logic"
+  recommendation: "Extract business logic from ProxyHandler"
+  estimated_hours: 4
+  blocked_by: []
+  
+- id: P0-003
+  title: "Add API versioning (/v1/ prefix)"
+  source: "06_api_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Breaking changes affect all clients"
+  recommendation: "Add /v1/ prefix to management endpoints"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P0-004
+  title: "Document configuration precedence"
+  source: "04_simplicity_report.md"
+  file: "README.md"
+  impact: "Complex precedence rules confuse users"
+  recommendation: "Add clear precedence documentation"
+  estimated_hours: 1
+  blocked_by: []
+
+## P1 — Important (14 items)
+
+- id: P1-001
+  title: "Make request body size configurable"
+  source: "01_security_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "DoS vector for memory-constrained environments"
+  estimated_hours: 1
+  blocked_by: []
+  
+- id: P1-002
+  title: "Add auth record caching with TTL"
+  source: "02_performance_report.md"
+  file: "src/cdx_proxy_cli_v2/auth/store.py"
+  impact: "Repeated file I/O + JSON parsing"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-003
+  title: "Split CLI handlers to separate files"
+  source: "03_maintainability_report.md"
+  file: "src/cdx_proxy_cli_v2/cli/main.py"
+  impact: "380+ lines in single file"
+  estimated_hours: 3
+  blocked_by: []
+  
+- id: P1-004
+  title: "Add rate limiting for management endpoints"
+  source: "01_security_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Brute-force protection missing"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-005
+  title: "Generate OpenAPI specification"
+  source: "06_api_report.md"
+  file: "docs/openapi.yaml"
+  impact: "Hard for clients to discover API"
+  estimated_hours: 3
+  blocked_by: [P0-003]
+  
+- id: P1-006
+  title: "Add read-write lock for auth pool"
+  source: "02_performance_report.md"
+  file: "src/cdx_proxy_cli_v2/auth/rotation.py"
+  impact: "Lock contention at high concurrency"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-007
+  title: "Use tmp_path for file-based tests"
+  source: "05_testability_report.md"
+  file: "tests/**/*.py"
+  impact: "Tests can interfere with each other"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-008
+  title: "Extract signal logic into injectable component"
+  source: "05_testability_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Hard to test signal handling"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-009
+  title: "Enhance error responses with codes"
+  source: "06_api_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "No structured error handling"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-010
+  title: "Add FileSystem protocol for file operations"
+  source: "05_testability_report.md"
+  file: "src/cdx_proxy_cli_v2/auth/store.py"
+  impact: "Requires real files for testing"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P1-011
+  title: "Add backpressure for streaming responses"
+  source: "02_performance_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Memory issues with slow clients"
+  estimated_hours: 3
+  blocked_by: []
+  
+- id: P1-012
+  title: "Document magic number rationale"
+  source: "03_maintainability_report.md"
+  file: "src/cdx_proxy_cli_v2/auth/rotation.py"
+  impact: "Values not clearly tied to requirements"
+  estimated_hours: 1
+  blocked_by: []
+  
+- id: P1-013
+  title: "Add docstring for /compact timeout logic"
+  source: "04_simplicity_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/rules.py"
+  impact: "Why is /compact special?"
+  estimated_hours: 0.5
+  blocked_by: []
+  
+- id: P1-014
+  title: "Add pagination to /trace endpoint"
+  source: "06_api_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  impact: "Can't page through large histories"
+  estimated_hours: 2
+  blocked_by: []
+
+## P2 — Nice-to-have (7 items)
+
+- id: P2-001
+  title: "Add state diagram to docs"
+  source: "04_simplicity_report.md"
+  file: "README.md"
+  estimated_hours: 1
+  blocked_by: []
+  
+- id: P2-002
+  title: "Add test coverage requirement (80%)"
+  source: "03_maintainability_report.md"
+  file: "pyproject.toml"
+  estimated_hours: 1
+  blocked_by: []
+  
+- id: P2-003
+  title: "Refactor ProxyHandler into separate classes"
+  source: "03_maintainability_report.md"
+  file: "src/cdx_proxy_cli_v2/proxy/server.py"
+  estimated_hours: 4
+  blocked_by: [P0-002]
+  
+- id: P2-004
+  title: "Add latency benchmark"
+  source: "02_performance_report.md"
+  file: "tests/benchmarks/"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P2-005
+  title: "Add throughput benchmark"
+  source: "02_performance_report.md"
+  file: "tests/benchmarks/"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P2-006
+  title: "Add memory baseline test"
+  source: "02_performance_report.md"
+  file: "tests/benchmarks/"
+  estimated_hours: 2
+  blocked_by: []
+  
+- id: P2-007
+  title: "Document security model in README"
+  source: "01_security_report.md"
+  file: "README.md"
+  estimated_hours: 1
+  blocked_by: []
+
+## P3 — Low Priority (1 item)
+
+- id: P3-001
+  title: "Make management key length configurable"
+  source: "01_security_report.md"
+  file: "src/cdx_proxy_cli_v2/config/settings.py"
+  estimated_hours: 0.5
+  blocked_by: []
+
+## Backlog (Low priority, not scheduled)
+
+- id: BACKLOG-001
+  title: "Add async I/O support"
+  source: "Future consideration"
+  estimated_hours: 40
+  note: "Threading is currently sufficient"
+
+## Summary
+
+priority_counts:
+  P0: 4
+  P1: 14
+  P2: 7
+  P3: 1
+  BACKLOG: 1
+  total: 27
+
+total_estimated_hours:
+  P0: 10
+  P1: 27.5
+  P2: 13
+  P3: 0.5
+  total: 51

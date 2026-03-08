@@ -1,0 +1,10 @@
+---
+run_id: "001"
+flow_version: "4.0.18"
+last_completed_phase: "9.1"
+next_phase: null
+continue_without_user_input: true
+blocked: false
+blocked_reason: null
+terminal_status: "COMPLETE_WITH_VIOLATIONS"
+updated_at: "2026-02-21T11:45:00+03:00"

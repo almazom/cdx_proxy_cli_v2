@@ -1,0 +1,98 @@
+# Bio Role Assignment
+# Biological Intelligence Layer - Dynamic role differentiation
+
+assignment_type: bio_role_assignment
+run_id: "03_swarm_review_20260221_162554"
+timestamp: "2026-02-21T16:28:00+03:00"
+
+model: "differentiation_and_mutation"
+description: "Engine/role can adapt to task environment with explicit trace"
+
+role_assignments:
+  - assignment_id: "role_001"
+    phase: 0
+    role: "preflight_validator"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Single producer mode detected"
+      - "Assumed multi-role responsibility"
+    environment_factors:
+      - "kimi_available: true"
+      - "qwen_available: true"
+      - "codex_available: true"
+      - "gemini_available: true"
+      - "parallel_spawn_possible: false"
+    reason: "Sequential execution in single-producer environment"
+    
+  - assignment_id: "role_002"
+    phase: 2
+    role: "security_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role differentiation via perspective switching"
+      - "Security domain knowledge applied"
+    context_pack:
+      SUBAGENT: "true"
+      TASK_ID: "expert_security_001"
+      PHASE: "2"
+      ROLE: "security_analyst"
+      GOAL: "Analyze security posture"
+      INPUT_ARTIFACTS:
+        - "auth/store.py"
+        - "proxy/server.py"
+        - "observability/event_log.py"
+      OUTPUT_ARTIFACTS:
+        - "reports/expert/01_security_report.md"
+      CONSTRAINTS:
+        - "Provide file:line evidence"
+        - "Classify by P0/P1/P2 priority"
+        
+  - assignment_id: "role_003"
+    phase: 2
+    role: "performance_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role switch from security to performance"
+      - "Performance domain knowledge applied"
+      
+  - assignment_id: "role_004"
+    phase: 2
+    role: "maintainability_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role switch from performance to maintainability"
+      
+  - assignment_id: "role_005"
+    phase: 2
+    role: "simplicity_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role switch to simplicity focus"
+      
+  - assignment_id: "role_006"
+    phase: 2
+    role: "testability_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role switch to testability focus"
+      
+  - assignment_id: "role_007"
+    phase: 2
+    role: "api_analyst"
+    engine: Pi
+    fitness_score: 1.0
+    adaptation_trace:
+      - "Role switch to API design focus"
+
+differentiation_summary:
+  total_roles: 7
+  unique_engines: 1
+  adaptation_events: 7
+  mode: "sequential_role_differentiation"
+  mutation_triggered: false

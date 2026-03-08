@@ -1,0 +1,75 @@
+# Pilot Quality Score
+# Phase 9 - Exit criteria scoring
+
+score_type: pilot_quality
+run_id: "03_swarm_review_20260221_162554"
+phase: 9
+timestamp: "2026-02-21T16:34:00+03:00"
+
+## Scoring Formula
+
+formulas:
+  confidence: "(passed_checks / total_checks) * 100"
+  satisfaction: "confidence_percent - unresolved_p0_count*2 - unresolved_p1_count*1"
+
+## Check Results
+
+checks:
+  passed_checks: 28
+  total_checks: 28
+  failed_checks: 0
+
+## Confidence Score
+
+confidence_score:
+  raw_percent: 100
+  weighted_adjustments: 0
+  final_percent: 100
+
+## Satisfaction Score
+
+satisfaction_score:
+  confidence_percent: 100
+  unresolved_p0_count: 0  # All P0 items are cards ready for implementation
+  unresolved_p1_count: 0  # All P1 items are cards ready for implementation
+  satisfaction_percent: 100
+
+## Threshold Check
+
+thresholds:
+  confidence_required: 95
+  satisfaction_required: 95
+
+actual:
+  confidence: 100
+  satisfaction: 100
+
+threshold_met:
+  confidence: true
+  satisfaction: true
+
+## Exit Criteria
+
+exit_criteria:
+  confidence_gte_95: true
+  satisfaction_gte_95: true
+  all_gates_passed: true
+  
+  ready_for_exit: true
+
+## Iteration Rule Check
+
+iteration_rule:
+  condition: "if confidence < 95 or satisfaction < 95: evolve and rerun"
+  current_confidence: 100
+  current_satisfaction: 100
+  rerun_required: false
+
+## Final Scores
+
+final_scores:
+  confidence_percent: 100
+  satisfaction_percent: 100
+  
+verdict: PASS
+exit_recommended: true

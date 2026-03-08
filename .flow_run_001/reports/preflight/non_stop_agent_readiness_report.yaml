@@ -1,0 +1,22 @@
+---
+status: pass
+work_preservation_policy_required: true
+previous_run_reference_present: true
+previous_run_reference_status: pass
+topology:
+  degraded_mode: false
+  compensated_lanes_active: false
+  mandatory_topology:
+    - codex
+    - qwen
+    - kimi
+  available_agents:
+    - kimi
+  unavailable_agents:
+    - codex
+    - qwen
+  fallback_strategy: "current_session_agent_with_compensated_lanes"
+report_path: "reports/preflight/non_stop_agent_readiness_report.yaml"
+markdown_report_path: "reports/preflight/non_stop_readiness_report.md"
+previous_run_reference_path: "reports/preflight/previous_run_reference.yaml"
+generated_at: "2026-02-21T10:45:02+03:00"

@@ -1,0 +1,59 @@
+# Project Scope Manifest
+# Phase 0 - Define analysis boundaries
+
+manifest_type: project_scope
+timestamp: "2026-02-21T16:26:00+03:00"
+run_id: "03_swarm_review_20260221_162554"
+
+project_identity:
+  name: "cdx_proxy_cli_v2"
+  type: "python_cli_package"
+  description: "Clean-split rewrite of cdx_proxy_cli - HTTP proxy with auth rotation"
+
+include_paths:
+  - "src/cdx_proxy_cli_v2/**/*.py"
+  - "tests/**/*.py"
+  - "scripts/**/*.py"
+  - "pyproject.toml"
+  - "README.md"
+  - "docs/**/*.md"
+
+exclude_paths:
+  - ".venv/**"
+  - "__pycache__/**"
+  - "*.egg-info/**"
+  - ".git/**"
+  - "runs/**"
+  - "*.pyc"
+
+code_file_extensions:
+  - ".py"
+  - ".toml"
+  - ".yaml"
+  - ".json"
+
+analysis_scope:
+  primary_modules:
+    - path: "src/cdx_proxy_cli_v2/cli/main.py"
+      responsibility: "CLI command orchestration"
+    - path: "src/cdx_proxy_cli_v2/proxy/server.py"
+      responsibility: "HTTP proxy transport"
+    - path: "src/cdx_proxy_cli_v2/proxy/rules.py"
+      responsibility: "Request routing/header rewriting"
+    - path: "src/cdx_proxy_cli_v2/auth/store.py"
+      responsibility: "Auth discovery and token extraction"
+    - path: "src/cdx_proxy_cli_v2/auth/rotation.py"
+      responsibility: "Round-robin and cooldown policy"
+    - path: "src/cdx_proxy_cli_v2/runtime/service.py"
+      responsibility: "Background process lifecycle"
+    - path: "src/cdx_proxy_cli_v2/observability/trace_store.py"
+      responsibility: "In-memory trace ring buffer"
+    - path: "src/cdx_proxy_cli_v2/observability/event_log.py"
+      responsibility: "JSONL event sink"
+    - path: "src/cdx_proxy_cli_v2/observability/tui.py"
+      responsibility: "Rich live trace monitor"
+
+estimated_loc: 2500
+file_count: 26
+
+verdict: PASS

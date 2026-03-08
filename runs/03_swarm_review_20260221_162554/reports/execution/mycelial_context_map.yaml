@@ -1,0 +1,133 @@
+# Mycelial Context Map
+# Phase 3 - Cross-card/context links
+
+map_type: mycelial_context
+run_id: "03_swarm_review_20260221_162554"
+phase: 3
+timestamp: "2026-02-21T16:29:00+03:00"
+
+model: "mycelial_network"
+description: "Cross-card/context links must be explicit to prevent isolated execution"
+
+## Context Transport Links
+
+### P0 Findings → Cards
+
+- link_id: "mycelium_001"
+  source:
+    type: "finding"
+    id: "P0-001"
+    expert: "performance"
+    file: "src/cdx_proxy_cli_v2/proxy/server.py:210-240"
+  target:
+    type: "card"
+    id: "CARD-001"
+    title: "Implement HTTP connection pooling"
+  context_transport:
+    - "No connection pooling → +50-200ms latency"
+    - "Recommendation: urllib3 PoolManager"
+  status: "linked"
+  
+- link_id: "mycelium_002"
+  source:
+    type: "finding"
+    id: "P0-002"
+    expert: "testability"
+    file: "src/cdx_proxy_cli_v2/proxy/server.py:95-340"
+  target:
+    type: "card"
+    id: "CARD-002"
+    title: "Extract ProxyLogic for testability"
+  context_transport:
+    - "ProxyHandler inherits BaseHTTPRequestHandler"
+    - "Business logic mixed with HTTP handling"
+  status: "linked"
+  
+- link_id: "mycelium_003"
+  source:
+    type: "finding"
+    id: "P0-003"
+    expert: "api"
+    file: "src/cdx_proxy_cli_v2/proxy/server.py:175-205"
+  target:
+    type: "card"
+    id: "CARD-003"
+    title: "Add API versioning"
+  context_transport:
+    - "No /v1/ prefix on management endpoints"
+    - "Breaking changes risk"
+  status: "linked"
+
+### P1 Findings → Cards
+
+- link_id: "mycelium_004"
+  source:
+    type: "finding"
+    id: "P1-005"
+    expert: "api"
+    file: "docs/"
+  target:
+    type: "card"
+    id: "CARD-005"
+    title: "Generate OpenAPI specification"
+  context_transport:
+    - "Depends on P0-003 (API versioning)"
+    - "Need versioned endpoints first"
+  dependency: "P0-003"
+  status: "linked"
+
+- link_id: "mycelium_005"
+  source:
+    type: "finding"
+    id: "P1-002"
+    expert: "performance"
+    file: "src/cdx_proxy_cli_v2/auth/store.py"
+  target:
+    type: "card"
+    id: "CARD-006"
+    title: "Add auth record caching with TTL"
+  context_transport:
+    - "Repeated file I/O + JSON parsing"
+    - "No caching mechanism"
+  status: "linked"
+
+### Card → SSOT Links (Future)
+
+- link_id: "mycelium_010"
+  source:
+    type: "card"
+    id: "CARD-001"
+  target:
+    type: "ssot"
+    file: "SSOT_KANBAN.yaml"
+  context_transport:
+    - "Card status will update SSOT"
+  status: "pending_phase_6"
+
+## Isolated Context Detection
+
+isolated_contexts: []
+
+note: "All findings have explicit card links. No orphaned context detected."
+
+## Hyphae Network (Card Dependencies)
+
+hyphae:
+  - from: "CARD-005"
+    to: "CARD-003"
+    type: "depends_on"
+    reason: "OpenAPI spec needs versioned endpoints"
+    
+  - from: "CARD-007"
+    to: "CARD-002"
+    type: "related_to"
+    reason: "Both touch proxy/server.py"
+
+## Context Flow Summary
+
+context_flow_metrics:
+  total_findings: 27
+  linked_to_cards: 27
+  orphaned_findings: 0
+  link_coverage_percent: 100
+  explicit_dependencies: 2

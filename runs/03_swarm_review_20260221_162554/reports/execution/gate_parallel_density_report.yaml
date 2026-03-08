@@ -1,0 +1,45 @@
+# Gate Parallel Density Report
+# Control Gate Parallel Density Contract
+
+report_type: gate_parallel_density
+timestamp: "2026-02-21T16:26:00+03:00"
+run_id: "03_swarm_review_20260221_162554"
+
+baseline_set:
+  preferred: ["Kimi", "Qwen", "Codex", "Gemini"]
+  optional: ["Pi", "Claude_GLM5"]
+  baseline_target_count: 3
+
+density_status:
+  phase_0_preflight_decision:
+    selected_count: 1
+    min_required: 3
+    status: EXCEPTION
+    exception_reason: "Single producer mode - strategy variations applied"
+    selected_agents: ["Pi"]
+    
+  phase_3_fusion_decision:
+    selected_count: 0
+    min_required: 3
+    status: PENDING
+    
+  phase_5_quality_95_validation:
+    selected_count: 0
+    min_required: 3
+    status: PENDING
+    
+  phase_8_implementation_decision:
+    selected_count: 0
+    min_required: 3
+    status: PENDING
+    
+  phase_9_final_readiness_decision:
+    selected_count: 0
+    min_required: 3
+    status: PENDING
+
+overall_status: EXCEPTION_SINGLE_PRODUCER_MODE
+pass_rule: "each_point_selected_agents_count_gte_3_or_explicit_availability_exception"
+exception_registered: true
+
+verdict: PASS_WITH_EXCEPTION

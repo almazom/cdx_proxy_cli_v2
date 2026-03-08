@@ -1,0 +1,88 @@
+# Stigmergy Signal Ledger
+# Biological Intelligence Layer - Coordination via artifact state changes
+
+ledger_type: stigmergy_signal
+run_id: "03_swarm_review_20260221_162554"
+timestamp: "2026-02-21T16:28:00+03:00"
+
+coordination_model: "stigmergy"
+description: "Agents coordinate by shared artifact state changes, not chat-style direct dependency"
+
+signal_events:
+  - event_id: "signal_001"
+    timestamp: "2026-02-21T16:26:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/preflight/environment_gate_report.yaml"
+    producer: "Pi"
+    state_change: "created"
+    consumer_trigger: "phase_0_preflight_review"
+    
+  - event_id: "signal_002"
+    timestamp: "2026-02-21T16:26:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/preflight/flow_version_lock_report.yaml"
+    producer: "Pi"
+    state_change: "created"
+    consumer_trigger: "phase_0_preflight_review"
+    
+  - event_id: "signal_003"
+    timestamp: "2026-02-21T16:26:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/preflight/mode_and_executability_report.yaml"
+    producer: "Pi"
+    state_change: "created"
+    consumer_trigger: "phase_0_preflight_review"
+    
+  - event_id: "signal_004"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/01_security_report.md"
+    producer: "Pi_security_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+    
+  - event_id: "signal_005"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/02_performance_report.md"
+    producer: "Pi_performance_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+    
+  - event_id: "signal_006"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/03_maintainability_report.md"
+    producer: "Pi_maintainability_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+    
+  - event_id: "signal_007"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/04_simplicity_report.md"
+    producer: "Pi_simplicity_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+    
+  - event_id: "signal_008"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/05_testability_report.md"
+    producer: "Pi_testability_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+    
+  - event_id: "signal_009"
+    timestamp: "2026-02-21T16:27:00+03:00"
+    signal_type: "artifact_created"
+    artifact: "reports/expert/06_api_report.md"
+    producer: "Pi_api_perspective"
+    state_change: "created"
+    consumer_trigger: "phase_3_fusion"
+
+pending_signals:
+  - signal_type: "phase_2_complete"
+    trigger_artifact: "reports/expert/expert_index.yaml"
+    next_phase: 3
+    status: "ready"

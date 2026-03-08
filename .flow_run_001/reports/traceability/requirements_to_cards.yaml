@@ -1,0 +1,56 @@
+---
+generated_at: "2026-02-21T11:20:00+03:00"
+mappings:
+  - requirement_id: "SEC-001"
+    card_ids: ["01-card-proxy-server-hardening"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/proxy/server.py
+      - src/cdx_proxy_cli_v2/config/settings.py
+    validation_commands:
+      - pytest tests/proxy/test_server.py::TestRequestValidation -v
+    evidence_refs:
+      - reports/card_validation/template_structure_report.yaml
+  - requirement_id: "SEC-002"
+    card_ids: ["02-card-auth-rotation-race-fix"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/auth/rotation.py
+    validation_commands:
+      - pytest tests/auth/test_rotation.py::TestTokenRotationConcurrency -v
+    evidence_refs:
+      - reports/comparison/three_way_comparison_report.yaml
+  - requirement_id: "PERF-001"
+    card_ids: ["03-card-trace-store-memory"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/observability/trace_store.py
+    validation_commands:
+      - pytest tests/observability/test_trace_store.py -v
+    evidence_refs:
+      - reports/traceability/requirements_to_cards.yaml
+  - requirement_id: "COR-002"
+    card_ids: ["04-card-settings-validation"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/config/settings.py
+    validation_commands:
+      - pytest tests/config/test_settings.py -v
+    evidence_refs:
+      - reports/card_validation/template_structure_report.yaml
+  - requirement_id: "SEC-003"
+    card_ids: ["05-card-event-log-sanitization"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/observability/event_log.py
+    validation_commands:
+      - pytest tests/observability/test_event_log_sanitization.py -v
+    evidence_refs:
+      - reports/live/review/codex_review_report.md
+  - requirement_id: "MAINT-001"
+    card_ids: ["06-card-rules-engine-refactor"]
+    implementation_files:
+      - src/cdx_proxy_cli_v2/proxy/rules/
+    validation_commands:
+      - pytest tests/proxy/test_rules.py -v
+    evidence_refs:
+      - reports/comparison/three_way_comparison_report.yaml
+coverage_summary:
+  total_requirements: 6
+  mapped_requirements: 6
+  coverage_percent: 100

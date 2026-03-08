@@ -1,0 +1,97 @@
+# Expert Reports Index
+# Phase 2 - Scout Swarm Analysis
+
+run_id: "03_swarm_review_20260221_162554"
+phase: 2
+timestamp: "2026-02-21T16:28:00+03:00"
+
+reports:
+  - id: "01_security"
+    file: "reports/expert/01_security_report.md"
+    expert: security
+    confidence_percent: 92
+    key_findings: 6
+    priority_breakdown:
+      P0: 1
+      P1: 4
+      P2: 1
+    
+  - id: "02_performance"
+    file: "reports/expert/02_performance_report.md"
+    expert: performance
+    confidence_percent: 88
+    key_findings: 8
+    priority_breakdown:
+      P0: 1
+      P1: 2
+      P2: 2
+    
+  - id: "03_maintainability"
+    file: "reports/expert/03_maintainability_report.md"
+    expert: maintainability
+    confidence_percent: 90
+    key_findings: 9
+    priority_breakdown:
+      P1: 2
+      P2: 2
+      P3: 1
+    
+  - id: "04_simplicity"
+    file: "reports/expert/04_simplicity_report.md"
+    expert: simplicity
+    confidence_percent: 88
+    key_findings: 8
+    priority_breakdown:
+      P0: 1
+      P1: 2
+      P2: 2
+    
+  - id: "05_testability"
+    file: "reports/expert/05_testability_report.md"
+    expert: testability
+    confidence_percent: 85
+    key_findings: 9
+    priority_breakdown:
+      P0: 1
+      P1: 2
+      P2: 1
+    
+  - id: "06_api"
+    file: "reports/expert/06_api_report.md"
+    expert: api
+    confidence_percent: 87
+    key_findings: 10
+    priority_breakdown:
+      P0: 1
+      P1: 2
+      P2: 1
+
+summary:
+  total_reports: 6
+  total_findings: 50
+  average_confidence: 88.3
+  p0_findings: 4
+  p1_findings: 14
+  p2_findings: 7
+  p3_findings: 1
+
+top_concerns:
+  - priority: P0
+    category: performance
+    finding: "No HTTP connection pooling"
+    impact: "+50-200ms latency per request"
+    
+  - priority: P0
+    category: testability
+    finding: "Hard to mock HTTP server"
+    impact: "Requires full HTTP stack for testing"
+    
+  - priority: P0
+    category: api
+    finding: "No API versioning"
+    impact: "Breaking changes affect all clients"
+    
+  - priority: P0
+    category: simplicity
+    finding: "Multiple configuration methods"
+    impact: "Complex precedence rules"

@@ -1,0 +1,63 @@
+# Graveyard Patterns
+# Phase 9 - Known bad patterns quarantine
+
+registry_type: graveyard_quarantine
+run_id: "03_swarm_review_20260221_162554"
+phase: 9
+timestamp: "2026-02-21T16:34:00+03:00"
+
+## Quarantine Policy
+
+policy:
+  description: "Known bad patterns are quarantined until mutation fix is verified"
+  pass_rule: "quarantined_patterns_not_reused_without_mutation_fix"
+
+## Quarantined Patterns
+
+quarantined_patterns:
+  - pattern_id: "Q-001"
+    name: "Fabricated parallel claims"
+    description: "Claiming 3 distinct producers when only 1 available"
+    detected_in: "Previous versions"
+    status: QUARANTINED
+    mutation_required: "Use strategy_variations mode with explicit exception"
+    fixed_in_current_run: true
+    
+  - pattern_id: "Q-002"
+    name: "Silent phase skip"
+    description: "Skipping phases without explicit blocked_reason"
+    detected_in: "Previous versions"
+    status: QUARANTINED
+    mutation_required: "Non-stop continuity guard"
+    fixed_in_current_run: true
+    
+  - pattern_id: "Q-003"
+    name: "Evidence-free findings"
+    description: "Findings without file:line citations"
+    detected_in: "Previous versions"
+    status: QUARANTINED
+    mutation_required: "Evidence integrity guard"
+    fixed_in_current_run: true
+
+## Pattern Usage Check
+
+usage_check:
+  patterns_quarantined: 3
+  patterns_reused_without_fix: 0
+  violations_detected: 0
+
+## Current Run Pattern Compliance
+
+compliance:
+  no_fabricated_parallel_claims: true
+  no_silent_phase_skips: true
+  all_findings_have_evidence: true
+  explicit_topology_attestation: true
+
+## Summary
+
+summary:
+  patterns_in_quarantine: 3
+  patterns_verified_fixed: 3
+  new_patterns_to_quarantine: 0
+  compliance_status: PASS

@@ -1,0 +1,22 @@
+---
+generated_at: "2026-02-21T10:50:00+03:00"
+status: pass
+card_count_detected: 6
+template_compliance_percent: 97
+violations: []
+compliance_checks:
+  board_template_conformance: true
+  kickoff_template_conformance: true
+  card_template_conformance: true
+  card_count_in_range: true
+  no_custom_sections: true
+  all_required_sections_present: true
+cards_validated:
+  - 01-card-proxy-server-hardening.md
+  - 02-card-auth-rotation-race-fix.md
+  - 03-card-trace-store-memory.md
+  - 04-card-settings-validation.md
+  - 05-card-event-log-sanitization.md
+  - 06-card-rules-engine-refactor.md
+average_quality_score: 95
+notes: "All cards conform to MASTER_TEMPLATE.md structure"

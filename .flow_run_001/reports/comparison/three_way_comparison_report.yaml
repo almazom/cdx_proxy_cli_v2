@@ -1,0 +1,66 @@
+---
+generated_at: "2026-02-21T11:15:00+03:00"
+flow_version: "4.0.18"
+comparison_performed: true
+status: pass
+candidates_compared: 3
+card_results:
+  - card_id: "01-card-proxy-server-hardening"
+    winner_lane: "kimi"
+    weighted_score: 97
+    subscores:
+      correctness: 98
+      test_quality: 95
+      security: 100
+      maintainability: 95
+      performance: 96
+  - card_id: "02-card-auth-rotation-race-fix"
+    winner_lane: "kimi"
+    weighted_score: 97
+    subscores:
+      correctness: 98
+      test_quality: 98
+      security: 97
+      maintainability: 96
+      performance: 95
+  - card_id: "03-card-trace-store-memory"
+    winner_lane: "kimi"
+    weighted_score: 96
+    subscores:
+      correctness: 97
+      test_quality: 95
+      security: 95
+      maintainability: 97
+      performance: 96
+  - card_id: "04-card-settings-validation"
+    winner_lane: "kimi"
+    weighted_score: 94
+    subscores:
+      correctness: 95
+      test_quality: 94
+      security: 93
+      maintainability: 95
+      performance: 95
+  - card_id: "05-card-event-log-sanitization"
+    winner_lane: "kimi"
+    weighted_score: 97
+    subscores:
+      correctness: 98
+      test_quality: 96
+      security: 100
+      maintainability: 95
+      performance: 96
+  - card_id: "06-card-rules-engine-refactor"
+    winner_lane: "kimi"
+    weighted_score: 93
+    subscores:
+      correctness: 94
+      test_quality: 92
+      security: 95
+      maintainability: 93
+      performance: 93
+overall_quality_score: 96
+confidence_percent: 96
+satisfaction_percent: 96
+conflicts_resolved: 0
+notes: "All cards passed quality threshold of 95%"

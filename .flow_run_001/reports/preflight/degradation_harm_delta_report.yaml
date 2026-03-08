@@ -1,0 +1,9 @@
+---
+status: deferred_no_baseline
+baseline_mode: missing
+previous_version: "4.0.17"
+current_version: "4.0.18"
+degradation_findings: []
+report_path: "reports/feedback/degradation_harm_delta_report.yaml"
+generated_at: "2026-02-21T10:45:01+03:00"
+note: "First run - no baseline available. Baseline will be established after this run."

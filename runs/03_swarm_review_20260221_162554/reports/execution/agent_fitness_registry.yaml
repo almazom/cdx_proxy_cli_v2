@@ -1,0 +1,67 @@
+# Agent Fitness Registry
+# Phase 2 - Fitness-based task allocation
+
+registry_type: agent_fitness
+run_id: "03_swarm_review_20260221_162554"
+phase: 2
+timestamp: "2026-02-21T16:28:00+03:00"
+
+fitness_policy: "select_highest_fitness_or_explain_exception"
+topology_mode: "single_producer"
+
+agent_fitness_scores:
+  - agent: Pi
+    fitness_score: 1.0
+    assignment: "all_expert_roles"
+    reason: "Single producer mode - Pi executing all perspectives"
+    exception: "Parallel spawn not available - using strategy_variations"
+    
+available_agents_not_spawned:
+  - agent: Kimi
+    available: true
+    fitness_score: null
+    not_spawned_reason: "Single producer mode"
+    
+  - agent: Qwen
+    available: true
+    fitness_score: null
+    not_spawned_reason: "Single producer mode"
+    
+  - agent: Codex
+    available: true
+    fitness_score: null
+    not_spawned_reason: "Single producer mode"
+    
+  - agent: Gemini
+    available: true
+    fitness_score: null
+    not_spawned_reason: "Single producer mode"
+
+role_assignments:
+  - role: security_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+    
+  - role: performance_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+    
+  - role: maintainability_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+    
+  - role: simplicity_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+    
+  - role: testability_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+    
+  - role: api_analyst
+    assigned_to: Pi
+    fitness_basis: "default_single_producer"
+
+pass_rule_check:
+  all_control_gate_assignments_have_fitness_basis: true
+  exception_registered: true

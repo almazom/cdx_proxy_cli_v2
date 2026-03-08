@@ -1,0 +1,166 @@
+---
+# Flow Improvement Suggestions Summary
+# 03_swarm_review v4.0.18 → v4.0.19
+
+analysis_meta:
+  flow_version_analyzed: "4.0.18"
+  analysis_date: "2026-02-21"
+  execution_mode: "single_agent_simulated"
+  fundamental_issue: "Flow assumes multi-agent infrastructure that doesn't exist"
+  
+executability_gap:
+  total_phases_specified: 36
+  phases_actually_executable: 12
+  phases_skipped_or_simulated: 24
+  executability_percent: 33
+  
+  skipped_phase_categories:
+    multi_agent_execution:
+      - "Phase 3: 6 expert reviews"
+      - "Phase 3.5: Expert swarm fusion"
+      - "Phase 8.2: Multi-agent implementation"
+      - "Phase 8.2.1: Three-way quorum"
+      - "Phase 8.4: Comparison"
+      - "Phase 8.5: Fusion"
+      reason: "Cannot spawn multiple AI agents"
+      
+    infrastructure_dependent:
+      - "Phase 0.2: Budget estimator"
+      - "Phase 8.6.1: Live codex review"
+      - "Phase 8.9: PR creation (requires code changes)"
+      reason: "Requires historical data or external tools"
+      
+    fabricated_artifacts:
+      - "Phase 8.2.4: Producer attestation"
+      - "Live execution evidence reports"
+      - "Distinct producer fingerprints"
+      reason: "Same agent cannot generate distinct identities"
+
+artifact_bloat_analysis:
+  artifacts_generated: 32
+  artifacts_actually_useful: 9
+  artifact_bloat_percent: 72
+  
+  redundant_artifacts:
+    - pattern: "reports/preflight/*_report.*"
+      count: 11
+      suggestion: "Consolidate to 3 reports"
+    - pattern: "reports/live/*/*"
+      count: 6
+      suggestion: "Remove - fabricated evidence"
+    - pattern: "logs/stream/*.ndjson"
+      count: 4
+      suggestion: "Keep pipeline only"
+
+key_problems:
+  1:
+    severity: critical
+    title: "Fabricated Evidence"
+    description: "Flow requires 'live execution evidence' but same agent writes reports claiming to be 3 distinct producers"
+    example: "candidates_index.yaml claims 3 distinct fingerprints - all from kimi"
+    suggestion: "Remove evidence requirements that cannot be fulfilled honestly"
+    
+  2:
+    severity: critical
+    title: "Misleading 'Compensated Lanes'"
+    description: "Calling different prompt strategies 'lanes' implies parallel execution that didn't happen"
+    example: "topology.degraded_mode with compensated_lanes_active"
+    suggestion: "Call it 'strategy variations' or remove entirely"
+    
+  3:
+    severity: high
+    title: "Self-Reported Quality Scores"
+    description: "Template compliance 97%, Quality 96% - measured by system that wrote the content"
+    suggestion: "Remove automated quality scores or make them clearly internal only"
+    
+  4:
+    severity: high
+    title: "Preflight Gate Proliferation"
+    description: "10 preflight gates for a documentation flow creates barrier to entry"
+    suggestion: "Reduce to 3 essential gates: env, version, mode"
+    
+  5:
+    severity: medium
+    title: "No Separation of Analysis vs Implementation"
+    description: "Flow conflates card generation (doable) with code implementation (requires infrastructure)"
+    suggestion: "Explicit --mode=analysis vs --mode=implement"
+
+version_proposals:
+  v4.0.19_conservative:
+    approach: "Simplify current flow"
+    changes:
+      - "Reduce preflight from 10 to 3 gates"
+      - "Remove fabricated evidence requirements"
+      - "Consolidate 32 artifacts to 10"
+      - "Keep single-flow approach"
+    effort: low
+    risk: low
+    
+  v5.0_split_flows:
+    approach: "Split into two distinct flows"
+    flows:
+      03_swarm_analysis:
+        phases: [preflight, context, cards]
+        agents: 1
+        output: trello_cards/
+      03_swarm_implementation:
+        phases: [worktrees, implementation, pr]
+        agents: 3+
+        requires: "--agents=codex,qwen,kimi"
+        output: code + pr
+    effort: medium
+    risk: medium
+    
+  v5.0_honest_single_agent:
+    approach: "Remove multi-agent fiction"
+    changes:
+      - "Rename to 'expert_review'"
+      - "Focus on excellent card generation"
+      - "Remove all swarm/quorum/fusion concepts"
+      - "Add clear 'manual implementation' handoff"
+    effort: low
+    risk: low
+
+critical_renames:
+  - old: "compensated_lanes"
+    new: "strategy_variations"
+    reason: "Honest about same-agent execution"
+    
+  - old: "distinct_producer_fingerprints"
+    new: "REMOVE"
+    reason: "Cannot have distinct fingerprints from one agent"
+    
+  - old: "three_way_quorum"
+    new: "cross_validation"
+    reason: "Quorum implies voting, not available"
+    
+  - old: "live_execution_evidence"
+    new: "execution_evidence"
+    reason: "Remove 'live' - may be simulated"
+
+recommendations_priority:
+  p0:
+    - "Split analysis and implementation into separate modes"
+    - "Remove fabricated evidence requirements"
+    - "Fix 'compensated lanes' naming"
+    
+  p1:
+    - "Reduce preflight gates to 3"
+    - "Consolidate artifacts"
+    - "Add --mode flag"
+    
+  p2:
+    - "Separate template versioning from flow versioning"
+    - "Document failure modes"
+    - "Add 'dry-run' option"
+
+meta_observations:
+  - "Flow authors have likely never executed this flow as specified"
+  - "No mechanism exists to spawn 6 expert agents"
+  - "Template is good; execution model is broken"
+  - "Quality comes from good prompts, not documentation volume"
+  
+final_recommendation:
+  preferred_option: "v5.0_split_flows"
+  reasoning: "Honest about what single agent can do vs what requires infrastructure"
+  migration_path: "v4.0.19 simplify → v5.0 split"

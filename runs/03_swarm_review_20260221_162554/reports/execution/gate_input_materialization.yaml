@@ -1,0 +1,36 @@
+# Gate Input Materialization
+# Lane Runtime Stabilization - mutation_001
+
+report_type: gate_input_materialization
+timestamp: "2026-02-21T16:26:00+03:00"
+run_id: "03_swarm_review_20260221_162554"
+
+phase_0_gates:
+  - gate: environment_gate
+    inputs_required:
+      - "run_root_path"
+      - "aiagentsdocs_snapshot"
+      - "target_project_path"
+    inputs_materialized: true
+    materialization_time: "2026-02-21T16:26:00+03:00"
+    
+  - gate: flow_version_lock_gate
+    inputs_required:
+      - "START.md_path"
+      - "protocols_directory"
+    inputs_materialized: true
+    materialization_time: "2026-02-21T16:26:00+03:00"
+    
+  - gate: mode_and_executability_gate
+    inputs_required:
+      - "cli_capabilities"
+      - "topology_detection"
+    inputs_materialized: true
+    materialization_time: "2026-02-21T16:26:00+03:00"
+
+materialization_summary:
+  total_gates: 3
+  all_inputs_materialized: true
+  ready_for_spawn: true
+
+verdict: PASS

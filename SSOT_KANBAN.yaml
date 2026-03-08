@@ -1,0 +1,142 @@
+# SSOT_KANBAN.yaml - Single Source of Truth for 03_swarm_review v4.0.18
+# Project: cdx_proxy_cli_v2
+# Run: .flow_run_001
+# Generated: 2026-02-21T10:45:02+03:00
+
+flow_version: "4.0.18"
+run_id: "001"
+project: "cdx_proxy_cli_v2"
+
+backlog:
+  - task_id: "TASK-001"
+    title: "Proxy Server Request Validation Hardening"
+    state: "backlog"
+    priority: "P0"
+    depends_on: []
+    requirement_refs: ["SEC-001", "REL-001"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-001.1"
+        title: "Add input sanitization to request headers"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-001.2"
+        title: "Implement rate limiting per client IP"
+        state: "backlog"
+        depends_on: ["TASK-001.1"]
+      - task_id: "TASK-001.3"
+        title: "Add request size limit validation"
+        state: "backlog"
+        depends_on: []
+
+  - task_id: "TASK-002"
+    title: "Auth Store Token Rotation Race Condition Fix"
+    state: "backlog"
+    priority: "P0"
+    depends_on: []
+    requirement_refs: ["SEC-002", "COR-001"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-002.1"
+        title: "Identify race condition in concurrent token access"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-002.2"
+        title: "Implement atomic token rotation with locking"
+        state: "backlog"
+        depends_on: ["TASK-002.1"]
+      - task_id: "TASK-002.3"
+        title: "Add stress tests for concurrent token rotation"
+        state: "backlog"
+        depends_on: ["TASK-002.2"]
+
+  - task_id: "TASK-003"
+    title: "Trace Store Memory Leak Prevention"
+    state: "backlog"
+    priority: "P1"
+    depends_on: []
+    requirement_refs: ["PERF-001", "REL-002"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-003.1"
+        title: "Analyze ring buffer memory growth patterns"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-003.2"
+        title: "Implement automatic buffer truncation"
+        state: "backlog"
+        depends_on: ["TASK-003.1"]
+
+  - task_id: "TASK-004"
+    title: "Settings Module Configuration Validation"
+    state: "backlog"
+    priority: "P1"
+    depends_on: []
+    requirement_refs: ["COR-002", "UX-001"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-004.1"
+        title: "Add schema validation for config file"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-004.2"
+        title: "Implement graceful fallback for invalid configs"
+        state: "backlog"
+        depends_on: ["TASK-004.1"]
+
+  - task_id: "TASK-005"
+    title: "Observability Event Log Sanitization"
+    state: "backlog"
+    priority: "P0"
+    depends_on: []
+    requirement_refs: ["SEC-003", "COMP-001"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-005.1"
+        title: "Identify sensitive fields in event logs"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-005.2"
+        title: "Implement field-level redaction"
+        state: "backlog"
+        depends_on: ["TASK-005.1"]
+      - task_id: "TASK-005.3"
+        title: "Add tests for sanitization coverage"
+        state: "backlog"
+        depends_on: ["TASK-005.2"]
+
+  - task_id: "TASK-006"
+    title: "Proxy Rules Engine Refactoring"
+    state: "backlog"
+    priority: "P2"
+    depends_on: []
+    requirement_refs: ["MAINT-001", "PERF-002"]
+    implementation_evidence: null
+    validation_evidence: null
+    subtasks:
+      - task_id: "TASK-006.1"
+        title: "Decompose monolithic rules module"
+        state: "backlog"
+        depends_on: []
+      - task_id: "TASK-006.2"
+        title: "Add rule composition unit tests"
+        state: "backlog"
+        depends_on: ["TASK-006.1"]
+
+state_machine:
+  - backlog
+  - in_progress
+  - blocked
+  - done
+  - verified
+
+metadata:
+  total_tasks: 6
+  total_subtasks: 14
+  critical_path: ["TASK-001", "TASK-002", "TASK-005"]
+  estimated_completion: "2026-02-21T14:00:00+03:00"

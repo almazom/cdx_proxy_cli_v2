@@ -1,0 +1,27 @@
+---
+generated_at: "2026-02-21T10:45:01+03:00"
+flow_version: "4.0.18"
+status: pass
+run_root: "/home/pets/TOOLS/cdx_proxy_cli_v2/.flow_run_001"
+logs_root: "/home/pets/TOOLS/cdx_proxy_cli_v2/.flow_run_001/logs"
+templates_root: "/home/pets/.Flows_Lifecycle_Stand/_shared_templates/trello_cards"
+ssot_path: "/home/pets/TOOLS/cdx_proxy_cli_v2/SSOT_KANBAN.yaml"
+checks:
+  run_root_resolved_and_writable: true
+  logs_root_writable: true
+  logs_root_under_run_root: true
+  templates_accessible: true
+  templates_root_matches_canonical: true
+  ssot_path_resolvable: true
+  tooling_probe_completed: true
+tooling:
+  git_available: true
+  gh_available: true
+  codex_available: false
+  kimi_available: true
+  pi_available: false
+storage_free_space_percent: 45
+storage_warning_threshold_percent: 10
+storage_critical_threshold_percent: 5
+failure_reason: null
+report_path: "reports/preflight/health_diagnostics_report.yaml"
