@@ -171,8 +171,6 @@ def _is_port_in_use(host: str, port: int) -> bool:
 def _find_pid_using_port(host: str, port: int) -> Optional[int]:
     """Try to find the PID of a process using the given port."""
     try:
-        # Try using lsof to find the process
-        import subprocess
         result = subprocess.run(
             ["lsof", "-i", f"TCP:{port}", "-sTCP:LISTEN", "-t"],
             capture_output=True,
@@ -181,7 +179,7 @@ def _find_pid_using_port(host: str, port: int) -> Optional[int]:
         )
         if result.returncode == 0 and result.stdout.strip():
             try:
-                return int(result.stdout.strip().split("\n")[0])
+                return int(result.stdout.splitlines()[0])
             except ValueError:
                 pass
     except Exception:
@@ -293,6 +291,22 @@ def _wait_for_ready(base_url: str, management_key: str, timeout_seconds: float) 
     return None
 
 
+def _spawn_env(settings: Settings, *, port: int, management_key: str) -> Dict[str, str]:
+    env = dict(os.environ)
+    env.update(
+        {
+            ENV_AUTH_DIR: settings.auth_dir,
+            ENV_HOST: settings.host,
+            ENV_PORT: str(port),
+            ENV_UPSTREAM: settings.upstream,
+            ENV_MANAGEMENT_KEY: management_key,
+            ENV_TRACE_MAX: str(settings.trace_max),
+            ENV_REQUEST_TIMEOUT: str(settings.request_timeout),
+        }
+    )
+    return env
+
+
 def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.Popen[bytes]:
     argv = [
         sys.executable,
@@ -317,14 +331,7 @@ def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.
 
     log_file = log_path(settings.auth_dir)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env[ENV_AUTH_DIR] = settings.auth_dir
-    env[ENV_HOST] = settings.host
-    env[ENV_PORT] = str(port)
-    env[ENV_UPSTREAM] = settings.upstream
-    env[ENV_MANAGEMENT_KEY] = management_key
-    env[ENV_TRACE_MAX] = str(settings.trace_max)
-    env[ENV_REQUEST_TIMEOUT] = str(settings.request_timeout)
+    env = _spawn_env(settings, port=port, management_key=management_key)
     with log_file.open("ab") as handle:
         process = subprocess.Popen(
             argv,
@@ -354,14 +361,15 @@ def start_service(settings: Settings) -> ServiceStartResult:
     state_file = state_path(runtime_settings.auth_dir)
     current_pid = _read_pid(pid_file)
     current_state = _load_state(state_file)
+    current_pid_is_proxy = _is_expected_proxy_process(current_pid, runtime_settings.auth_dir)
 
     # Check if already running and healthy
-    if _is_expected_proxy_process(current_pid, runtime_settings.auth_dir):
+    if current_pid_is_proxy:
         state_base_url = str(current_state.get("base_url") or runtime_settings.base_url)
-        debug = probe_debug(state_base_url, key)
-        if isinstance(debug, dict) and debug.get("status") == "running":
-            running_host = str(debug.get("host") or runtime_settings.host)
-            running_port = int(debug.get("port") or runtime_settings.port)
+        running_debug = probe_debug(state_base_url, key)
+        if isinstance(running_debug, dict) and running_debug.get("status") == "running":
+            running_host = str(running_debug.get("host") or runtime_settings.host)
+            running_port = int(running_debug.get("port") or runtime_settings.port)
             return ServiceStartResult(
                 host=running_host,
                 port=running_port,
@@ -391,30 +399,31 @@ def start_service(settings: Settings) -> ServiceStartResult:
             port = requested_port
         
         runtime_settings = runtime_settings.with_port(port)
-        
+
         # Check if port is in use by a stale process
         if _is_port_in_use(runtime_settings.host, port):
-            # Try to kill the stale process
-            if _kill_stale_proxy_on_port(runtime_settings.host, port, key, runtime_settings.auth_dir):
-                # Port should be free now, proceed
-                pass
-            elif not use_free_port:
+            port_conflict_resolved = _kill_stale_proxy_on_port(
+                runtime_settings.host,
+                port,
+                key,
+                runtime_settings.auth_dir,
+            )
+            if not port_conflict_resolved and not use_free_port:
                 # Port still in use and we were asked for a specific port
                 # Try again with a new port
                 continue
-            # If use_free_port=True, we already picked a new port for next iteration
-        
+
         # Spawn the process
         process = _spawn(runtime_settings, port=runtime_settings.port, management_key=key)
         _write_pid(pid_file, process.pid)
-        
-        debug = _wait_for_ready(
+
+        ready_debug = _wait_for_ready(
             runtime_settings.base_url,
             key,
             timeout_seconds=DEFAULT_STARTUP_TIMEOUT_SECONDS,
         )
-        
-        if debug is not None:
+
+        if ready_debug is not None:
             # Success!
             payload: Dict[str, object] = {
                 "status": "running",
