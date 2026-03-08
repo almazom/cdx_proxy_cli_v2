@@ -1,0 +1,24 @@
+run_id: "03_swarm_review_20260308_115903"
+artifacts:
+  reports:
+    - reports/execution/final_terminal_report.ru.md
+    - reports/execution/pr_checkpoint.md
+    - reports/simplification/simplification_report.md
+    - reports/simplification/noop.yaml
+  cards:
+    - cards/CARD-001.md
+    - cards/CARD-002.md
+  publish:
+    - reports/publish/swarm_master_landing.ru.html
+    - reports/publish/cards/CARD-001.html
+    - reports/publish/cards/CARD-002.html
+    - reports/publish/subagents/Bohr.html
+    - reports/publish/subagents/Goodall.html
+    - reports/publish/subagents/Euler.html
+    - reports/publish/subagents/Locke.html
+    - reports/publish/subagents/Bacon.html
+    - reports/publish/subagents/Faraday.html
+    - reports/publish/subagents/Descartes.html
+    - reports/publish/subagents/Pasteur.html
+    - reports/publish/internal/subagent_prompts.full.md
+    - reports/publish/public_prompt_registry.redacted.md

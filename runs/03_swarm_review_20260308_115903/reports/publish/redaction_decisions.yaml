@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_115903"
+public_redaction_defaults:
+  absolute_repo_paths: summarized
+  exact orchestration prompts: summarized_in_public_registry
+  agent_ids: kept in internal artifacts, omitted from public HTML where not useful
+  card/code content: kept because it contains no secrets and is needed for understanding
+  historical docs/flow artefacts outside active scope: excluded from public narrative
+notes:
+  - "Internal exact prompt registry is not a publish target."
+  - "Public pages keep issue meaning while avoiding unnecessary internal path/detail leakage."

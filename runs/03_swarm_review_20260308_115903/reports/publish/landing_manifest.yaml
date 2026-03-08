@@ -1,0 +1,21 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T13:18:00+03:00"
+master:
+  path: reports/publish/swarm_master_landing.ru.html
+  language: ru
+  standalone: true
+cards:
+  - { card_id: CARD-001, path: reports/publish/cards/CARD-001.html }
+  - { card_id: CARD-002, path: reports/publish/cards/CARD-002.html }
+subagents:
+  - { name: Bohr, path: reports/publish/subagents/Bohr.html }
+  - { name: Goodall, path: reports/publish/subagents/Goodall.html }
+  - { name: Euler, path: reports/publish/subagents/Euler.html }
+  - { name: Locke, path: reports/publish/subagents/Locke.html }
+  - { name: Bacon, path: reports/publish/subagents/Bacon.html }
+  - { name: Faraday, path: reports/publish/subagents/Faraday.html }
+  - { name: Descartes, path: reports/publish/subagents/Descartes.html }
+  - { name: Pasteur, path: reports/publish/subagents/Pasteur.html }
+counts:
+  cards: 2
+  subagents: 8

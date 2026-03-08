@@ -1,0 +1,16 @@
+run_id: "03_swarm_review_20260308_115903"
+order:
+  cards:
+    - reports/publish/cards/CARD-001.html
+    - reports/publish/cards/CARD-002.html
+  subagents:
+    - reports/publish/subagents/Bohr.html
+    - reports/publish/subagents/Goodall.html
+    - reports/publish/subagents/Euler.html
+    - reports/publish/subagents/Locke.html
+    - reports/publish/subagents/Bacon.html
+    - reports/publish/subagents/Faraday.html
+    - reports/publish/subagents/Descartes.html
+    - reports/publish/subagents/Pasteur.html
+  master:
+    - reports/publish/swarm_master_landing.ru.html

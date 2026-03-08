@@ -1,0 +1,11 @@
+runs/03_swarm_review_20260308_115903/reports/publish/cards/CARD-001.html
+runs/03_swarm_review_20260308_115903/reports/publish/cards/CARD-002.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Bohr.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Goodall.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Euler.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Locke.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Bacon.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Faraday.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Descartes.html
+runs/03_swarm_review_20260308_115903/reports/publish/subagents/Pasteur.html
+runs/03_swarm_review_20260308_115903/reports/publish/swarm_master_landing.ru.html

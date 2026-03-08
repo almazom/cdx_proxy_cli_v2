@@ -1,0 +1,73 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>CARD-002 — Case-insensitive forced headers для ChatGPT backend</title><style>body{font-family:Inter,system-ui,-apple-system,sans-serif;margin:0;background:#0b1020;color:#e8ecf3;line-height:1.5}a{color:#8bd3ff}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}header,section,nav,footer{padding:20px 24px}header{background:linear-gradient(135deg,#18213d,#0b1020)}nav{position:sticky;top:0;background:#111833;border-bottom:1px solid #293253;display:flex;gap:16px;flex-wrap:wrap;z-index:2}.card,.station,.tile{background:#141c35;border:1px solid #2e3a63;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.muted{color:#a8b3cf}.ok{color:#87f7c1}.warn{color:#ffd27f}.pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#22305b;margin-right:8px}details{background:#0f1630;border:1px solid #27325b;border-radius:10px;padding:10px 12px;margin:10px 0}summary{cursor:pointer;font-weight:700}.mono{white-space:pre-wrap;background:#0f1630;padding:12px;border-radius:10px;border:1px solid #27325b}.small{font-size:14px}.links a{display:inline-block;margin-right:12px;margin-bottom:8px}.table{width:100%;border-collapse:collapse}.table td,.table th{border:1px solid #2c375d;padding:8px;vertical-align:top}.anchor{scroll-margin-top:90px}</style></head><body>
+<header><h1>CARD-002 — Case-insensitive forced headers для ChatGPT backend</h1><p class="muted">Карточка P1 • public-safe render</p><p><a href="../swarm_master_landing.ru.html#cards">← Назад к master landing</a></p></header>
+<section class="card"><h2>Суть</h2><p>Ветка ChatGPT backend теперь очищает любые case-варианты `Origin`, `Referer` и `User-Agent` перед установкой канонических значений; добавлены регрессии на `_proxy_request`.</p></section>
+<section class="card"><h2>Полное public-safe содержание</h2><details open><summary>Открыть карточку</summary><div class="mono small"># P1-CARD-002: Force ChatGPT headers with case-insensitive replacement and tests
+
+## 📋 Description
+Given ChatGPT backend requests must present canonical `Origin`, `Referer`, and `User-Agent` values, when inbound client headers use different casing or conflicting values, then the proxy must replace those headers case-insensitively and tests must lock the behavior.
+
+## 🌍 Context
+The current change improved security by switching from `setdefault(...)` to forced assignment. But direct assignment to `Origin`, `Referer`, and `User-Agent` still leaves lowercase variants such as `origin` or `user-agent` alive in the forwarded header map. That means the branch still allows ambiguous duplicate headers and lacks direct regression coverage.
+
+## 📍 Location
+File: `src/cdx_proxy_cli_v2/proxy/server.py`
+Lines: `400-409`
+File: `tests/proxy/test_server.py`
+Lines: `213-239`
+
+## 🔴 Current Code (ACTUAL, not placeholder)
+```python
+if chatgpt_backend:
+    base_headers["Origin"] = "https://chatgpt.com"
+    base_headers["Referer"] = "https://chatgpt.com/"
+    base_headers["User-Agent"] = "codex-cli"
+```
+
+## 🟢 Fixed Code (copy-paste ready)
+```python
+if chatgpt_backend:
+    set_header_case_insensitive(base_headers, "Origin", "https://chatgpt.com")
+    set_header_case_insensitive(base_headers, "Referer", "https://chatgpt.com/")
+    set_header_case_insensitive(base_headers, "User-Agent", "codex-cli")
+```
+
+```python
+def test_chatgpt_backend_headers_are_replaced_case_insensitively(...):
+    # lower-case inbound values are replaced with canonical ChatGPT headers
+    ...
+```
+
+## ⚠️ Risk Assessment
+| Risk | Level | Mitigation |
+|------|-------|------------|
+| Unexpected header-shape change for ChatGPT backend | L | Limit change to the existing `chatgpt_backend` branch only |
+| Regression in non-ChatGPT upstreams | M | Add a negative test that non-ChatGPT paths preserve caller headers |
+| Test gap around forwarded request assembly | M | Exercise the proxy request path rather than helper functions alone |
+
+## ✅ Acceptance Criteria
+- [ ] ChatGPT backend requests replace `Origin`, `Referer`, and `User-Agent` case-insensitively
+- [ ] Lowercase inbound duplicates do not survive the forwarded header map
+- [ ] Non-ChatGPT upstream behavior remains unchanged
+- [ ] Targeted proxy tests cover the new behavior
+
+## 🧪 Verification
+```bash
+python3 -m pytest -q tests/proxy/test_server.py
+python3 -m pytest -q tests/cli/test_main.py tests/proxy/test_server.py
+python3 -m pytest -q
+```
+
+## 🔄 Rollback
+```bash
+git restore --source=HEAD~1 -- src/cdx_proxy_cli_v2/proxy/server.py tests/proxy/test_server.py
+```
+
+## 📝 Commit Message
+```
+fix(proxy): casefold forced chatgpt headers
+
+Card: CARD-002
+Fixes: proxy.chatgpt_header_casefold_override
+```</div></details></section>
+<section class="card"><h2>Проверка</h2><div class="mono small">python3 -m pytest -q tests/proxy/test_server.py\npython3 -m pytest -q tests/cli/test_main.py tests/proxy/test_server.py</div></section>
+<footer><a href="../swarm_master_landing.ru.html#cards">Вернуться на landing</a></footer></body></html>
