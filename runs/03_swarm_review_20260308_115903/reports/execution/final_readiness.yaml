@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_115903"
+timestamp: "2026-03-08T12:57:00+03:00"
+status: CORE_COMPLETE
+checks:
+  ssot_frozen: true
+  cards_done: 2
+  focused_tests_green: true
+  full_suite_green: true
+  terminal_gate_synced: true
+  tail_phases_pending: true
