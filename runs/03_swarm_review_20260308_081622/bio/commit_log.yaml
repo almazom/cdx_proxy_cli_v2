@@ -1,0 +1,11 @@
+run_id: "03_swarm_review_20260308_081622"
+commits:
+  - { phase: checkpoint, sha: "e117211", message: "chore: checkpoint before swarm review" }
+  - { phase: 0, sha: "0541780", message: "Phase 0: Preflight ✓" }
+  - { phase: 2, sha: "faa73be", message: "Phase 2: 6 scouts ✓" }
+  - { phase: 3, sha: "c594787", message: "Phase 3: Fusion ✓" }
+  - { phase: 4, sha: "26d722c", message: "Phase 4: Cards ✓" }
+  - { phase: 5, sha: "f4971b1", message: "Phase 5: Quality ✓" }
+  - { phase: 6, sha: "e1e2a9f", message: "Phase 6: SSOT ✓" }
+  - { phase: 7, sha: "2ab5075", message: "Phase 7: Ready ✓" }
+  - { phase: 8, sha: "5414686", message: "Phase 8: Code ✓" }

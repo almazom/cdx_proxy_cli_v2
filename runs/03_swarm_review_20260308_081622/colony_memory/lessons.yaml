@@ -1,0 +1,5 @@
+run_id: "03_swarm_review_20260308_081622"
+loaded_from_previous_runs:
+  - "Prior runs exist and are used only as historical context, not as evidence for current findings"
+lessons:
+  - "Current run must validate findings against HEAD before creating cards"

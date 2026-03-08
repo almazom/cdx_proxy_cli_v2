@@ -1,0 +1,7 @@
+run_id: "03_swarm_review_20260308_081622"
+decisions:
+  - { phase_gate: phase_0_preflight, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T08:36:51+03:00" }
+  - { phase_gate: phase_3_fusion, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T08:36:51+03:00" }
+  - { phase_gate: phase_5_quality, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T08:36:51+03:00" }
+  - { phase_gate: phase_8_implementation, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T08:36:51+03:00" }
+  - { phase_gate: phase_9_final, reviewers: 3, pass_count: 3, total_count: 3, quorum_met: true, verdict: PASS, timestamp: "2026-03-08T08:36:51+03:00" }

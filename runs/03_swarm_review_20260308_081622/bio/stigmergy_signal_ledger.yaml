@@ -1,0 +1,9 @@
+run_id: "03_swarm_review_20260308_081622"
+events:
+  - { event_id: 1, phase: 0, agent: orchestrator, type: created, artifact: metadata/run_manifest.yaml, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 2, phase: 0, agent: orchestrator, type: created, artifact: reports/preflight/environment_gate_report.yaml, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 3, phase: 2, agent: scout_swarm, type: created, artifact: reports/expert/expert_index.yaml, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 4, phase: 3, agent: orchestrator, type: created, artifact: reports/fusion/fusion_report.md, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 5, phase: 4, agent: comb_builder, type: created, artifact: cards/CARD-001.md, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 6, phase: 4, agent: comb_builder, type: created, artifact: cards/CARD-002.md, timestamp: "2026-03-08T08:30:01+03:00" }
+  - { event_id: 7, phase: 4, agent: comb_builder, type: created, artifact: cards/CARD-003.md, timestamp: "2026-03-08T08:30:01+03:00" }
