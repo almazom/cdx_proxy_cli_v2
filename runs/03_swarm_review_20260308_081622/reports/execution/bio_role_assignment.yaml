@@ -1,0 +1,14 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:30:01+03:00"
+roles:
+  scouts:
+    security: "019ccbe0-3193-73a3-b4ce-ad1dd622cd26"
+    performance: "019ccbe0-458b-7fc0-b05c-b3788902aa58"
+    maintainability: "019ccbe0-6288-7a70-bfac-4be8a17665ad"
+    simplicity: "019ccbe0-7711-7122-9a33-9b1de30f35ee"
+    testability: "019ccbe0-984d-7432-95bd-5284c15df560"
+    api: "019ccbe0-a963-71d2-a3cb-d9b2cf3a5d33"
+  masticator: orchestrator
+  comb_builder: orchestrator
+  nurses: orchestrator + gate reviewers
+  workers: orchestrator

@@ -1,0 +1,12 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:30:01+03:00"
+spawns:
+  - { phase: 2, caste: scout, specialty: security, agent_id: "019ccbe0-3193-73a3-b4ce-ad1dd622cd26" }
+  - { phase: 2, caste: scout, specialty: performance, agent_id: "019ccbe0-458b-7fc0-b05c-b3788902aa58" }
+  - { phase: 2, caste: scout, specialty: maintainability, agent_id: "019ccbe0-6288-7a70-bfac-4be8a17665ad" }
+  - { phase: 2, caste: scout, specialty: simplicity, agent_id: "019ccbe0-7711-7122-9a33-9b1de30f35ee" }
+  - { phase: 2, caste: scout, specialty: testability, agent_id: "019ccbe0-984d-7432-95bd-5284c15df560" }
+  - { phase: 2, caste: scout, specialty: api, agent_id: "019ccbe0-a963-71d2-a3cb-d9b2cf3a5d33" }
+  - { phase: 0, caste: gate_reviewer, specialty: preflight, agent_id: "019ccbe0-3193-73a3-b4ce-ad1dd622cd26" }
+  - { phase: 0, caste: gate_reviewer, specialty: preflight, agent_id: "019ccbe0-458b-7fc0-b05c-b3788902aa58" }
+  - { phase: 0, caste: gate_reviewer, specialty: preflight, agent_id: "019ccbe0-6288-7a70-bfac-4be8a17665ad" }

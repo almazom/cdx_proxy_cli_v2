@@ -1,0 +1,16 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:29:30+03:00"
+experts:
+  - { id: 1, specialty: security, agent_id: "019ccbe0-3193-73a3-b4ce-ad1dd622cd26", report: "reports/expert/01_security_report.md" }
+  - { id: 2, specialty: performance, agent_id: "019ccbe0-458b-7fc0-b05c-b3788902aa58", report: "reports/expert/02_performance_report.md" }
+  - { id: 3, specialty: maintainability, agent_id: "019ccbe0-6288-7a70-bfac-4be8a17665ad", report: "reports/expert/03_maintainability_report.md" }
+  - { id: 4, specialty: simplicity, agent_id: "019ccbe0-7711-7122-9a33-9b1de30f35ee", report: "reports/expert/04_simplicity_report.md" }
+  - { id: 5, specialty: testability, agent_id: "019ccbe0-984d-7432-95bd-5284c15df560", report: "reports/expert/05_testability_report.md" }
+  - { id: 6, specialty: api, agent_id: "019ccbe0-a963-71d2-a3cb-d9b2cf3a5d33", report: "reports/expert/06_api_report.md" }
+summary:
+  total_experts: 6
+  topology: honest_parallel
+  implemented_this_run:
+    - CARD-001
+    - CARD-002
+    - CARD-003
