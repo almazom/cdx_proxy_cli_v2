@@ -1,0 +1,20 @@
+run_id: "03_swarm_review_20260308_115903"
+phase: 1
+timestamp: "2026-03-08T12:18:00+03:00"
+status: COMPLETE
+bootstrap:
+  target_repo: "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  flow_version: "v6.5.3"
+  baseline_head: "f703fb7dd653e4f74c28d9c1220339c14dc28e72"
+  live_scope:
+    - "complete cdx2→cdx contract migration"
+    - "stabilize ChatGPT header override behavior"
+    - "discard environment-coupled scratch wrapper/tests if unnecessary"
+  prior_runs_loaded_for_context:
+    - runs/03_swarm_review_20260308_081622
+  expected_outputs:
+    - "cards + SSOT for accepted findings"
+    - "implementation with green tests"
+    - "simplification tail"
+    - "standalone published HTML bundle"
+    - "telegram delivery receipt"

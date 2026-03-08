@@ -4,7 +4,7 @@ lanes:
   - lane_id: phase_0_preflight
     status: complete
   - lane_id: phase_1_bootstrap
-    status: pending
+    status: complete
   - lane_id: phase_2_scouts
     status: in_progress
   - lane_id: phase_3_fusion

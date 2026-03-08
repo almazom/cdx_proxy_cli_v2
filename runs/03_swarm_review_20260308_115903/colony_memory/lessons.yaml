@@ -1,0 +1,7 @@
+run_id: "03_swarm_review_20260308_115903"
+loaded_from_previous_runs:
+  - "Prior runs exist and are used only as historical context, not as evidence for current findings"
+lessons:
+  - "Current run must validate findings against the live worktree before creating cards"
+  - "Tail phases 10-13 are mandatory for v6.5.3 and must consume post-simplification state"
+  - "Current scope is a live cdx-only migration plus header normalization hardening"
