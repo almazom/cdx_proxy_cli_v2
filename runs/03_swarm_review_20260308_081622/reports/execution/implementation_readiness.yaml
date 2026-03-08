@@ -1,0 +1,10 @@
+run_id: "03_swarm_review_20260308_081622"
+timestamp: "2026-03-08T08:30:39+03:00"
+status: READY
+cards_selected:
+  - CARD-001
+  - CARD-002
+  - CARD-003
+notes:
+  - "All selected cards are <=4h and have direct source/test ownership"
+  - "Baseline tests were green before implementation"
