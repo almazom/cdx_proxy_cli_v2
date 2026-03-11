@@ -121,6 +121,36 @@ python scripts/migrate_tokens_to_keyring.py ~/.codex/_auths
 - stable-first selection: if at least one stable key is available, foreground traffic avoids previously hard-failed keys
 - token refresh: if auth file token changes, penalties reset for that key
 
+### Auto-Heal Blacklist (Background Health Checking)
+
+Inspired by Envoy's outlier detection and active health checking:
+
+- **Background checker**: Runs every 60s to probe blacklisted keys
+- **Health check**: Lightweight API call to verify key is working again
+- **Auto-restoration**: After 2 successful health checks, key is restored to pool
+- **Failure handling**: 3 consecutive failures extend blacklist TTL (exponential backoff)
+- **Notifications**: All events logged to trace (`cdx trace`) and event log
+- **Consecutive error threshold**: Blacklist only after 3 consecutive errors (configurable)
+- **Max ejection percent**: Never blacklist more than 50% of keys (configurable)
+
+Events you'll see:
+- `auth.blacklisted` — Key ejected due to 401/403
+- `auth.cooldown` — Key rate limited (429)
+- `auth.pool_exhausted` — All keys unavailable (503)
+- `auto_heal.success` — Key restored via background health check
+- `auto_heal.failure` — Health check failed, blacklist extended
+
+### Configuration (Environment Variables)
+
+```bash
+# Auto-heal configuration
+export CLIPROXY_AUTO_HEAL_INTERVAL=60          # Health check interval (seconds)
+export CLIPROXY_AUTO_HEAL_SUCCESS_TARGET=2     # Successes to restore key
+export CLIPROXY_AUTO_HEAL_MAX_ATTEMPTS=3       # Failures before penalty
+export CLIPROXY_MAX_EJECTION_PERCENT=50        # Max % keys that can be blacklisted
+export CLIPROXY_CONSECUTIVE_ERROR_THRESHOLD=3  # Errors before blacklist
+```
+
 ## Tests
 
 ```bash

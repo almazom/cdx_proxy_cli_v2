@@ -1,40 +1,38 @@
-# Python
+
+*~
+build/
+.coverage
+dist/
+.DS_Store
+*.egg
+*.egg-info/
+.eggs/
+env/
+ENV/
+# Generated run artifacts
+htmlcov/
+# IDE
+.idea/
+.nox/
+# OS
 __pycache__/
 *.py[c,o]
 *.pyo
-*.egg-info/
-.eggs/
-*.egg
-dist/
-build/
+.pytest_cache/
+# Python
+.ruff_cache/
+runs/
+runs/*/reports/execution/*.html
+runs/*/reports/execution/*.publish*.json
+runs/*/reports/execution/*_publish.json
+runs/*/reports/execution/simplification_step.md
 *.so
-
-# Virtual environments
+*.swo
+*.swp
+# Testing
+Thumbs.db
+.tox/
 .venv/
 venv/
-ENV/
-env/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# IDE
-.idea/
+# Virtual environments
 .vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Generated run artifacts
-runs/*/reports/execution/*.html
-runs/*/reports/execution/*_publish.json
-runs/*/reports/execution/*.publish*.json
-runs/*/reports/execution/simplification_step.md
