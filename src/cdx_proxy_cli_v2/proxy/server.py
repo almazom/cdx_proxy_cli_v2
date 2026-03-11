@@ -189,19 +189,38 @@ def _normalize_model_context_window(item: dict[str, Any]) -> int:
     return 128000
 
 
+_VALID_REASONING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+_REASONING_LEVEL_ALIASES = {
+    "standard": "medium",
+    "extended": "high",
+}
+
+
+def _normalize_reasoning_level(value: Any) -> Optional[str]:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if raw in _VALID_REASONING_LEVELS:
+        return raw
+    return _REASONING_LEVEL_ALIASES.get(raw)
+
+
 def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
-    existing = item.get("default_reasoning_level")
-    if isinstance(existing, str) and existing.strip():
-        return existing.strip()
+    normalized_existing = _normalize_reasoning_level(item.get("default_reasoning_level"))
+    if normalized_existing:
+        return normalized_existing
     supported = item.get("supported_reasoning_levels")
     if isinstance(supported, list):
         for candidate in supported:
             if isinstance(candidate, str) and candidate.strip():
-                return candidate.strip()
+                normalized = _normalize_reasoning_level(candidate)
+                if normalized:
+                    return normalized
             if isinstance(candidate, dict):
                 effort = candidate.get("effort") or candidate.get("thinking_effort")
-                if isinstance(effort, str) and effort.strip():
-                    return effort.strip()
+                normalized = _normalize_reasoning_level(effort)
+                if normalized:
+                    return normalized
     if str(item.get("reasoning_type") or "").strip().lower() == "reasoning":
         return "medium"
     return "low"
@@ -210,22 +229,31 @@ def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
 def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[dict[str, str]]:
     existing = item.get("supported_reasoning_levels")
     normalized: list[dict[str, str]] = []
+    seen_efforts: set[str] = set()
     if isinstance(existing, list):
         for candidate in existing:
             if isinstance(candidate, dict):
                 effort = candidate.get("effort") or candidate.get("thinking_effort")
                 description = candidate.get("description")
-                if isinstance(effort, str) and effort.strip():
+                normalized_effort = _normalize_reasoning_level(effort)
+                if normalized_effort and normalized_effort not in seen_efforts:
                     normalized.append(
                         {
-                            "effort": effort.strip(),
+                            "effort": normalized_effort,
                             "description": str(description or "").strip(),
                         }
                     )
+                    seen_efforts.add(normalized_effort)
             elif isinstance(candidate, str) and candidate.strip():
-                normalized.append(
-                    {"effort": candidate.strip(), "description": candidate.strip()}
-                )
+                normalized_effort = _normalize_reasoning_level(candidate)
+                if normalized_effort and normalized_effort not in seen_efforts:
+                    normalized.append(
+                        {
+                            "effort": normalized_effort,
+                            "description": candidate.strip(),
+                        }
+                    )
+                    seen_efforts.add(normalized_effort)
         if normalized:
             return normalized
 
@@ -236,7 +264,8 @@ def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[di
         if not isinstance(effort, dict):
             continue
         effort_name = effort.get("thinking_effort")
-        if not isinstance(effort_name, str) or not effort_name.strip():
+        normalized_effort = _normalize_reasoning_level(effort_name)
+        if not normalized_effort or normalized_effort in seen_efforts:
             continue
         description = (
             effort.get("description")
@@ -247,10 +276,11 @@ def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[di
         )
         normalized.append(
             {
-                "effort": effort_name.strip(),
+                "effort": normalized_effort,
                 "description": str(description).strip(),
             }
         )
+        seen_efforts.add(normalized_effort)
     return normalized
 
 
@@ -267,8 +297,9 @@ def _normalize_codex_cli_model_fields(item: dict[str, Any]) -> bool:
     for key, value in _codex_cli_static_model_fields().items():
         ensure(key, value)
 
-    if "default_reasoning_level" not in item:
-        item["default_reasoning_level"] = _normalize_model_default_reasoning_level(item)
+    normalized_default_reasoning_level = _normalize_model_default_reasoning_level(item)
+    if item.get("default_reasoning_level") != normalized_default_reasoning_level:
+        item["default_reasoning_level"] = normalized_default_reasoning_level
         changed = True
     if "context_window" not in item:
         item["context_window"] = _normalize_model_context_window(item)

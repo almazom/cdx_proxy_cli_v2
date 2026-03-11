@@ -607,10 +607,39 @@ class TestModelsEndpoint:
         )
 
         assert normalized["models"][0]["supported_reasoning_levels"] == [
-            {"effort": "standard", "description": "standard"},
-            {"effort": "extended", "description": "extended"},
+            {"effort": "medium", "description": "standard"},
+            {"effort": "high", "description": "extended"},
         ]
         assert normalized["models"][1]["supported_reasoning_levels"] == []
+
+    def test_maps_alias_reasoning_levels_to_codex_enum(self):
+        """Codex only accepts a fixed reasoning-level enum in /models payloads."""
+        body = json.dumps(
+            {
+                "models": [
+                    {
+                        "slug": "gpt-5-4-thinking",
+                        "default_reasoning_level": "standard",
+                        "supported_reasoning_levels": [
+                            {"effort": "standard", "description": "Balanced thinking"},
+                            {"effort": "extended", "description": "Longer thinking"},
+                        ],
+                    }
+                ]
+            }
+        ).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_models_response_body(
+                body, request_path="/models?client_version=0.114.0"
+            ).decode("utf-8")
+        )
+
+        assert normalized["models"][0]["default_reasoning_level"] == "medium"
+        assert normalized["models"][0]["supported_reasoning_levels"] == [
+            {"effort": "medium", "description": "Balanced thinking"},
+            {"effort": "high", "description": "Longer thinking"},
+        ]
 
     def test_normalizes_shell_type_for_codex_cli(self):
         """Upstream /models payloads should expose Codex-required fields."""
