@@ -36,6 +36,21 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--trace-max", type=int, default=None)
     parser.add_argument("--request-timeout", type=int, default=None, help="timeout seconds for /responses endpoints")
     parser.add_argument("--allow-non-loopback", action="store_true", default=None)
+    parser.set_defaults(auto_reset_on_single_key=None)
+    parser.add_argument(
+        "--auto-reset-on-single-key",
+        dest="auto_reset_on_single_key",
+        action="store_true",
+        help="auto-reset blacklist/probation keys after a sustained one-key trace streak",
+    )
+    parser.add_argument(
+        "--no-auto-reset-on-single-key",
+        dest="auto_reset_on_single_key",
+        action="store_false",
+        help="disable one-key starvation auto-reset even if enabled in env",
+    )
+    parser.add_argument("--auto-reset-streak", type=int, default=None, help="recent same-key trace events required before auto-reset")
+    parser.add_argument("--auto-reset-cooldown", type=int, default=None, help="minimum seconds between automatic recovery resets")
     parser.add_argument("--quiet", "-q", action="store_true", default=False, help="Suppress non-error output")
 
 
@@ -49,6 +64,9 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         allow_non_loopback=getattr(args, "allow_non_loopback", None),
         trace_max=getattr(args, "trace_max", None),
         request_timeout=getattr(args, "request_timeout", None),
+        auto_reset_on_single_key=getattr(args, "auto_reset_on_single_key", None),
+        auto_reset_streak=getattr(args, "auto_reset_streak", None),
+        auto_reset_cooldown=getattr(args, "auto_reset_cooldown", None),
     )
 
 
@@ -194,6 +212,123 @@ def handle_doctor(args: argparse.Namespace) -> int:
         return 1
 
     headers = _management_headers(settings)
+
+    # Handle --probe flag: proactively test auth keys
+    if getattr(args, "probe", False):
+        timeout = getattr(args, "probe_timeout", 10)
+        timeout = max(1, min(30, timeout))
+
+        try:
+            probe_payload = fetch_json(
+                base_url=base_url,
+                path=f"/probe?timeout={timeout}",
+                method="POST",
+                headers=headers,
+                timeout=float(timeout) + 5.0,  # Extra buffer for processing
+            )
+        except Exception as exc:
+            print(f"Probe failed: {exc}", file=sys.stderr)
+            return 1
+
+        # Display probe results if not in JSON mode
+        if not bool(args.json):
+            results = probe_payload.get("results", [])
+            probed = probe_payload.get("probed", 0)
+
+            # Count actions
+            action_counts: Dict[str, int] = {}
+            for r in results:
+                action = r.get("action", "none")
+                action_counts[action] = action_counts.get(action, 0) + 1
+
+            print(f"Probed {probed} auth key(s) with timeout={timeout}s")
+            print()
+
+            # Show summary table
+            if action_counts:
+                print("Actions taken:")
+                for action, count in sorted(action_counts.items()):
+                    action_desc = {
+                        "none": "No change (healthy)",
+                        "restored": "Restored from blacklist",
+                        "blacklisted": "Added to blacklist",
+                        "cooldown": "Put in cooldown",
+                        "error": "Network/error during test",
+                    }.get(action, action)
+                    print(f"  {action}: {count} ({action_desc})")
+                print()
+
+            # Show details for non-none actions
+            notable_results = [r for r in results if r.get("action") != "none"]
+            if notable_results:
+                table = Table(title="cdx doctor | probe changes")
+                table.add_column("File")
+                table.add_column("Previous")
+                table.add_column("Current")
+                table.add_column("Action")
+                table.add_column("HTTP")
+                table.add_column("Latency")
+
+                for r in sorted(notable_results, key=lambda x: str(x.get("file", ""))):
+                    latency_ms = r.get("latency_ms", 0)
+                    http_status = r.get("http_status")
+                    http_str = str(http_status) if http_status is not None else "-"
+
+                    table.add_row(
+                        str(r.get("file") or "-"),
+                        str(r.get("previous_status") or "-"),
+                        str(r.get("status") or "-"),
+                        str(r.get("action") or "-"),
+                        http_str,
+                        f"{latency_ms}ms",
+                    )
+                Console().print(table)
+                print()
+
+        # Include probe results in JSON output
+        if bool(args.json):
+            # Fetch fresh health after probe
+            try:
+                health_payload = fetch_json(
+                    base_url=base_url,
+                    path="/health?refresh=1",
+                    headers=headers,
+                    timeout=2.0,
+                )
+            except Exception as exc:
+                print(f"Doctor failed to read /health after probe: {exc}", file=sys.stderr)
+                return 1
+
+            accounts_raw = health_payload.get("accounts", [])
+            accounts: List[Dict[str, Any]] = [item for item in accounts_raw if isinstance(item, dict)] if isinstance(accounts_raw, list) else []
+            summary = {
+                "whitelist": 0,
+                "probation": 0,
+                "cooldown": 0,
+                "blacklist": 0,
+                "unknown": 0,
+                "total": len(accounts),
+            }
+            for item in accounts:
+                bucket = _state_bucket(item.get("status"))
+                summary[bucket] += 1
+
+            output: Dict[str, Any] = {
+                "ok": True,
+                "base_url": base_url,
+                "probe": probe_payload,
+                "policy": {
+                    "hard_fail_blacklist": [401, 403],
+                    "rate_limit_cooldown": 429,
+                    "probation_success_target": 2,
+                },
+                "summary": summary,
+                "accounts": accounts,
+            }
+            print(json.dumps(output, ensure_ascii=False, indent=2))
+            return 0
+
+    # Regular doctor flow (always fetch health)
     try:
         health_payload = fetch_json(
             base_url=base_url,
@@ -280,7 +415,12 @@ def handle_stop(args: argparse.Namespace) -> int:
 
 def handle_trace(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    base_url = settings.base_url
+    # Get actual running proxy endpoint from state file, not default settings
+    status_payload = service_status(settings)
+    if not status_payload.get("healthy"):
+        print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
+        return 1
+    base_url = str(status_payload.get("base_url") or settings.base_url)
     headers = _management_headers(settings)
     upstream_base_url = None
     log_request_preview = None
@@ -399,19 +539,183 @@ def handle_reset(args: argparse.Namespace) -> int:
 
     count = result.get("reset", 0)
     filter_info = result.get("filter", {})
-    
+
     if bool(getattr(args, "json", False)):
         print(json.dumps(result, indent=2))
         return 0
-    
+
     # Print summary
     filter_str = ""
     if filter_info.get("name"):
         filter_str = f" (name={filter_info['name']})"
     elif filter_info.get("state"):
         filter_str = f" (state={filter_info['state']})"
-    
+
     print(f"Reset {count} auth key(s){filter_str}")
+    return 0
+
+
+def _get_codex_home() -> Path:
+    """Get the codex home directory (e.g., ~/.codex)."""
+    code_home = str(os.environ.get("CODEX_HOME") or "").strip()
+    if code_home:
+        return Path(os.path.expanduser(code_home))
+    home_dir = Path(os.path.expanduser(str(os.environ.get("HOME") or "~")))
+    return home_dir / ".codex"
+
+
+def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
+    """Atomically write JSON data to a file to prevent corruption."""
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix=".",
+        dir=str(path.parent),
+        delete=False,
+        encoding="utf-8",
+    ) as f:
+        temp_path = Path(f.name)
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    # Set restrictive permissions before moving into place
+    try:
+        temp_path.chmod(0o600)
+    except OSError:
+        pass
+    temp_path.rename(path)
+
+
+def handle_rotate(args: argparse.Namespace) -> int:
+    """Rotate active auth key for codex CLI.
+
+    Finds a healthy auth from the _auths directory and copies it to
+    the active auth.json location for use by the codex CLI.
+    """
+    settings = _settings_from_args(args)
+    base_url = _healthy_base_url_or_none(settings)
+    if base_url is None:
+        return 1
+
+    headers = _management_headers(settings)
+    try:
+        health_payload = fetch_json(
+            base_url=base_url,
+            path="/health?refresh=1",
+            headers=headers,
+            timeout=5.0,
+        )
+    except Exception as exc:
+        print(f"Failed to fetch health status: {exc}", file=sys.stderr)
+        return 1
+
+    accounts_raw = health_payload.get("accounts", [])
+    accounts: List[Dict[str, Any]] = (
+        [item for item in accounts_raw if isinstance(item, dict)]
+        if isinstance(accounts_raw, list)
+        else []
+    )
+
+    # Filter for healthy auths (status == "OK")
+    healthy_auths = [
+        acc for acc in accounts
+        if str(acc.get("status", "")).upper() == "OK"
+    ]
+
+    if not healthy_auths:
+        print("Error: No healthy auth keys available.", file=sys.stderr)
+        print("All keys are in cooldown, blacklist, or probation state.", file=sys.stderr)
+        print("Run `cdx doctor` to see current auth states.", file=sys.stderr)
+        return 1
+
+    # Sort by used count (ascending) to pick least-used, then by file name for stability
+    healthy_auths.sort(key=lambda a: (int(a.get("used") or 0), str(a.get("file") or "")))
+    selected = healthy_auths[0]
+
+    selected_file = str(selected.get("file") or "")
+    selected_email = str(selected.get("email") or selected.get("account") or "")
+    selected_used = int(selected.get("used") or 0)
+
+    # Resolve the source auth file path
+    auth_dir_path = Path(settings.auth_dir).expanduser().resolve()
+    source_path = auth_dir_path / selected_file
+
+    # Determine destination path
+    codex_home = _get_codex_home()
+    dest_path = codex_home / "auth.json"
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    json_output = bool(getattr(args, "json", False))
+
+    # Handle dry-run before file system operations
+    if dry_run:
+        if json_output:
+            output = {
+                "dry_run": True,
+                "selected": {
+                    "file": selected_file,
+                    "email": selected_email,
+                    "used": selected_used,
+                },
+                "source": str(source_path),
+                "destination": str(dest_path),
+            }
+            print(json.dumps(output, indent=2))
+        else:
+            print("Dry run: Would rotate to auth key")
+            print(f"  File: {selected_file}")
+            if selected_email:
+                print(f"  Email: {selected_email}")
+            print(f"  Used count: {selected_used}")
+            print(f"  Source: {source_path}")
+            print(f"  Destination: {dest_path}")
+        return 0
+
+    # Validate source path is within auth directory (prevent path traversal)
+    try:
+        if not source_path.resolve().is_relative_to(auth_dir_path):
+            print(f"Error: Invalid auth file path: {selected_file}", file=sys.stderr)
+            return 1
+    except OSError:
+        print(f"Error: Cannot resolve auth file path: {selected_file}", file=sys.stderr)
+        return 1
+
+    if not source_path.exists():
+        print(f"Error: Auth file not found: {source_path}", file=sys.stderr)
+        return 1
+
+    # Read the source auth file
+    raw, error = read_auth_json(source_path)
+    if error or raw is None:
+        print(f"Error: Failed to read auth file: {error}", file=sys.stderr)
+        return 1
+
+    # Perform the rotation (atomic write)
+    try:
+        _atomic_write_json(dest_path, raw)
+    except Exception as exc:
+        print(f"Error: Failed to write auth file: {exc}", file=sys.stderr)
+        return 1
+
+    if json_output:
+        output = {
+            "success": True,
+            "selected": {
+                "file": selected_file,
+                "email": selected_email,
+                "used": selected_used,
+            },
+            "destination": str(dest_path),
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"Rotated to auth key: {selected_file}")
+        if selected_email:
+            print(f"  Email: {selected_email}")
+        print(f"  Used count: {selected_used}")
+        print(f"  Written to: {dest_path}")
+
     return 0
 
 
@@ -519,6 +823,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = sub.add_parser("doctor", help="rotation doctor (white/black/probation)")
     _add_runtime_options(doctor_parser)
     doctor_parser.add_argument("--json", action="store_true")
+    doctor_parser.add_argument("--probe", action="store_true", help="proactively test auth keys via HTTP requests")
+    doctor_parser.add_argument("--fix", dest="probe", action="store_true", help="alias for --probe")
+    doctor_parser.add_argument("--repair", dest="probe", action="store_true", help="alias for --probe")
+    doctor_parser.add_argument("--probe-timeout", type=int, default=10, help="per-key timeout in seconds (default: 10, max: 30)")
     doctor_parser.set_defaults(handler=handle_doctor)
 
     stop_parser = sub.add_parser("stop", help="stop proxy service")
@@ -554,6 +862,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reset_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
     reset_parser.set_defaults(handler=handle_reset)
+
+    rotate_parser = sub.add_parser("rotate", help="rotate active auth key for codex CLI")
+    _add_runtime_options(rotate_parser)
+    rotate_parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="show what would be rotated without making changes",
+    )
+    rotate_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
+    rotate_parser.set_defaults(handler=handle_rotate)
 
     all_parser = sub.add_parser("all", help="show all keys cards dashboard (v1 style)")
     _add_runtime_options(all_parser)
