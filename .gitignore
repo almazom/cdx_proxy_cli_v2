@@ -37,3 +37,4 @@ venv/
 # Virtual environments
 .vscode/
 docs/envoy_doc/
+docs/flow_artefacts/
