@@ -17,7 +17,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from cdx_proxy_cli_v2.auth.store import load_auth_records
-from cdx_proxy_cli_v2.auth.eligibility import fetch_limit_health, merge_runtime_with_limits, merged_ok
+from cdx_proxy_cli_v2.auth.eligibility import (
+    fetch_limit_health,
+    merge_runtime_with_limits,
+    merged_ok,
+)
 from cdx_proxy_cli_v2.observability.event_log import EventLogger
 from cdx_proxy_cli_v2.proxy.rules import (
     CHATGPT_HOSTS,
@@ -83,7 +87,9 @@ def _extract_error_strings(raw_body: bytes) -> list[str]:
     return texts
 
 
-def _extract_error_code(raw_body: bytes, *, status: Optional[int] = None) -> Optional[str]:
+def _extract_error_code(
+    raw_body: bytes, *, status: Optional[int] = None
+) -> Optional[str]:
     texts = _extract_error_strings(raw_body)
     if int(status or 0) == 400:
         haystack = " ".join(texts).lower()
@@ -145,12 +151,26 @@ def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
                 if not isinstance(item, dict):
                     continue
                 if item.get("display_name"):
-                    continue
-                display_name = item.get("title") or item.get("slug") or item.get("id")
-                if not isinstance(display_name, str) or not display_name.strip():
-                    continue
-                item["display_name"] = display_name
-                changed = True
+                    pass
+                else:
+                    display_name = (
+                        item.get("title") or item.get("slug") or item.get("id")
+                    )
+                    if isinstance(display_name, str) and display_name.strip():
+                        item["display_name"] = display_name
+                        changed = True
+                if not isinstance(item.get("supported_reasoning_levels"), list):
+                    supported_reasoning_levels: list[str] = []
+                    thinking_efforts = item.get("thinking_efforts")
+                    if isinstance(thinking_efforts, list):
+                        for effort in thinking_efforts:
+                            if not isinstance(effort, dict):
+                                continue
+                            level = effort.get("thinking_effort")
+                            if isinstance(level, str) and level.strip():
+                                supported_reasoning_levels.append(level.strip())
+                    item["supported_reasoning_levels"] = supported_reasoning_levels
+                    changed = True
     if not changed:
         return body
     return json.dumps(payload).encode("utf-8")
@@ -175,13 +195,23 @@ class ProxyRuntime:
     trace_store: TraceStore = field(init=False)
     logger: EventLogger = field(init=False)
     overload_guard: LocalOverloadGuard = field(init=False)
-    _auto_reset_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
-    _metrics_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _auto_reset_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    _metrics_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
     _auto_reset_blocked_until: float = field(default=0.0, init=False, repr=False)
     # Auto-heal background checker
-    _auto_heal_thread: Optional[threading.Thread] = field(default=None, init=False, repr=False)
-    _auto_heal_stop: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
-    _limit_health_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
+    _auto_heal_thread: Optional[threading.Thread] = field(
+        default=None, init=False, repr=False
+    )
+    _auto_heal_stop: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    _limit_health_cache: Dict[str, Dict[str, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _limit_health_cache_at: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -209,10 +239,16 @@ class ProxyRuntime:
         # Start background auto-heal checker
         self._start_auto_heal_checker()
 
-    def _refresh_limit_health(self, *, force: bool = False) -> Dict[str, Dict[str, Any]]:
+    def _refresh_limit_health(
+        self, *, force: bool = False
+    ) -> Dict[str, Dict[str, Any]]:
         now = time.time()
         before_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
-        if not force and self._limit_health_cache and (now - self._limit_health_cache_at) < 60.0:
+        if (
+            not force
+            and self._limit_health_cache
+            and (now - self._limit_health_cache_at) < 60.0
+        ):
             return self._limit_health_cache
         try:
             self._limit_health_cache = fetch_limit_health(self.settings.auth_dir)
@@ -222,7 +258,9 @@ class ProxyRuntime:
             pass
         self.auth_pool.apply_limit_health(self._limit_health_cache)
         after_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
-        self._emit_auth_transitions(before_accounts=before_accounts, after_accounts=after_accounts)
+        self._emit_auth_transitions(
+            before_accounts=before_accounts, after_accounts=after_accounts
+        )
         return self._limit_health_cache
 
     def _start_auto_heal_checker(self) -> None:
@@ -239,80 +277,89 @@ class ProxyRuntime:
         """Background loop: check blacklisted keys and attempt auto-heal."""
         while not self._auto_heal_stop.is_set():
             try:
-                now = time.time()
-                snapshot = self.auth_pool.health_snapshot()
-                
-                for account in snapshot:
-                    # Check only blacklisted keys
-                    if account.get("status") != "BLACKLIST":
-                        continue
-                    if account.get("blacklist_reason") == CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE:
-                        continue
-                    
-                    blacklist_remaining = account.get("blacklist_seconds") or 0
-                    if blacklist_remaining <= 0:
-                        continue  # Already expired, will be restored on next pick
-                    
-                    auth_file = account.get("file", "")
-                    
-                    # Check if enough time passed since last check
-                    last_check = self._auto_heal_last_check.get(auth_file, 0)
-                    if now - last_check < self.auth_pool.auto_heal_interval:
-                        continue
-                    
-                    # Perform health check
-                    success = self._perform_auto_heal_check(account)
-                    
-                    # Update last check time
-                    self._auto_heal_last_check[auth_file] = now
-                    
-                    if success:
-                        # Reload before restoration so fresh on-disk tokens are used.
-                        self.reload_auths()
-                        self.apply_auth_result(auth_file, status=200)
-                        merged_state = {
-                            item.get("file", ""): item
-                            for item in self.health_snapshot(refresh=False).get("accounts", [])
-                        }.get(auth_file, {})
-                        if bool(merged_state.get("eligible_now")):
-                            self._notify_user(
-                                level="INFO",
-                                event="auto_heal.success",
-                                message=f"Key {account.get('email') or auth_file} restored after successful health check",
-                                auth_file=auth_file,
-                                auth_email=account.get("email"),
-                            )
-                        else:
-                            self._notify_user(
-                                level="INFO",
-                                event="auto_heal.progress",
-                                message=f"Health check passed for {account.get('email') or auth_file}, waiting for full re-entry",
-                                auth_file=auth_file,
-                                auth_email=account.get("email"),
-                            )
-                    else:
-                        # Mark as failure to extend blacklist
-                        self.auth_pool.mark_auto_heal_failure(auth_file, now)
-                        state = {
-                            item.get("file", ""): item
-                            for item in self.auth_pool.health_snapshot()
-                        }.get(auth_file, {})
-                        self._notify_user(
-                            level="WARN",
-                            event="auto_heal.failure",
-                            message=f"Health check failed for {account.get('email') or auth_file}, blacklist extended",
-                            auth_file=auth_file,
-                            auth_email=account.get("email"),
-                            cooldown_seconds=state.get("cooldown_seconds"),
-                            blacklist_seconds=state.get("blacklist_seconds"),
-                        )
-                
+                self._run_auto_heal_cycle()
             except Exception:
                 # Silently continue on errors, log at debug level only
                 pass
-            
+
             # Sleep for check interval
             self._auto_heal_stop.wait(timeout=self.auth_pool.auto_heal_interval)
+
+    def _run_auto_heal_cycle(self, *, now: Optional[float] = None) -> None:
+        """Run one auto-heal scan over blacklist/probation keys."""
+        now_ts = float(now if now is not None else time.time())
+        snapshot = self.auth_pool.health_snapshot()
+
+        for account in snapshot:
+            status = str(account.get("status") or "").upper()
+            if status not in {"BLACKLIST", "PROBATION"}:
+                continue
+            if (
+                account.get("blacklist_reason")
+                == CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE
+            ):
+                continue
+
+            auth_file = str(account.get("file") or "").strip()
+            if not auth_file:
+                continue
+
+            last_check = self._auto_heal_last_check.get(auth_file, 0.0)
+            if now_ts - last_check < self.auth_pool.auto_heal_interval:
+                continue
+
+            next_probe_at = account.get("until")
+            if (
+                status == "PROBATION"
+                and isinstance(next_probe_at, (int, float))
+                and now_ts < float(next_probe_at)
+            ):
+                continue
+
+            success = self._perform_auto_heal_check(account)
+            self._auto_heal_last_check[auth_file] = now_ts
+
+            if success:
+                # Reload before restoration so fresh on-disk tokens are used.
+                self.reload_auths()
+                self.apply_auth_result(auth_file, status=200)
+                merged_state = {
+                    item.get("file", ""): item
+                    for item in self.health_snapshot(refresh=False).get("accounts", [])
+                }.get(auth_file, {})
+                if bool(merged_state.get("eligible_now")):
+                    self._notify_user(
+                        level="INFO",
+                        event="auto_heal.success",
+                        message=f"Key {account.get('email') or auth_file} restored after successful health check",
+                        auth_file=auth_file,
+                        auth_email=account.get("email"),
+                    )
+                else:
+                    self._notify_user(
+                        level="INFO",
+                        event="auto_heal.progress",
+                        message=f"Health check passed for {account.get('email') or auth_file}, waiting for full re-entry",
+                        auth_file=auth_file,
+                        auth_email=account.get("email"),
+                    )
+                continue
+
+            if status == "BLACKLIST":
+                self.auth_pool.mark_auto_heal_failure(auth_file, now_ts)
+
+            state = {
+                item.get("file", ""): item for item in self.auth_pool.health_snapshot()
+            }.get(auth_file, {})
+            self._notify_user(
+                level="WARN",
+                event="auto_heal.failure",
+                message=f"Health check failed for {account.get('email') or auth_file}, blacklist extended",
+                auth_file=auth_file,
+                auth_email=account.get("email"),
+                cooldown_seconds=state.get("cooldown_seconds"),
+                blacklist_seconds=state.get("blacklist_seconds"),
+            )
 
     def _perform_auto_heal_check(self, account: Dict[str, Any]) -> bool:
         """Perform a lightweight health check on a blacklisted key.
@@ -321,21 +368,27 @@ class ProxyRuntime:
         """
 
         auth_file = account.get("file", "")
-        token = ""
-        for record in load_auth_records(self.settings.auth_dir):
-            if record.name == auth_file:
-                token = record.token
+        matching_record = None
+        for candidate in load_auth_records(self.settings.auth_dir):
+            if candidate.name == auth_file:
+                matching_record = candidate
                 break
-        if not token:
+        if matching_record is None or not matching_record.token:
             return False
 
-        result = self._probe_single_auth(auth_file, token, timeout=5)
+        result = self._probe_single_auth(
+            auth_file,
+            matching_record.token,
+            matching_record.account_id,
+            timeout=5,
+        )
         return result.get("success", False)
 
     def _probe_single_auth(
         self,
         auth_file: str,
         token: str,
+        account_id: Optional[str] = None,
         timeout: int = 10,
     ) -> Dict[str, Any]:
         """Probe a single auth key via HTTP GET to /backend-api/models.
@@ -361,17 +414,28 @@ class ProxyRuntime:
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             base_path = parsed.path.rstrip("/")
             path = f"{base_path}/models" if base_path else "/models"
+            chatgpt_backend = (
+                host.lower() in CHATGPT_HOSTS and base_path == "/backend-api"
+            )
+            headers = build_forward_headers({}, chatgpt_backend=chatgpt_backend)
+            set_header_case_insensitive(headers, "Authorization", f"Bearer {token}")
+            set_header_case_insensitive(headers, "Content-Type", "application/json")
+            if chatgpt_backend and account_id:
+                set_header_case_insensitive(
+                    headers, "ChatGPT-Account-Id", str(account_id)
+                )
 
-            conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+            conn_cls = (
+                http.client.HTTPSConnection
+                if parsed.scheme == "https"
+                else http.client.HTTPConnection
+            )
             conn = conn_cls(host, port, timeout=timeout)
             try:
                 conn.request(
                     "GET",
                     path,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                 )
                 response = conn.getresponse()
                 result["http_status"] = response.status
@@ -382,19 +446,25 @@ class ProxyRuntime:
                     raw_body = response.read()
                 except Exception:
                     raw_body = b""
-                extracted_error_code = _extract_error_code(raw_body, status=response.status)
+                extracted_error_code = _extract_error_code(
+                    raw_body, status=response.status
+                )
 
                 # Determine success based on status code
                 if 200 <= response.status < 300:
                     result["success"] = True
                 elif response.status in {401, 403}:
-                    result["error_code"] = extracted_error_code or ("token_invalid" if response.status == 401 else "forbidden")
+                    result["error_code"] = extracted_error_code or (
+                        "token_invalid" if response.status == 401 else "forbidden"
+                    )
                 elif response.status == 429:
                     result["error_code"] = extracted_error_code or "rate_limited"
                 elif response.status >= 500:
                     result["error_code"] = extracted_error_code or "server_error"
                 else:
-                    result["error_code"] = extracted_error_code or f"http_{response.status}"
+                    result["error_code"] = (
+                        extracted_error_code or f"http_{response.status}"
+                    )
 
             finally:
                 conn.close()
@@ -407,7 +477,7 @@ class ProxyRuntime:
         return result
 
     def probe_all_auths(self, timeout: int = 10) -> Dict[str, Any]:
-        """Probe all auth keys and update their states based on results.
+        """Probe all auth keys without mutating their current runtime state.
 
         Returns a summary of probe results with per-key details.
         """
@@ -420,8 +490,7 @@ class ProxyRuntime:
 
         # Get current snapshot for comparison
         snapshot_before = {
-            item.get("file", ""): item
-            for item in self.auth_pool.health_snapshot()
+            item.get("file", ""): item for item in self.auth_pool.health_snapshot()
         }
 
         results: List[Dict[str, Any]] = []
@@ -433,6 +502,7 @@ class ProxyRuntime:
                     self._probe_single_auth,
                     record.name,
                     record.token,
+                    record.account_id,
                     timeout,
                 ): record
                 for record in records
@@ -466,23 +536,27 @@ class ProxyRuntime:
                     action = "would_cooldown"
                 elif http_status in {401, 403}:
                     action = "auth_failed"
-                elif is_auth_incompatible_error(int(http_status or 0), str(error_code or "")):
+                elif is_auth_incompatible_error(
+                    int(http_status or 0), str(error_code or "")
+                ):
                     action = "compat_failed"
                 elif http_status is not None:
                     action = "error"
                 else:
                     action = "network_error"
 
-                results.append({
-                    "file": record.name,
-                    "email": record.email,
-                    "previous_status": prev_status,
-                    "status": prev_status,
-                    "http_status": http_status,
-                    "action": action,
-                    "latency_ms": probe_result.get("latency_ms", 0),
-                    "error": probe_result.get("error") or error_code,
-                })
+                results.append(
+                    {
+                        "file": record.name,
+                        "email": record.email,
+                        "previous_status": prev_status,
+                        "status": prev_status,
+                        "http_status": http_status,
+                        "action": action,
+                        "latency_ms": probe_result.get("latency_ms", 0),
+                        "error": probe_result.get("error") or error_code,
+                    }
+                )
 
         return {
             "probed": len(results),
@@ -499,7 +573,7 @@ class ProxyRuntime:
     ) -> None:
         """Send notification to user via logger and trace store."""
         # Remove 'event' from kwargs if present to avoid duplication
-        kwargs.pop('event', None)
+        kwargs.pop("event", None)
         payload = {
             "ts": time.time(),
             "event": event,
@@ -514,8 +588,12 @@ class ProxyRuntime:
         *,
         limit_health: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
-        active_limit_health = self._limit_health_cache if limit_health is None else limit_health
-        return merge_runtime_with_limits(self.auth_pool.health_snapshot(), active_limit_health)
+        active_limit_health = (
+            self._limit_health_cache if limit_health is None else limit_health
+        )
+        return merge_runtime_with_limits(
+            self.auth_pool.health_snapshot(), active_limit_health
+        )
 
     @staticmethod
     def _account_index(accounts: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -537,7 +615,8 @@ class ProxyRuntime:
             counters = dict(self._metrics)
         counters.update(self.overload_guard.snapshot())
         counters["auth_available"] = sum(
-            1 for account in self._merged_accounts(limit_health=self._limit_health_cache)
+            1
+            for account in self._merged_accounts(limit_health=self._limit_health_cache)
             if bool(account.get("eligible_now"))
         )
         return counters
@@ -584,7 +663,11 @@ class ProxyRuntime:
 
             auth_email = after.get("email") or before.get("email")
             display_name = auth_email or auth_file
-            reason = after.get("reason") or after.get("blacklist_reason") or after.get("limit_reason")
+            reason = (
+                after.get("reason")
+                or after.get("blacklist_reason")
+                or after.get("limit_reason")
+            )
             self._notify_user(
                 level=level,
                 event=event,
@@ -723,7 +806,8 @@ class ProxyRuntime:
         threshold = max(1, int(self.settings.auto_reset_streak))
         trace_events = self.trace_store.list(limit=self.trace_store.max_size)
         recent_events = [
-            event for event in reversed(trace_events)
+            event
+            for event in reversed(trace_events)
             if str(event.get("event") or "") == "proxy.request"
         ][:threshold]
         if len(recent_events) < threshold:
@@ -756,7 +840,9 @@ class ProxyRuntime:
             if reset_count <= 0:
                 return 0
 
-            self._auto_reset_blocked_until = now + max(1, int(self.settings.auto_reset_cooldown))
+            self._auto_reset_blocked_until = now + max(
+                1, int(self.settings.auto_reset_cooldown)
+            )
             only_auth = next(iter(auth_names))
             self.logger.write(
                 level="WARN",
@@ -789,10 +875,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _is_websocket_upgrade_request(headers: Dict[str, str]) -> bool:
         upgrade = _header_value_case_insensitive(headers, "Upgrade").strip().lower()
-        connection = _header_value_case_insensitive(headers, "Connection").strip().lower()
+        connection = (
+            _header_value_case_insensitive(headers, "Connection").strip().lower()
+        )
         if upgrade != "websocket":
             return False
-        connection_tokens = {token.strip() for token in connection.split(",") if token.strip()}
+        connection_tokens = {
+            token.strip() for token in connection.split(",") if token.strip()
+        }
         return "upgrade" in connection_tokens
 
     def _tunnel_websocket(
@@ -831,7 +921,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         chunk = b""
                     if not chunk:
                         return
-                    target = upstream_socket if source is client_socket else client_socket
+                    target = (
+                        upstream_socket if source is client_socket else client_socket
+                    )
                     target.sendall(chunk)
         finally:
             try:
@@ -925,13 +1017,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return {}
         return parse_qs(query)
 
-    def _first_query_value(self, params: Dict[str, List[str]], key: str) -> Optional[str]:
+    def _first_query_value(
+        self, params: Dict[str, List[str]], key: str
+    ) -> Optional[str]:
         values = params.get(key)
         if not values:
             return None
         return values[0]
 
-    def _int_query_value(self, params: Dict[str, List[str]], key: str, default: int = 0) -> int:
+    def _int_query_value(
+        self, params: Dict[str, List[str]], key: str, default: int = 0
+    ) -> int:
         raw_value = self._first_query_value(params, key)
         if raw_value is None:
             return default
@@ -940,7 +1036,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return default
 
-    def _parse_reset_params(self, params: Dict[str, List[str]]) -> tuple[Optional[str], Optional[str]]:
+    def _parse_reset_params(
+        self, params: Dict[str, List[str]]
+    ) -> tuple[Optional[str], Optional[str]]:
         """Parse reset query parameters from request path.
 
         Returns:
@@ -970,7 +1068,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         if route == "shutdown":
             self._send_json(200, {"status": "shutting_down"})
-            runtime.logger.write(level="INFO", event="proxy.shutdown_requested", message="shutdown requested")
+            runtime.logger.write(
+                level="INFO",
+                event="proxy.shutdown_requested",
+                message="shutdown requested",
+            )
             self.server.initiate_shutdown()
             return
         if route == "reset":
@@ -979,10 +1081,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
             name, state = self._parse_reset_params(params)
             count = runtime.auth_pool.reset_auth(name=name, state=state)
-            self._send_json(200, {
-                "reset": count,
-                "filter": {"name": name, "state": state}
-            })
+            self._send_json(
+                200, {"reset": count, "filter": {"name": name, "state": state}}
+            )
             runtime.logger.write(
                 level="INFO",
                 event="proxy.auth_reset",
@@ -1036,7 +1137,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
     ) -> UpstreamAttemptResult:
         connection: Optional[http.client.HTTPConnection] = None
         try:
-            conn_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+            conn_cls = (
+                http.client.HTTPSConnection
+                if scheme == "https"
+                else http.client.HTTPConnection
+            )
             timeout = get_request_timeout(
                 rewritten_path,
                 default=request_timeout,
@@ -1079,7 +1184,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return UpstreamAttemptResult(
                     status=413,
                     headers=[("Content-Type", "application/json")],
-                    body=json.dumps({"error": "response body too large"}).encode("utf-8"),
+                    body=json.dumps({"error": "response body too large"}).encode(
+                        "utf-8"
+                    ),
                 )
             data = _normalize_models_response_body(data, request_path=rewritten_path)
 
@@ -1142,11 +1249,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if base_path and rewritten_path.startswith(f"{base_path}/"):
                 full_path = rewritten_path
             else:
-                full_path = f"{base_path}{rewritten_path}" if base_path else rewritten_path
+                full_path = (
+                    f"{base_path}{rewritten_path}" if base_path else rewritten_path
+                )
 
-            chatgpt_backend = host.lower() in CHATGPT_HOSTS and base_path.rstrip("/") == "/backend-api"
-            chatgpt_responses_mode = bool(chatgpt_backend and is_primary_responses_path(rewritten_path))
-            websocket_upgrade_request = self.command.upper() == "GET" and self._is_websocket_upgrade_request(dict(self.headers))
+            chatgpt_backend = (
+                host.lower() in CHATGPT_HOSTS
+                and base_path.rstrip("/") == "/backend-api"
+            )
+            chatgpt_responses_mode = bool(
+                chatgpt_backend and is_primary_responses_path(rewritten_path)
+            )
+            websocket_upgrade_request = (
+                self.command.upper() == "GET"
+                and self._is_websocket_upgrade_request(dict(self.headers))
+            )
 
             body = self._read_body()
             if body is None:
@@ -1161,13 +1278,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 websocket_upgrade=websocket_upgrade_request,
             )
 
-            max_attempts = 1 if websocket_upgrade_request else max(1, runtime.auth_pool.count())
+            max_attempts = max(1, runtime.auth_pool.count())
             compact_timeout = runtime.settings.compact_timeout
             request_id = uuid.uuid4().hex[:12]
             client_ip = self.client_address[0] if self.client_address else None
 
             final_status = 503
-            final_headers: List[Tuple[str, str]] = [("Content-Type", "application/json")]
+            final_headers: List[Tuple[str, str]] = [
+                ("Content-Type", "application/json")
+            ]
             final_body = json.dumps({"error": "no auths available"}).encode("utf-8")
             stream_response: Optional[http.client.HTTPResponse] = None
             stream_connection: Optional[http.client.HTTPConnection] = None
@@ -1181,9 +1300,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     break
 
                 headers = dict(base_headers)
-                set_header_case_insensitive(headers, "Authorization", f"Bearer {auth_state.record.token}")
+                set_header_case_insensitive(
+                    headers, "Authorization", f"Bearer {auth_state.record.token}"
+                )
                 if chatgpt_backend and auth_state.record.account_id:
-                    set_header_case_insensitive(headers, "chatgpt-account-id", str(auth_state.record.account_id))
+                    set_header_case_insensitive(
+                        headers, "chatgpt-account-id", str(auth_state.record.account_id)
+                    )
 
                 start = time.time()
                 attempt_result = self._run_upstream_attempt(
@@ -1219,21 +1342,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     client_ip=client_ip,
                     error=attempt_result.error_message,
                 )
-                if not websocket_upgrade_request:
-                    runtime.apply_auth_result(
-                        auth_state.record.name,
-                        status=final_status,
-                        error_code=attempt_result.error_code,
-                    )
-                    runtime.maybe_auto_reset_single_key_stall()
+                runtime.apply_auth_result(
+                    auth_state.record.name,
+                    status=final_status,
+                    error_code=attempt_result.error_code,
+                )
+                runtime.maybe_auto_reset_single_key_stall()
 
-                    if is_retryable_auth_failure(final_status, attempt_result.error_code):
-                        attempt += 1
-                        if attempt < max_attempts:
-                            continue
+                if is_retryable_auth_failure(final_status, attempt_result.error_code):
+                    attempt += 1
+                    if attempt < max_attempts:
+                        continue
                 break
 
-            if attempt > 0 and final_status >= 500:
+            if auth_state is not None and final_status >= 500:
                 runtime._increment_metric("upstream_errors_total")
 
             self.send_response(final_status)
@@ -1245,7 +1367,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     continue
                 self.send_header(key, value)
 
-            if final_websocket_upgrade and stream_response is not None and stream_connection is not None:
+            if (
+                final_websocket_upgrade
+                and stream_response is not None
+                and stream_connection is not None
+            ):
                 self.end_headers()
                 self._tunnel_websocket(
                     upstream_connection=stream_connection,
@@ -1292,7 +1418,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def run_proxy_server(settings: Settings) -> None:
     if not is_loopback_host(settings.host) and not settings.allow_non_loopback:
-        raise ValueError("non-loopback bind blocked; use --allow-non-loopback to override")
+        raise ValueError(
+            "non-loopback bind blocked; use --allow-non-loopback to override"
+        )
     management_key = str(settings.management_key or "").strip()
     if not management_key:
         raise ValueError("management key required")
@@ -1352,8 +1480,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--upstream", required=False)
     parser.add_argument("--management-key", required=False)
     parser.add_argument("--trace-max", type=int, required=False)
-    parser.add_argument("--request-timeout", type=int, required=False, help="Timeout in seconds for /responses endpoints (default: 45)")
-    parser.add_argument("--compact-timeout", type=int, required=False, help="Timeout in seconds for /compact endpoints (default: 120)")
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        required=False,
+        help="Timeout in seconds for /responses endpoints (default: 45)",
+    )
+    parser.add_argument(
+        "--compact-timeout",
+        type=int,
+        required=False,
+        help="Timeout in seconds for /compact endpoints (default: 120)",
+    )
     parser.add_argument("--allow-non-loopback", action="store_true")
     return parser
 

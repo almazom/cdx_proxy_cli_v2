@@ -47,12 +47,16 @@ def is_loopback_host(host: str) -> bool:
 
 
 def trace_route(path: str) -> str:
-    path_only = (path or "").split("?", 1)[0]
+    path_only = urlsplit(path or "").path.rstrip("/")
+    if management_route(path):
+        return "management"
     if path_only.endswith("/compact"):
         return "compact"
+    if path_only.endswith("/models"):
+        return "models"
     if "/responses" in path_only:
-        return "request"
-    return "other"
+        return "responses"
+    return ""
 
 
 def management_route(path: str) -> Optional[str]:
@@ -60,7 +64,9 @@ def management_route(path: str) -> Optional[str]:
     return MANAGEMENT_ROUTES.get(path_only)
 
 
-def rewrite_request_path(*, req_path: str, upstream_host: Optional[str], upstream_base_path: str) -> str:
+def rewrite_request_path(
+    *, req_path: str, upstream_host: Optional[str], upstream_base_path: str
+) -> str:
     host = (upstream_host or "").lower()
     if host not in CHATGPT_HOSTS:
         return req_path
@@ -80,7 +86,7 @@ def is_primary_responses_path(req_path: str) -> bool:
 
 def get_request_timeout(req_path: str, default: int = 25, compact: int = 120) -> int:
     """Return appropriate timeout based on endpoint type.
-    
+
     /compact endpoints can take significantly longer as they process
     and compress large conversation histories. Research shows these
     operations can take 30-300+ seconds depending on conversation size.
@@ -112,7 +118,18 @@ def build_forward_headers(
 ) -> Dict[str, str]:
     headers: Dict[str, str] = {}
     # Hop-by-hop headers that should not be forwarded
-    hop_by_hop = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "upgrade"}
+    hop_by_hop = {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    }
 
     for key, value in incoming_headers.items():
         normalized = key.lower()

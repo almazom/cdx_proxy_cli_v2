@@ -8,7 +8,12 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from cdx_proxy_cli_v2.auth.store import load_auth_records
-from cdx_proxy_cli_v2.limits_domain import classify_status, extract_limits, overall_status, usage_url
+from cdx_proxy_cli_v2.limits_domain import (
+    classify_status,
+    extract_limits,
+    overall_status,
+    usage_url,
+)
 
 DEFAULT_USER_AGENT = "codex-cli"
 NO_CACHE_HEADERS = {
@@ -30,16 +35,26 @@ def window_summary(
     used = window.get("used_percent")
     used_percent = float(used) if isinstance(used, (int, float)) else None
     reset_after = window.get("reset_after_seconds")
-    reset_after_seconds = int(reset_after) if isinstance(reset_after, (int, float)) else None
+    reset_after_seconds = (
+        int(reset_after) if isinstance(reset_after, (int, float)) else None
+    )
     if reset_after_seconds is None:
         reset_at = window.get("reset_at")
         if isinstance(reset_at, (int, float)) and reset_at > 0:
             delta_seconds = int(float(reset_at) - time.time())
             if delta_seconds >= 0:
                 reset_after_seconds = delta_seconds
+    effective_limit_reached = bool(window.get("limit_reached"))
+    if (
+        not effective_limit_reached
+        and limit_reached
+        and used_percent is not None
+        and used_percent >= cooldown_at
+    ):
+        effective_limit_reached = True
     status = classify_status(
         used_percent=used_percent,
-        limit_reached=limit_reached,
+        limit_reached=effective_limit_reached,
         warn_at=warn_at,
         cooldown_at=cooldown_at,
     )
@@ -52,10 +67,16 @@ def window_summary(
 
 def live_usage_url(url: str) -> str:
     parsed = urlsplit(url)
-    pairs = [(key, value) for (key, value) in parse_qsl(parsed.query, keep_blank_values=True) if key != "_ts"]
+    pairs = [
+        (key, value)
+        for (key, value) in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "_ts"
+    ]
     pairs.append(("_ts", str(time.time_ns())))
     query = urlencode(pairs)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment)
+    )
 
 
 def fetch_usage(url: str, headers: Dict[str, str], timeout: int) -> Dict[str, Any]:
