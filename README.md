@@ -154,7 +154,10 @@ export CLIPROXY_CONSECUTIVE_ERROR_THRESHOLD=3  # Errors before blacklist
 ## Tests
 
 ```bash
-python3 -m pytest
+make test-unit
+make test-integration
+make test-e2e
+make test-all
 ```
 
 ## Quality Gate (TaaD)
