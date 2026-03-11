@@ -1,4 +1,5 @@
 """Test that tokens are never exposed in API responses."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -18,7 +19,9 @@ def test_health_snapshot_no_token_in_response():
         account_id="acc-123",
     )
 
-    with patch("cdx_proxy_cli_v2.health_snapshot.load_auth_records", return_value=[mock_auth]):
+    with patch(
+        "cdx_proxy_cli_v2.health_snapshot.load_auth_records", return_value=[mock_auth]
+    ):
         with patch("cdx_proxy_cli_v2.health_snapshot.fetch_usage") as mock_fetch:
             mock_fetch.return_value = {"rate_limit": {}}
 
@@ -32,10 +35,12 @@ def test_health_snapshot_no_token_in_response():
             )
 
             for account in result.get("accounts", []):
-                assert "access_token" not in account, \
+                assert "access_token" not in account, (
                     f"access_token should not be in response for {account.get('file')}"
-                assert "token" not in account, \
+                )
+                assert "token" not in account, (
                     f"token should not be in response for {account.get('file')}"
+                )
 
 
 def test_build_collective_payload_no_token_in_output():
@@ -54,7 +59,7 @@ def test_build_collective_payload_no_token_in_output():
 
     with patch(
         "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",
-        return_value=mock_snapshot
+        return_value=mock_snapshot,
     ):
         result = build_collective_payload(
             auths_dir="/tmp",
@@ -66,7 +71,9 @@ def test_build_collective_payload_no_token_in_output():
         )
 
         for account in result.get("accounts", []):
-            assert "access_token" not in account, \
+            assert "access_token" not in account, (
                 f"access_token should not be in output for {account.get('file')}"
-            assert "token" not in account, \
+            )
+            assert "token" not in account, (
                 f"token should not be in output for {account.get('file')}"
+            )

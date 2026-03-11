@@ -8,6 +8,7 @@ Tests real-world scenarios:
 - WebSocket connections
 - Concurrent requests
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from cdx_proxy_cli_v2.proxy.server import (
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def test_settings(tmp_path) -> Settings:
@@ -99,6 +101,7 @@ def _request_json(
 # Mock Upstream Server
 # ============================================================================
 
+
 class MockUpstreamHandler(BaseHTTPRequestHandler):
     """Mock upstream server that simulates OpenAI/ChatGPT API."""
 
@@ -166,7 +169,9 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
         # Check auth
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
-            self._send_json(401, {"error": {"code": "invalid_auth", "message": "Missing auth"}})
+            self._send_json(
+                401, {"error": {"code": "invalid_auth", "message": "Missing auth"}}
+            )
             return
 
         # Get response from queue or default
@@ -195,20 +200,33 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 return
             else:
-                self._send_json(200, {
-                    "id": "resp_123",
-                    "object": "response",
-                    "status": "completed",
-                    "output": [{"type": "message", "content": [{"type": "text", "text": "Hello!"}]}],
-                })
+                self._send_json(
+                    200,
+                    {
+                        "id": "resp_123",
+                        "object": "response",
+                        "status": "completed",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "text", "text": "Hello!"}],
+                            }
+                        ],
+                    },
+                )
                 return
 
         if "/chat/completions" in self.path:
-            self._send_json(200, {
-                "id": "chatcmpl_123",
-                "object": "chat.completion",
-                "choices": [{"message": {"role": "assistant", "content": "Hello!"}}],
-            })
+            self._send_json(
+                200,
+                {
+                    "id": "chatcmpl_123",
+                    "object": "chat.completion",
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "Hello!"}}
+                    ],
+                },
+            )
             return
 
         self._send_json(404, {"error": "unknown endpoint"})
@@ -231,7 +249,9 @@ def upstream_server() -> Iterator[Tuple[str, int]]:
 
 
 @pytest.fixture
-def proxy_server(test_settings, upstream_server) -> Iterator[Tuple[str, int, ProxyRuntime]]:
+def proxy_server(
+    test_settings, upstream_server
+) -> Iterator[Tuple[str, int, ProxyRuntime]]:
     """Start a proxy server with the mock upstream."""
     u_host, u_port = upstream_server
     settings = build_settings(
@@ -267,6 +287,7 @@ def proxy_server(test_settings, upstream_server) -> Iterator[Tuple[str, int, Pro
 # Integration Tests: Codex CLI Patterns
 # ============================================================================
 
+
 class TestCodexExec:
     """Tests for 'codex exec' pattern - POST /responses."""
 
@@ -279,7 +300,10 @@ class TestCodexExec:
             base_url=base_url,
             path="/v1/responses",
             method="POST",
-            payload={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
+            payload={
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
         )
 
         assert status == 200
@@ -292,7 +316,10 @@ class TestCodexExec:
         base_url = f"http://{host}:{port}"
 
         # Make request with Accept: text/event-stream
-        req_headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
+        req_headers = {
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+        }
         req = Request(
             f"{base_url}/v1/responses",
             data=json.dumps({"model": "gpt-4", "stream": True}).encode(),

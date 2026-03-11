@@ -125,31 +125,31 @@ def _load_state(path: Path) -> Dict[str, object]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    
+
     # Validate schema version
     schema_version = raw.get("$schema_version", "1.0.0")
     if schema_version != STATE_SCHEMA_VERSION:
         # For now, accept only matching version
         # Future: add migration logic here
         return {}
-    
+
     return raw
 
 
 def _save_state(path: Path, payload: Dict[str, object]) -> None:
     """Save state file with schema version."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Add schema version and timestamp
     versioned_payload = {
         "$schema_version": STATE_SCHEMA_VERSION,
         "$written_at": datetime.now(timezone.utc).isoformat(),
         **payload,
     }
-    
+
     path.write_text(
         json.dumps(versioned_payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
 
@@ -230,7 +230,9 @@ def _is_expected_proxy_process(pid: Optional[int], auth_dir: str) -> bool:
     )
 
 
-def _kill_stale_proxy_on_port(host: str, port: int, management_key: str, auth_dir: str) -> bool:
+def _kill_stale_proxy_on_port(
+    host: str, port: int, management_key: str, auth_dir: str
+) -> bool:
     """
     Attempt to kill a stale proxy process on the given port.
     Returns True if we believe the port is now free.
@@ -285,7 +287,9 @@ def probe_debug(base_url: str, management_key: Optional[str]) -> Optional[dict]:
     return payload
 
 
-def _wait_for_ready(base_url: str, management_key: str, timeout_seconds: float) -> Optional[dict]:
+def _wait_for_ready(
+    base_url: str, management_key: str, timeout_seconds: float
+) -> Optional[dict]:
     deadline = time.time() + max(0.1, timeout_seconds)
     while time.time() < deadline:
         payload = probe_debug(base_url, management_key)
@@ -307,7 +311,9 @@ def _spawn_env(settings: Settings, *, port: int, management_key: str) -> Dict[st
             ENV_TRACE_MAX: str(settings.trace_max),
             ENV_REQUEST_TIMEOUT: str(settings.request_timeout),
             ENV_COMPACT_TIMEOUT: str(settings.compact_timeout),
-            ENV_AUTO_RESET_ON_SINGLE_KEY: "1" if settings.auto_reset_on_single_key else "0",
+            ENV_AUTO_RESET_ON_SINGLE_KEY: "1"
+            if settings.auto_reset_on_single_key
+            else "0",
             ENV_AUTO_RESET_STREAK: str(settings.auto_reset_streak),
             ENV_AUTO_RESET_COOLDOWN: str(settings.auto_reset_cooldown),
         }
@@ -315,7 +321,9 @@ def _spawn_env(settings: Settings, *, port: int, management_key: str) -> Dict[st
     return env
 
 
-def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.Popen[bytes]:
+def _spawn(
+    settings: Settings, *, port: int, management_key: str
+) -> subprocess.Popen[bytes]:
     argv = [
         sys.executable,
         "-m",
@@ -354,7 +362,7 @@ def _spawn(settings: Settings, *, port: int, management_key: str) -> subprocess.
 def start_service(settings: Settings) -> ServiceStartResult:
     """
     Start the proxy service with intelligent stale process handling.
-    
+
     This function will:
     1. Check if proxy is already running and healthy (reuse it)
     2. Kill stale processes by PID if they don't respond
@@ -364,12 +372,14 @@ def start_service(settings: Settings) -> ServiceStartResult:
     """
     key = ensure_management_key(settings.auth_dir, settings.management_key)
     runtime_settings = settings.with_management_key(key)
-    
+
     pid_file = pid_path(runtime_settings.auth_dir)
     state_file = state_path(runtime_settings.auth_dir)
     current_pid = _read_pid(pid_file)
     current_state = _load_state(state_file)
-    current_pid_is_proxy = _is_expected_proxy_process(current_pid, runtime_settings.auth_dir)
+    current_pid_is_proxy = _is_expected_proxy_process(
+        current_pid, runtime_settings.auth_dir
+    )
 
     # Check if already running and healthy
     if current_pid_is_proxy:
@@ -393,7 +403,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
     # Determine port to use
     requested_port = runtime_settings.port
     use_free_port = requested_port <= 0
-    
+
     # Try to start with retry logic for port conflicts
     last_error = None
     for attempt in range(MAX_START_RETRIES):
@@ -405,7 +415,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
             use_free_port = True  # Continue with free ports
         else:
             port = requested_port
-        
+
         runtime_settings = runtime_settings.with_port(port)
 
         # Check if port is in use by a stale process
@@ -422,7 +432,9 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 continue
 
         # Spawn the process
-        process = _spawn(runtime_settings, port=runtime_settings.port, management_key=key)
+        process = _spawn(
+            runtime_settings, port=runtime_settings.port, management_key=key
+        )
         _write_pid(pid_file, process.pid)
 
         ready_debug = _wait_for_ready(
@@ -460,21 +472,24 @@ def start_service(settings: Settings) -> ServiceStartResult:
                     ENV_TRACE_MAX: str(runtime_settings.trace_max),
                     ENV_REQUEST_TIMEOUT: str(runtime_settings.request_timeout),
                     ENV_COMPACT_TIMEOUT: str(runtime_settings.compact_timeout),
-                    ENV_AUTO_RESET_ON_SINGLE_KEY: "1" if runtime_settings.auto_reset_on_single_key else "0",
+                    ENV_AUTO_RESET_ON_SINGLE_KEY: "1"
+                    if runtime_settings.auto_reset_on_single_key
+                    else "0",
                     ENV_AUTO_RESET_STREAK: str(runtime_settings.auto_reset_streak),
                     ENV_AUTO_RESET_COOLDOWN: str(runtime_settings.auto_reset_cooldown),
                 },
             )
-            
+
             # Warn user if we had to use a different port than requested
             if requested_port > 0 and port != requested_port:
                 import warnings
+
                 warnings.warn(
                     f"Port {requested_port} was in use, using port {port} instead. "
                     f"Run 'cdx stop' to clean up stale processes.",
                     RuntimeWarning,
                 )
-            
+
             return ServiceStartResult(
                 host=runtime_settings.host,
                 port=runtime_settings.port,
@@ -482,16 +497,16 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 management_key=key,
                 started=True,
             )
-        
+
         # Startup failed - cleanup and retry
         _terminate_pid(process.pid, timeout_seconds=3.0)
         _remove_file(pid_file)
         last_error = f"proxy failed to start on port {port}"
-        
+
         # If we were using a specific port, try a free port next
         if not use_free_port:
             use_free_port = True
-    
+
     # All retries exhausted
     log_file = log_path(runtime_settings.auth_dir)
     raise RuntimeError(
@@ -500,7 +515,9 @@ def start_service(settings: Settings) -> ServiceStartResult:
     )
 
 
-def _resolve_endpoint_from_state(settings: Settings, state: Dict[str, object]) -> tuple[str, int, str]:
+def _resolve_endpoint_from_state(
+    settings: Settings, state: Dict[str, object]
+) -> tuple[str, int, str]:
     host = str(state.get("host") or settings.host)
     port_raw = state.get("port")
     try:

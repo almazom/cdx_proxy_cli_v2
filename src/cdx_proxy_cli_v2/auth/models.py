@@ -43,7 +43,10 @@ class AuthState:
             return False
         if now < self.cooldown_until:
             return False
-        if self.probation_successes < self.probation_target and now < self.next_probe_after:
+        if (
+            self.probation_successes < self.probation_target
+            and now < self.next_probe_after
+        ):
             return False
         return True
 
@@ -59,10 +62,14 @@ class AuthState:
         return "OK"
 
     def health(self, now: float) -> Dict[str, Any]:
-        runtime_remaining = int(self.cooldown_until - now) if self.cooldown_until > now else 0
+        runtime_remaining = (
+            int(self.cooldown_until - now) if self.cooldown_until > now else 0
+        )
         limit_remaining = int(self.limit_until - now) if self.limit_until > now else 0
         remaining = max(runtime_remaining, limit_remaining)
-        blacklist_remaining = int(self.blacklist_until - now) if self.blacklist_until > now else 0
+        blacklist_remaining = (
+            int(self.blacklist_until - now) if self.blacklist_until > now else 0
+        )
         status = self.status(now)
         reason = None
         reason_origin = None
@@ -89,7 +96,9 @@ class AuthState:
             "status": status,
             "eligible_now": self.available(now),
             "cooldown_seconds": remaining if remaining > 0 else None,
-            "blacklist_seconds": blacklist_remaining if blacklist_remaining > 0 else None,
+            "blacklist_seconds": blacklist_remaining
+            if blacklist_remaining > 0
+            else None,
             "blacklist_reason": self.blacklist_reason,
             "limit_reason": self.limit_reason,
             "reason": reason,

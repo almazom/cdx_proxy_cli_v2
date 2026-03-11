@@ -1,4 +1,5 @@
 """Management endpoint handlers."""
+
 from __future__ import annotations
 
 import json
@@ -11,10 +12,10 @@ if TYPE_CHECKING:
 
 def extract_error_code(raw_body: bytes) -> Optional[str]:
     """Extract error code from JSON response body.
-    
+
     Args:
         raw_body: Raw response body bytes
-        
+
     Returns:
         Error code string if found, None otherwise
     """
@@ -38,7 +39,7 @@ def extract_error_code(raw_body: bytes) -> Optional[str]:
 
 class ManagementHandler:
     """Handles management endpoint requests.
-    
+
     Supported endpoints:
     - /debug: Server status and configuration
     - /trace: Recent trace events
@@ -47,47 +48,51 @@ class ManagementHandler:
     - /shutdown: Graceful shutdown request
     - /reset: Reset auth key(s) to healthy state
     """
-    
+
     def __init__(self, runtime: "ProxyRuntime", host: str, port: int) -> None:
         self._runtime = runtime
         self._host = host
         self._port = port
 
-    def handle(self, route: str, path: str, send_json_callback, method: str = "GET") -> bool:
+    def handle(
+        self, route: str, path: str, send_json_callback, method: str = "GET"
+    ) -> bool:
         """Handle a management route.
-        
+
         Args:
             route: Management route name (debug, trace, health, etc.)
             path: Full request path including query string
             send_json_callback: Function to send JSON response (status, payload)
-            
+
         Returns:
             True if route was handled, False if unknown route
         """
         if route == "debug":
-            send_json_callback(200, self._runtime.debug_payload(
-                host=self._host, port=self._port
-            ))
+            send_json_callback(
+                200, self._runtime.debug_payload(host=self._host, port=self._port)
+            )
             return True
-            
+
         if route == "trace":
             limit = self._parse_limit(path)
             send_json_callback(200, {"events": self._runtime.trace_events(limit=limit)})
             return True
-            
+
         if route == "health":
             refresh = self._parse_refresh(path)
             send_json_callback(200, self._runtime.health_snapshot(refresh=refresh))
             return True
-            
+
         if route == "auth-files":
             send_json_callback(200, {"files": self._runtime.auth_pool.auth_files()})
             return True
-            
+
         if route == "shutdown":
             send_json_callback(200, {"status": "shutting_down"})
             self._runtime.logger.write(
-                level="INFO", event="proxy.shutdown_requested", message="shutdown requested"
+                level="INFO",
+                event="proxy.shutdown_requested",
+                message="shutdown requested",
             )
             return True
 
@@ -97,10 +102,9 @@ class ManagementHandler:
                 return True
             name, state = self._parse_reset_params(path)
             count = self._runtime.auth_pool.reset_auth(name=name, state=state)
-            send_json_callback(200, {
-                "reset": count,
-                "filter": {"name": name, "state": state}
-            })
+            send_json_callback(
+                200, {"reset": count, "filter": {"name": name, "state": state}}
+            )
             self._runtime.logger.write(
                 level="INFO",
                 event="proxy.auth_reset",
@@ -110,7 +114,7 @@ class ManagementHandler:
                 count=count,
             )
             return True
-            
+
         return False
 
     @staticmethod
@@ -137,7 +141,7 @@ class ManagementHandler:
     @staticmethod
     def _parse_reset_params(path: str) -> tuple[Optional[str], Optional[str]]:
         """Parse reset query parameters from path.
-        
+
         Returns:
             Tuple of (name, state) filters. Either may be None.
         """

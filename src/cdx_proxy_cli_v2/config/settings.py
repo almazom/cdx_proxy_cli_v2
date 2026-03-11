@@ -231,8 +231,12 @@ def build_settings(
     merged = dict(file_env)
     merged.update(os.environ)
 
-    resolved_auth_dir = str(resolve_path(auth_dir or merged.get(ENV_AUTH_DIR) or initial_auth_dir))
-    resolved_host = (host or merged.get(ENV_HOST) or DEFAULT_HOST).strip() or DEFAULT_HOST
+    resolved_auth_dir = str(
+        resolve_path(auth_dir or merged.get(ENV_AUTH_DIR) or initial_auth_dir)
+    )
+    resolved_host = (
+        host or merged.get(ENV_HOST) or DEFAULT_HOST
+    ).strip() or DEFAULT_HOST
 
     def resolve_numeric_setting(
         *,
@@ -260,13 +264,17 @@ def build_settings(
         upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM,
         default=DEFAULT_UPSTREAM,
     )
-    raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
+    raw_key = (
+        management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
+    )
     # Handle both Python None and string "None" from env files
     key_str = str(raw_key).strip()
     resolved_key = key_str if key_str and key_str.lower() != "none" else None
 
     if allow_non_loopback is None:
-        resolved_allow_non_loopback = parse_bool(merged.get(ENV_ALLOW_NON_LOOPBACK), default=False)
+        resolved_allow_non_loopback = parse_bool(
+            merged.get(ENV_ALLOW_NON_LOOPBACK), default=False
+        )
     else:
         resolved_allow_non_loopback = bool(allow_non_loopback)
 

@@ -15,7 +15,9 @@ from cdx_proxy_cli_v2.proxy.server import ProxyHTTPServer, ProxyRuntime
 
 
 def _write_auth(path: Path, token: str, email: str) -> None:
-    path.write_text(json.dumps({"access_token": token, "email": email}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"access_token": token, "email": email}), encoding="utf-8"
+    )
 
 
 def _request_json(
@@ -98,7 +100,9 @@ def test_taad_retry_flow_is_traceable_with_single_request_id(tmp_path: Path) -> 
     _write_auth(tmp_path / "b.json", token="tok-b", email="b@example.com")
 
     upstream_probe = UpstreamProbe()
-    upstream_server = ThreadingHTTPServer(("127.0.0.1", 0), _build_upstream_handler(upstream_probe))
+    upstream_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), _build_upstream_handler(upstream_probe)
+    )
     with _running_http_server(upstream_server) as (_u_host, u_port):
         settings = build_settings(
             auth_dir=str(tmp_path),
@@ -132,7 +136,11 @@ def test_taad_retry_flow_is_traceable_with_single_request_id(tmp_path: Path) -> 
             events = trace_body.get("events")
             assert isinstance(events, list)
 
-            request_events = [item for item in events if isinstance(item, dict) and item.get("path") == "/responses"]
+            request_events = [
+                item
+                for item in events
+                if isinstance(item, dict) and item.get("path") == "/responses"
+            ]
             assert len(request_events) == 2
             first, second = request_events[0], request_events[1]
 

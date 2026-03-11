@@ -81,7 +81,9 @@ def summarize_event_records(records: List[Dict[str, Any]]) -> Dict[str, Dict[str
 
         current_ts = _parse_ts(record.get("ts"))
         existing_ts = _parse_ts(item.get("last_ts"))
-        if existing_ts is None or (current_ts is not None and current_ts >= existing_ts):
+        if existing_ts is None or (
+            current_ts is not None and current_ts >= existing_ts
+        ):
             item["last_ts"] = record.get("ts")
             item["last_status"] = status
     return summary
@@ -165,7 +167,9 @@ def build_all_payload(
             {
                 "file": name,
                 "health": health_status,
-                "cooldown_seconds": int(cooldown) if isinstance(cooldown, int) else None,
+                "cooldown_seconds": int(cooldown)
+                if isinstance(cooldown, int)
+                else None,
                 "stats": {
                     "ok_2xx": ok_2xx,
                     "s401": s401,
@@ -173,9 +177,13 @@ def build_all_payload(
                     "s5xx": s5xx,
                     "other": int(stats.get("other") or 0),
                     "total": total,
-                    "success_ratio_percent": round((100.0 * ok_2xx / total), 2) if total > 0 else None,
+                    "success_ratio_percent": round((100.0 * ok_2xx / total), 2)
+                    if total > 0
+                    else None,
                 },
-                "last_status": int(last_status) if isinstance(last_status, int) else None,
+                "last_status": int(last_status)
+                if isinstance(last_status, int)
+                else None,
                 "last_seen": _fmt_ts(stats.get("last_ts")),
             }
         )
@@ -202,11 +210,19 @@ def render_all_dashboard(*, payload: Dict[str, Any]) -> None:
     summary_table = Table(title="cdx all | summary")
     summary_table.add_column("Field")
     summary_table.add_column("Value")
-    summary_table.add_row("Proxy running", "yes" if bool(summary.get("proxy_running")) else "no")
-    summary_table.add_row("Proxy healthy", "yes" if bool(summary.get("proxy_healthy")) else "no")
+    summary_table.add_row(
+        "Proxy running", "yes" if bool(summary.get("proxy_running")) else "no"
+    )
+    summary_table.add_row(
+        "Proxy healthy", "yes" if bool(summary.get("proxy_healthy")) else "no"
+    )
     summary_table.add_row("Base URL", str(summary.get("base_url") or "-"))
-    summary_table.add_row("Auth files loaded", str(summary.get("auth_files_loaded") or 0))
-    summary_table.add_row("Recent events source", str(summary.get("events_file") or "-"))
+    summary_table.add_row(
+        "Auth files loaded", str(summary.get("auth_files_loaded") or 0)
+    )
+    summary_table.add_row(
+        "Recent events source", str(summary.get("events_file") or "-")
+    )
     console.print(summary_table)
 
     key_table = Table(title="cdx all | keys")

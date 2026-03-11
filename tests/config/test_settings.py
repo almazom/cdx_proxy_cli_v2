@@ -1,4 +1,5 @@
 """Comprehensive tests for config settings module."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,6 +37,7 @@ from cdx_proxy_cli_v2.config.settings import (
 # Test: resolve_path
 # ============================================================================
 
+
 class TestResolvePath:
     """Tests for resolve_path function."""
 
@@ -62,15 +64,21 @@ class TestResolvePath:
 # Test: parse_bool
 # ============================================================================
 
+
 class TestParseBool:
     """Tests for parse_bool function."""
 
-    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "YES", "on", "ON"])
+    @pytest.mark.parametrize(
+        "value", ["1", "true", "True", "TRUE", "yes", "YES", "on", "ON"]
+    )
     def test_returns_true_for_truthy_values(self, value: str):
         """Should return True for truthy string values."""
         assert parse_bool(value) is True
 
-    @pytest.mark.parametrize("value", ["0", "false", "False", "FALSE", "no", "NO", "off", "OFF", "", "random"])
+    @pytest.mark.parametrize(
+        "value",
+        ["0", "false", "False", "FALSE", "no", "NO", "off", "OFF", "", "random"],
+    )
     def test_returns_false_for_falsy_values(self, value: str):
         """Should return False for non-truthy string values."""
         assert parse_bool(value) is False
@@ -84,6 +92,7 @@ class TestParseBool:
 # ============================================================================
 # Test: parse_port
 # ============================================================================
+
 
 class TestParsePort:
     """Tests for parse_port function."""
@@ -112,6 +121,7 @@ class TestParsePort:
 # Test: parse_positive_int
 # ============================================================================
 
+
 class TestParsePositiveInt:
     """Tests for parse_positive_int function."""
 
@@ -135,6 +145,7 @@ class TestParsePositiveInt:
 # Test: load_env_file
 # ============================================================================
 
+
 class TestLoadEnvFile:
     """Tests for load_env_file function."""
 
@@ -142,15 +153,15 @@ class TestLoadEnvFile:
         """Should load simple KEY=value pairs."""
         env_file = tmp_path / ".env"
         env_file.write_text("TEST_KEY=test_value\n")
-        
+
         result = load_env_file(env_file)
         assert result == {"TEST_KEY": "test_value"}
 
     def test_handles_quoted_values(self, tmp_path: Path):
         """Should strip quotes from values."""
         env_file = tmp_path / ".env"
-        env_file.write_text('KEY1="double quoted"\nKEY2=\'single quoted\'\n')
-        
+        env_file.write_text("KEY1=\"double quoted\"\nKEY2='single quoted'\n")
+
         result = load_env_file(env_file)
         assert result["KEY1"] == "double quoted"
         assert result["KEY2"] == "single quoted"
@@ -159,7 +170,7 @@ class TestLoadEnvFile:
         """Should ignore comment lines."""
         env_file = tmp_path / ".env"
         env_file.write_text("# This is a comment\nKEY=value\n# Another comment\n")
-        
+
         result = load_env_file(env_file)
         assert result == {"KEY": "value"}
 
@@ -167,7 +178,7 @@ class TestLoadEnvFile:
         """Should handle 'export KEY=value' format."""
         env_file = tmp_path / ".env"
         env_file.write_text("export KEY=value\n")
-        
+
         result = load_env_file(env_file)
         assert result == {"KEY": "value"}
 
@@ -175,7 +186,7 @@ class TestLoadEnvFile:
         """Should ignore lines without = sign."""
         env_file = tmp_path / ".env"
         env_file.write_text("INVALID_LINE\nKEY=value\n")
-        
+
         result = load_env_file(env_file)
         assert result == {"KEY": "value"}
 
@@ -189,15 +200,16 @@ class TestLoadEnvFile:
 # Test: upsert_env_values
 # ============================================================================
 
+
 class TestUpsertEnvValues:
     """Tests for upsert_env_values function."""
 
     def test_creates_new_file(self, tmp_path: Path):
         """Should create env file if it doesn't exist."""
         env_file = tmp_path / ".env"
-        
+
         result = upsert_env_values(env_file, {"KEY": "value"})
-        
+
         assert result is True
         assert env_file.exists()
         assert load_env_file(env_file) == {"KEY": "value"}
@@ -206,9 +218,9 @@ class TestUpsertEnvValues:
         """Should update existing values."""
         env_file = tmp_path / ".env"
         env_file.write_text("KEY=old_value\n")
-        
+
         result = upsert_env_values(env_file, {"KEY": "new_value"})
-        
+
         assert result is True
         assert load_env_file(env_file) == {"KEY": "new_value"}
 
@@ -216,18 +228,18 @@ class TestUpsertEnvValues:
         """Should return False if values unchanged."""
         env_file = tmp_path / ".env"
         env_file.write_text("KEY=value\n")
-        
+
         result = upsert_env_values(env_file, {"KEY": "value"})
-        
+
         assert result is False
 
     def test_adds_new_values(self, tmp_path: Path):
         """Should add new values while keeping existing."""
         env_file = tmp_path / ".env"
         env_file.write_text("KEY1=value1\n")
-        
+
         result = upsert_env_values(env_file, {"KEY2": "value2"})
-        
+
         assert result is True
         loaded = load_env_file(env_file)
         assert loaded["KEY1"] == "value1"
@@ -237,6 +249,7 @@ class TestUpsertEnvValues:
 # ============================================================================
 # Test: Settings dataclass
 # ============================================================================
+
 
 class TestSettings:
     """Tests for Settings dataclass."""
@@ -254,7 +267,7 @@ class TestSettings:
             request_timeout=45,
             compact_timeout=120,
         )
-        
+
         assert settings.base_url == "http://127.0.0.1:8080"
 
     def test_with_port_returns_new_instance(self):
@@ -272,7 +285,7 @@ class TestSettings:
         )
 
         updated = original.with_port(9000)
-        
+
         assert original.port == 8080  # Original unchanged
         assert updated.port == 9000
 
@@ -291,7 +304,7 @@ class TestSettings:
         )
 
         updated = original.with_management_key("new-key")
-        
+
         assert original.management_key is None
         assert updated.management_key == "new-key"
 
@@ -299,6 +312,7 @@ class TestSettings:
 # ============================================================================
 # Test: build_settings precedence
 # ============================================================================
+
 
 class TestBuildSettingsPrecedence:
     """Tests for build_settings precedence rules."""
@@ -334,7 +348,9 @@ class TestBuildSettingsPrecedence:
 
         assert settings.upstream == DEFAULT_UPSTREAM
 
-    def test_chatgpt_upstream_from_env_without_backend_path_is_normalized(self, tmp_path: Path, monkeypatch):
+    def test_chatgpt_upstream_from_env_without_backend_path_is_normalized(
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.setenv(ENV_UPSTREAM, "https://chat.openai.com/")
 
         settings = build_settings(auth_dir=str(tmp_path))
@@ -429,19 +445,20 @@ class TestBuildSettingsAutoReset:
 # Test: format_shell_exports
 # ============================================================================
 
+
 class TestFormatShellExports:
     """Tests for format_shell_exports function."""
 
     def test_formats_simple_values(self):
         """Should format simple key=value pairs."""
         result = format_shell_exports({"KEY": "value"})
-        
+
         assert "export KEY='value'" in result
 
     def test_sorts_keys_alphabetically(self):
         """Should sort keys alphabetically."""
         result = format_shell_exports({"Z_KEY": "z", "A_KEY": "a"})
-        
+
         lines = result.split("\n")
         assert lines[0] == "export A_KEY='a'"
         assert lines[1] == "export Z_KEY='z'"
@@ -449,18 +466,20 @@ class TestFormatShellExports:
     def test_escapes_single_quotes(self):
         """Should escape single quotes in values."""
         result = format_shell_exports({"KEY": "value'with'quotes"})
-        
+
         # Should contain escaped quotes
         assert "'" in result
         assert "value'with'quotes" not in result  # Raw quotes not present
 
     def test_handles_multiple_values(self):
         """Should handle multiple key-value pairs."""
-        result = format_shell_exports({
-            "KEY1": "value1",
-            "KEY2": "value2",
-        })
-        
+        result = format_shell_exports(
+            {
+                "KEY1": "value1",
+                "KEY2": "value2",
+            }
+        )
+
         assert "KEY1" in result
         assert "KEY2" in result
 

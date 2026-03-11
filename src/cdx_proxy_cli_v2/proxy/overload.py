@@ -44,7 +44,10 @@ class LocalOverloadGuard:
 
     def acquire(self) -> RequestLease:
         with self._condition:
-            if self.max_in_flight_requests <= 0 or self._in_flight_requests < self.max_in_flight_requests:
+            if (
+                self.max_in_flight_requests <= 0
+                or self._in_flight_requests < self.max_in_flight_requests
+            ):
                 self._in_flight_requests += 1
                 return RequestLease(
                     _guard=self,

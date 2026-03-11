@@ -13,7 +13,9 @@ from cdx_proxy_cli_v2.proxy.server import ProxyHTTPServer, ProxyRuntime
 
 
 def _write_auth(path: Path, token: str, email: str) -> None:
-    path.write_text(json.dumps({"access_token": token, "email": email}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"access_token": token, "email": email}), encoding="utf-8"
+    )
 
 
 def _request_json(
@@ -61,7 +63,9 @@ def test_taad_management_endpoints_require_management_key(tmp_path: Path) -> Non
     """TaaD Safety: management endpoints are protected from unauthorized access."""
     _write_auth(tmp_path / "primary.json", token="tok-1", email="a@example.com")
 
-    with _running_proxy(auth_dir=str(tmp_path), management_key="mgmt-secret") as base_url:
+    with _running_proxy(
+        auth_dir=str(tmp_path), management_key="mgmt-secret"
+    ) as base_url:
         status, body = _request_json(base_url=base_url, path="/debug")
         assert status == 401
         assert body.get("error") == "unauthorized management request"
@@ -82,7 +86,9 @@ def test_taad_health_endpoint_is_operationally_readable(tmp_path: Path) -> None:
     _write_auth(tmp_path / "primary.json", token="tok-1", email="a@example.com")
     _write_auth(tmp_path / "backup.json", token="tok-2", email="b@example.com")
 
-    with _running_proxy(auth_dir=str(tmp_path), management_key="mgmt-secret") as base_url:
+    with _running_proxy(
+        auth_dir=str(tmp_path), management_key="mgmt-secret"
+    ) as base_url:
         status, body = _request_json(
             base_url=base_url,
             path="/health?refresh=1",

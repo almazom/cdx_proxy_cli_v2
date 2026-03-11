@@ -24,7 +24,13 @@ def test_taad_auth_store_accepts_supported_token_shapes(tmp_path: Path) -> None:
     )
     _write_json(
         tmp_path / "nested.json",
-        {"tokens": {"access_token": "tok-nested", "account_id": "acc-1", "email": "nested@example.com"}},
+        {
+            "tokens": {
+                "access_token": "tok-nested",
+                "account_id": "acc-1",
+                "email": "nested@example.com",
+            }
+        },
     )
     _write_json(
         tmp_path / "openai_key.json",
@@ -38,7 +44,12 @@ def test_taad_auth_store_accepts_supported_token_shapes(tmp_path: Path) -> None:
     records = load_auth_records(str(tmp_path))
     by_name = {item.name: item for item in records}
 
-    assert set(by_name.keys()) == {"fallback.json", "nested.json", "openai_key.json", "primary.json"}
+    assert set(by_name.keys()) == {
+        "fallback.json",
+        "nested.json",
+        "openai_key.json",
+        "primary.json",
+    }
     assert by_name["primary.json"].token == "tok-primary"
     assert by_name["nested.json"].token == "tok-nested"
     assert by_name["nested.json"].account_id == "acc-1"

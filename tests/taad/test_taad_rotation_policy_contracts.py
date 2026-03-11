@@ -13,8 +13,16 @@ def test_taad_401_blacklists_then_reenters_via_probation(monkeypatch) -> None:
     now = 1000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
-    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
-    pool.load([AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com")])
+    pool = RoundRobinAuthPool(
+        consecutive_error_threshold=1
+    )  # Blacklist on first error for test
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            )
+        ]
+    )
 
     picked = pool.pick()
     assert picked is not None
@@ -38,11 +46,17 @@ def test_taad_401_blacklists_then_reenters_via_probation(monkeypatch) -> None:
 
 def test_taad_429_cooldown_rotates_to_next_key() -> None:
     """TaaD Functional Fit: rate-limited key is cooled down and rotation continues."""
-    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
+    pool = RoundRobinAuthPool(
+        consecutive_error_threshold=1
+    )  # Blacklist on first error for test
     pool.load(
         [
-            AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"),
-            AuthRecord(name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"),
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
         ]
     )
     first = pool.pick()
@@ -60,7 +74,13 @@ def test_taad_400_account_incompatibility_blacklists_immediately(monkeypatch) ->
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
     pool = RoundRobinAuthPool()
-    pool.load([AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com")])
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            )
+        ]
+    )
 
     picked = pool.pick()
     assert picked is not None
@@ -74,11 +94,17 @@ def test_taad_prefers_stable_key_over_recently_blacklisted_key(monkeypatch) -> N
     now = 1000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
-    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
+    pool = RoundRobinAuthPool(
+        consecutive_error_threshold=1
+    )  # Blacklist on first error for test
     pool.load(
         [
-            AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"),
-            AuthRecord(name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"),
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
         ]
     )
 

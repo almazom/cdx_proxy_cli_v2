@@ -14,9 +14,9 @@ def normalize_base_url(url: str) -> str:
     while normalized.endswith("/"):
         normalized = normalized[:-1]
     if (
-        (normalized.startswith("https://chatgpt.com") or normalized.startswith("https://chat.openai.com"))
-        and "/backend-api" not in normalized
-    ):
+        normalized.startswith("https://chatgpt.com")
+        or normalized.startswith("https://chat.openai.com")
+    ) and "/backend-api" not in normalized:
         normalized = f"{normalized}/backend-api"
     return normalized
 
@@ -43,7 +43,9 @@ def decode_jwt_payload(token: str) -> Dict[str, Any]:
         return {}
 
 
-def extract_limits(rate_limit: Optional[Dict[str, Any]]) -> Dict[str, Optional[Dict[str, Any]]]:
+def extract_limits(
+    rate_limit: Optional[Dict[str, Any]],
+) -> Dict[str, Optional[Dict[str, Any]]]:
     limits: Dict[str, Optional[Dict[str, Any]]] = {"five_hour": None, "weekly": None}
     if not isinstance(rate_limit, dict):
         return limits

@@ -14,7 +14,10 @@ ELIGIBLE_ACCOUNT_STATUSES = {"OK", "WARN"}
 
 
 def usage_base_url() -> str:
-    return str(os.environ.get("CLIPROXY_USAGE_BASE_URL") or DEFAULT_USAGE_BASE_URL).strip() or DEFAULT_USAGE_BASE_URL
+    return (
+        str(os.environ.get("CLIPROXY_USAGE_BASE_URL") or DEFAULT_USAGE_BASE_URL).strip()
+        or DEFAULT_USAGE_BASE_URL
+    )
 
 
 def fetch_limit_health(
@@ -62,7 +65,9 @@ def _window_status(window: Optional[Dict[str, Any]]) -> str:
     return str(window.get("status") or "UNKNOWN").upper()
 
 
-def limit_block_details(limit_health: Optional[Dict[str, Any]], *, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+def limit_block_details(
+    limit_health: Optional[Dict[str, Any]], *, now: Optional[float] = None
+) -> Optional[Dict[str, Any]]:
     if not isinstance(limit_health, dict):
         return None
     now_ts = float(now if now is not None else time.time())
@@ -121,7 +126,9 @@ def merged_account_state(
         status = limit_status
 
     item["status"] = status
-    item["eligible_now"] = bool(runtime_eligible and status in ELIGIBLE_ACCOUNT_STATUSES)
+    item["eligible_now"] = bool(
+        runtime_eligible and status in ELIGIBLE_ACCOUNT_STATUSES
+    )
 
     if runtime_reason:
         item["reason"] = runtime_reason
@@ -136,10 +143,15 @@ def merged_account_state(
             float(limit_block["until"]),
         )
         runtime_cooldown = runtime_item.get("cooldown_seconds")
-        item["cooldown_seconds"] = max(
-            int(runtime_cooldown) if isinstance(runtime_cooldown, (int, float)) else 0,
-            int(limit_block["cooldown_seconds"]),
-        ) or None
+        item["cooldown_seconds"] = (
+            max(
+                int(runtime_cooldown)
+                if isinstance(runtime_cooldown, (int, float))
+                else 0,
+                int(limit_block["cooldown_seconds"]),
+            )
+            or None
+        )
     elif isinstance(runtime_until, (int, float)):
         item["until"] = float(runtime_until)
 
@@ -159,7 +171,9 @@ def merge_runtime_with_limits(
             runtime_by_file[auth_file] = item
 
     merged: List[Dict[str, Any]] = []
-    for auth_file in sorted(set(runtime_by_file.keys()) | set(limit_health_by_file.keys())):
+    for auth_file in sorted(
+        set(runtime_by_file.keys()) | set(limit_health_by_file.keys())
+    ):
         runtime_item = dict(runtime_by_file.get(auth_file, {}))
         limit_item = dict(limit_health_by_file.get(auth_file, {}))
         item = merged_account_state(runtime_item, limit_item)
@@ -169,4 +183,6 @@ def merge_runtime_with_limits(
 
 
 def merged_ok(accounts: List[Dict[str, Any]]) -> bool:
-    return any(bool(item.get("eligible_now")) for item in accounts if isinstance(item, dict))
+    return any(
+        bool(item.get("eligible_now")) for item in accounts if isinstance(item, dict)
+    )

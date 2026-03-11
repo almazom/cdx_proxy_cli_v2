@@ -13,27 +13,9 @@ from rich.text import Text
 from cdx_proxy_cli_v2.health_snapshot import collective_health_snapshot
 from cdx_proxy_cli_v2.limits_domain import overall_status
 
-OPEN_RIGHT_ROUNDED = box.Box(
-    "    \n"
-    "│ │ \n"
-    "├─┼ \n"
-    "│ │ \n"
-    "├─┼ \n"
-    "├─┼ \n"
-    "│ │ \n"
-    "╰─┴ \n"
-)
+OPEN_RIGHT_ROUNDED = box.Box("    \n│ │ \n├─┼ \n│ │ \n├─┼ \n├─┼ \n│ │ \n╰─┴ \n")
 
-OPEN_RIGHT_DOUBLE = box.Box(
-    "    \n"
-    "║ ║ \n"
-    "╠═╬ \n"
-    "║ ║ \n"
-    "╠═╬ \n"
-    "╠═╬ \n"
-    "║ ║ \n"
-    "╚═╩ \n"
-)
+OPEN_RIGHT_DOUBLE = box.Box("    \n║ ║ \n╠═╬ \n║ ║ \n╠═╬ \n╠═╬ \n║ ║ \n╚═╩ \n")
 
 
 def human_duration(seconds: Optional[int]) -> str:
@@ -100,7 +82,7 @@ def status_level_emoji(status: str) -> str:
 
 def status_rank(status: str) -> int:
     """Rank status for sorting. Lower rank = better = appears first.
-    
+
     Order: OK (green) > WARN (yellow) > COOLDOWN (red) > UNKNOWN (white)
     """
     order = {"OK": 0, "WARN": 1, "COOLDOWN": 2, "UNKNOWN": 3}
@@ -148,13 +130,15 @@ def account_min_reset(entry: Dict[str, Any]) -> Optional[int]:
         if isinstance(window, dict):
             reset_after = window.get("reset_after_seconds")
             if isinstance(reset_after, int):
-                min_reset = reset_after if min_reset is None else min(min_reset, reset_after)
+                min_reset = (
+                    reset_after if min_reset is None else min(min_reset, reset_after)
+                )
     return min_reset
 
 
 def collective_sort_key(entry: Dict[str, Any]) -> Tuple[int, float, float, str]:
     """Sort key for accounts. Lower tuple = appears first (top of list).
-    
+
     Priority:
     1. Status rank (OK=0, WARN=1, COOLDOWN=2, UNKNOWN=3)
     2. Has data (True=0, False=1) - accounts with data come first
@@ -223,15 +207,23 @@ def build_collective_payload(
                 total_used_samples += 1
         min_reset_entry = account_min_reset(entry)
         if isinstance(min_reset_entry, int):
-            min_reset = min_reset_entry if min_reset is None else min(min_reset, min_reset_entry)
+            min_reset = (
+                min_reset_entry
+                if min_reset is None
+                else min(min_reset, min_reset_entry)
+            )
             if status == "COOLDOWN":
                 if next_available_in is None or min_reset_entry < next_available_in:
                     next_available_in = min_reset_entry
                     next_available_file = entry.get("file")
 
-    aggregate_status = overall_status([entry.get("status", "UNKNOWN") for entry in accounts])
+    aggregate_status = overall_status(
+        [entry.get("status", "UNKNOWN") for entry in accounts]
+    )
     global_exhaustion = (
-        (total_used_percent / float(total_used_samples)) if total_used_samples > 0 else None
+        (total_used_percent / float(total_used_samples))
+        if total_used_samples > 0
+        else None
     )
     aggregate = {
         "status": aggregate_status,
@@ -255,7 +247,11 @@ def build_collective_payload(
             if matched:
                 return matched
         if current_access_token:
-            matched = [entry for entry in accounts if entry.get("access_token") == current_access_token]
+            matched = [
+                entry
+                for entry in accounts
+                if entry.get("access_token") == current_access_token
+            ]
             if matched:
                 return matched
         if current_email:
@@ -263,12 +259,17 @@ def build_collective_payload(
             matched = [
                 entry
                 for entry in accounts
-                if isinstance(entry.get("email"), str) and entry.get("email", "").strip().lower() == needle
+                if isinstance(entry.get("email"), str)
+                and entry.get("email", "").strip().lower() == needle
             ]
             if matched:
                 return matched
         if current_account_id:
-            matched = [entry for entry in accounts if entry.get("account_id") == current_account_id]
+            matched = [
+                entry
+                for entry in accounts
+                if entry.get("account_id") == current_account_id
+            ]
             if matched:
                 return matched
         return []
@@ -302,14 +303,25 @@ def _window_text(window: Optional[Dict[str, Any]]) -> Text:
     if not isinstance(window, dict):
         return Text("unknown")
     status = window.get("status", "UNKNOWN")
-    used_value = window.get("used_percent") if isinstance(window.get("used_percent"), (int, float)) else None
+    used_value = (
+        window.get("used_percent")
+        if isinstance(window.get("used_percent"), (int, float))
+        else None
+    )
     left_value = left_percent_from_used(used_value)
     usage_text = format_left_percent(used_value)
     bar_text = mini_meter(left_value)
     reset_text = human_duration(
-        window.get("reset_after_seconds") if isinstance(window.get("reset_after_seconds"), int) else None
+        window.get("reset_after_seconds")
+        if isinstance(window.get("reset_after_seconds"), int)
+        else None
     )
-    color = {"OK": "green", "WARN": "yellow", "COOLDOWN": "red", "UNKNOWN": "white"}.get(status, "white")
+    color = {
+        "OK": "green",
+        "WARN": "yellow",
+        "COOLDOWN": "red",
+        "UNKNOWN": "white",
+    }.get(status, "white")
     return Text(f"{bar_text}  {usage_text} | reset {reset_text}", style=color)
 
 
@@ -318,7 +330,11 @@ def render_collective_dashboard(payload: Dict[str, Any]) -> None:
     aggregate = payload.get("aggregate", {})
     global_exhaustion = aggregate.get("global_exhaustion")
     global_left = left_percent_from_used(global_exhaustion)
-    left_text = format_percent(global_left) if isinstance(global_left, (int, float)) else "unknown"
+    left_text = (
+        format_percent(global_left)
+        if isinstance(global_left, (int, float))
+        else "unknown"
+    )
     console.print(f"Global left: {left_text}  {mini_meter(global_left)}")
 
     accounts = payload.get("accounts", [])

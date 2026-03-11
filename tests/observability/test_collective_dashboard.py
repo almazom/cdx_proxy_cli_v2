@@ -20,7 +20,9 @@ def test_format_left_percent_unknown_percent() -> None:
 
 
 def test_window_text_includes_left_only() -> None:
-    text = _window_text({"status": "OK", "used_percent": 50, "reset_after_seconds": 120})
+    text = _window_text(
+        {"status": "OK", "used_percent": 50, "reset_after_seconds": 120}
+    )
     plain = text.plain
     assert "50% left" in plain
     assert "reset 2m" in plain
@@ -46,10 +48,12 @@ def test_account_has_data() -> None:
 def test_account_best_left() -> None:
     """Should return highest left percentage."""
     assert account_best_left({"five_hour": {"used_percent": 20}}) == 80.0
-    assert account_best_left({
-        "five_hour": {"used_percent": 50},
-        "weekly": {"used_percent": 10}
-    }) == 90.0  # weekly has more left
+    assert (
+        account_best_left(
+            {"five_hour": {"used_percent": 50}, "weekly": {"used_percent": 10}}
+        )
+        == 90.0
+    )  # weekly has more left
     assert account_best_left({}) is None
 
 
@@ -57,16 +61,28 @@ def test_collective_sort_key_ok_before_unknown() -> None:
     """OK accounts should sort before UNKNOWN accounts."""
     ok_entry = {"status": "OK", "file": "a.json", "five_hour": {"used_percent": 50}}
     unknown_entry = {"status": "UNKNOWN", "file": "b.json"}
-    
+
     assert collective_sort_key(ok_entry) < collective_sort_key(unknown_entry)
 
 
 def test_collective_sort_key_more_left_first() -> None:
     """Within same status, accounts with more left% should come first."""
-    entry_80_left = {"status": "OK", "file": "a.json", "five_hour": {"used_percent": 20}}
-    entry_50_left = {"status": "OK", "file": "b.json", "five_hour": {"used_percent": 50}}
-    entry_10_left = {"status": "OK", "file": "c.json", "five_hour": {"used_percent": 90}}
-    
+    entry_80_left = {
+        "status": "OK",
+        "file": "a.json",
+        "five_hour": {"used_percent": 20},
+    }
+    entry_50_left = {
+        "status": "OK",
+        "file": "b.json",
+        "five_hour": {"used_percent": 50},
+    }
+    entry_10_left = {
+        "status": "OK",
+        "file": "c.json",
+        "five_hour": {"used_percent": 90},
+    }
+
     # 80% left should come before 50% left
     assert collective_sort_key(entry_80_left) < collective_sort_key(entry_50_left)
     # 50% left should come before 10% left
@@ -77,7 +93,7 @@ def test_collective_sort_key_with_data_before_without() -> None:
     """Accounts with usage data should sort before accounts with unknown data."""
     with_data = {"status": "OK", "file": "a.json", "five_hour": {"used_percent": 90}}
     without_data = {"status": "OK", "file": "b.json"}
-    
+
     # Account with data (even heavily used) should come before unknown
     assert collective_sort_key(with_data) < collective_sort_key(without_data)
 
@@ -86,8 +102,12 @@ def test_collective_sort_key_warn_between_ok_and_cooldown() -> None:
     """WARN should be between OK and COOLDOWN."""
     ok_entry = {"status": "OK", "file": "a.json", "five_hour": {"used_percent": 50}}
     warn_entry = {"status": "WARN", "file": "b.json", "five_hour": {"used_percent": 50}}
-    cooldown_entry = {"status": "COOLDOWN", "file": "c.json", "five_hour": {"used_percent": 50}}
-    
+    cooldown_entry = {
+        "status": "COOLDOWN",
+        "file": "c.json",
+        "five_hour": {"used_percent": 50},
+    }
+
     assert collective_sort_key(ok_entry) < collective_sort_key(warn_entry)
     assert collective_sort_key(warn_entry) < collective_sort_key(cooldown_entry)
 
@@ -166,7 +186,9 @@ def test_build_collective_payload_marks_current_by_account_id(monkeypatch) -> No
     assert accounts[1]["current"] is True
 
 
-def test_build_collective_payload_account_id_collision_marks_single_current(monkeypatch) -> None:
+def test_build_collective_payload_account_id_collision_marks_single_current(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",
         lambda **_kwargs: {
