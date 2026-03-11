@@ -26,7 +26,7 @@ This V2 keeps behavior similar while splitting complexity into narrow modules:
 ## Quick Start
 
 ```bash
-cd /home/pets/TOOLS/cdx_proxy_cli_v2
+cd /path/to/cdx_proxy_cli_v2
 pip install -e .
 cdx proxy
 ```
