@@ -16,22 +16,30 @@ PROBATION_PROBE_INTERVAL_SECONDS = 20
 PROBATION_SUCCESS_TARGET = 2
 CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE = "chatgpt_account_incompatible"
 AUTH_INCOMPATIBLE_ERROR_CODES = {CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE}
-HARD_AUTH_BLACKLIST_REASONS = {"token_invalid", "forbidden"} | AUTH_INCOMPATIBLE_ERROR_CODES
+HARD_AUTH_BLACKLIST_REASONS = {
+    "token_invalid",
+    "forbidden",
+} | AUTH_INCOMPATIBLE_ERROR_CODES
 SOFT_RESTORABLE_BLACKLIST_REASONS = {"rate_limited_persistent"}
 
 
 def is_auth_incompatible_error(status: int, error_code: Optional[str] = None) -> bool:
-    return int(status) == 400 and str(error_code or "").strip() in AUTH_INCOMPATIBLE_ERROR_CODES
+    return (
+        int(status) == 400
+        and str(error_code or "").strip() in AUTH_INCOMPATIBLE_ERROR_CODES
+    )
 
 
 def is_retryable_auth_failure(status: int, error_code: Optional[str] = None) -> bool:
     normalized_status = int(status)
-    return normalized_status in {401, 403, 429} or is_auth_incompatible_error(normalized_status, error_code)
+    return normalized_status in {401, 403, 429} or is_auth_incompatible_error(
+        normalized_status, error_code
+    )
 
 
 class RoundRobinAuthPool:
     """Thread-safe auth pool with cooldown, blacklist, and probation.
-    
+
     Envoy-inspired features:
     - Outlier detection (blacklist on consecutive errors)
     - Active health checking (auto-heal background probes)
@@ -99,6 +107,7 @@ class RoundRobinAuthPool:
         """Choose the next currently eligible auth from already-known state only."""
         with self._lock:
             now = time.time()
+            self._restore_stable_state_after_cooldown(now, self._states)
             available = [state for state in self._states if state.available(now)]
 
             # Envoy pattern: max ejection percent
@@ -110,22 +119,20 @@ class RoundRobinAuthPool:
             else:
                 max_ejected = total
             min_available = max(0, total - max_ejected)
-            blacklisted_count = sum(
-                1 for s in self._states
-                if s.blacklist_until > now
-            )
-            
+            blacklisted_count = sum(1 for s in self._states if s.blacklist_until > now)
+
             # If we've hit max ejection, force-restore some keys
             if total > 1 and len(available) < min_available and blacklisted_count > 0:
                 # Find blacklisted keys with least failures and restore them
                 blacklisted = [
-                    s for s in self._states
+                    s
+                    for s in self._states
                     if s.blacklist_until > now
                     and s.blacklist_reason in SOFT_RESTORABLE_BLACKLIST_REASONS
                     and s not in available
                 ]
                 blacklisted.sort(key=lambda s: s.hard_failures)
-                
+
                 # Restore the least-failed keys
                 to_restore = min(len(blacklisted), min_available - len(available))
                 for state in blacklisted[:to_restore]:
@@ -135,13 +142,13 @@ class RoundRobinAuthPool:
                     state.probation_successes = state.probation_target
                     state.next_probe_after = 0.0
                     state.consecutive_errors = 0
-                
+
                 # Refresh available list
                 available = [state for state in self._states if state.available(now)]
 
             if not available:
                 return None
-            
+
             # Latency-first policy: when at least one stable key exists,
             # avoid sending foreground traffic through previously hard-failed keys.
             preferred = [state for state in available if self._is_stable(state)]
@@ -157,7 +164,9 @@ class RoundRobinAuthPool:
         with self._lock:
             return len(self._states)
 
-    def mark_cooldown(self, auth_name: str, seconds: int = DEFAULT_COOLDOWN_SECONDS) -> None:
+    def mark_cooldown(
+        self, auth_name: str, seconds: int = DEFAULT_COOLDOWN_SECONDS
+    ) -> None:
         # Legacy helper kept for compatibility with older call-sites.
         self.mark_result(auth_name, status=429, cooldown_seconds=seconds)
 
@@ -175,25 +184,36 @@ class RoundRobinAuthPool:
             for state in self._states:
                 if state.record.name != auth_name:
                     continue
-                if 200 <= int(status) < 400:
-                    self._mark_success(state, now, auto_heal_target=self.auto_heal_success_target)
+                if 100 <= int(status) < 400:
+                    self._mark_success(
+                        state, now, auto_heal_target=self.auto_heal_success_target
+                    )
                     return
 
                 if int(status) in {401, 403}:
-                    state.consecutive_errors += 1
-                    reason = error_code or ("token_invalid" if int(status) == 401 else "forbidden")
-                    self._mark_blacklist(state, now, reason=reason)
+                    reason = error_code or (
+                        "token_invalid" if int(status) == 401 else "forbidden"
+                    )
+                    self._mark_hard_auth_failure(state, now, reason=reason)
                     return
 
                 if is_auth_incompatible_error(int(status), error_code):
-                    self._mark_blacklist(state, now, reason=str(error_code or "chatgpt_account_incompatible"))
+                    self._mark_blacklist(
+                        state,
+                        now,
+                        reason=str(error_code or "chatgpt_account_incompatible"),
+                    )
                     return
 
                 if int(status) == 429:
                     self._mark_rate_limited(
                         state,
                         now,
-                        seconds_override=(max(1, int(cooldown_seconds)) if cooldown_seconds is not None else None),
+                        seconds_override=(
+                            max(1, int(cooldown_seconds))
+                            if cooldown_seconds is not None
+                            else None
+                        ),
                     )
                     return
 
@@ -201,8 +221,8 @@ class RoundRobinAuthPool:
                     self._mark_transient_failure(state, now)
                     return
 
-                # Unknown non-success status: mild cooldown only.
-                self._mark_transient_failure(state, now)
+                # Client/request-side 4xx that are not auth/limit signals should not poison the key.
+                state.consecutive_errors = 0
                 return
 
     def health_snapshot(self) -> List[dict]:
@@ -217,7 +237,13 @@ class RoundRobinAuthPool:
     def stats(self) -> dict:
         with self._lock:
             now = time.time()
-            counts = {"ok": 0, "cooldown": 0, "blacklist": 0, "probation": 0, "total": len(self._states)}
+            counts = {
+                "ok": 0,
+                "cooldown": 0,
+                "blacklist": 0,
+                "probation": 0,
+                "total": len(self._states),
+            }
             for state in self._states:
                 status = state.status(now)
                 if status == "OK":
@@ -241,9 +267,11 @@ class RoundRobinAuthPool:
                 state.blacklist_until = 0.0
                 state.blacklist_reason = None
                 state.next_probe_after = 0.0
+                state.hard_failures = 0
         elif state.blacklist_until <= now:
             state.blacklist_reason = None
-        
+            state.hard_failures = 0
+
         # Auto-heal: track successful health check for blacklisted keys
         if state.blacklist_until > 0 and now < state.blacklist_until:
             state.auto_heal_successes += 1
@@ -256,6 +284,20 @@ class RoundRobinAuthPool:
                 state.cooldown_until = 0.0
                 state.auto_heal_successes = 0
                 state.auto_heal_failures = 0
+                state.hard_failures = 0
+
+    def _mark_hard_auth_failure(
+        self, state: AuthState, now: float, *, reason: str
+    ) -> None:
+        state.consecutive_errors += 1
+        threshold = max(1, int(self.consecutive_error_threshold))
+        if state.consecutive_errors >= threshold:
+            self._mark_blacklist(state, now, reason=reason)
+            return
+        state.errors += 1
+        state.cooldown_until = max(
+            state.cooldown_until, now + DEFAULT_TRANSIENT_COOLDOWN_SECONDS
+        )
 
     @staticmethod
     def _rate_limit_cooldown_seconds(strikes: int) -> int:
@@ -272,7 +314,11 @@ class RoundRobinAuthPool:
         state.errors += 1
         state.consecutive_errors = 0
         state.rate_limit_strikes += 1
-        cooldown = seconds_override if seconds_override is not None else self._rate_limit_cooldown_seconds(state.rate_limit_strikes)
+        cooldown = (
+            seconds_override
+            if seconds_override is not None
+            else self._rate_limit_cooldown_seconds(state.rate_limit_strikes)
+        )
         state.cooldown_until = max(state.cooldown_until, now + max(1, int(cooldown)))
         # Persistent 429s are ejected temporarily as outliers.
         if state.rate_limit_strikes >= 5:
@@ -294,8 +340,10 @@ class RoundRobinAuthPool:
     def _mark_transient_failure(state: AuthState, now: float) -> None:
         state.errors += 1
         state.consecutive_errors = 0
-        state.cooldown_until = max(state.cooldown_until, now + DEFAULT_TRANSIENT_COOLDOWN_SECONDS)
-    
+        state.cooldown_until = max(
+            state.cooldown_until, now + DEFAULT_TRANSIENT_COOLDOWN_SECONDS
+        )
+
     def _mark_auto_heal_failure(self, state: AuthState, now: float) -> None:
         """Track failed auto-heal health check."""
         state.auto_heal_failures += 1
@@ -308,11 +356,10 @@ class RoundRobinAuthPool:
             remaining = state.blacklist_until - now
             if remaining > 0:
                 state.blacklist_until = min(
-                    state.blacklist_until + remaining,
-                    now + MAX_BLACKLIST_SECONDS
+                    state.blacklist_until + remaining, now + MAX_BLACKLIST_SECONDS
                 )
             state.auto_heal_failures = 0
-    
+
     def mark_auto_heal_failure(self, auth_name: str, now: float) -> None:
         """Public method to track failed auto-heal check by auth name."""
         with self._lock:
@@ -334,6 +381,21 @@ class RoundRobinAuthPool:
                 state.limit_reason = str(block["reason"])
 
     @staticmethod
+    def _restore_stable_state_after_cooldown(
+        now: float, states: Optional[List[AuthState]] = None
+    ) -> None:
+        active_states = states or []
+        for state in active_states:
+            if state.cooldown_until > now:
+                continue
+            if state.blacklist_until > now:
+                continue
+            if state.probation_successes < state.probation_target:
+                continue
+            if state.rate_limit_strikes > 0:
+                state.rate_limit_strikes = 0
+
+    @staticmethod
     def _is_stable(state: AuthState) -> bool:
         return (
             state.hard_failures <= 0
@@ -351,7 +413,7 @@ class RoundRobinAuthPool:
 
         Args:
             name: If specified, only reset the auth with this file name.
-            state: If specified, only reset auths in this state 
+            state: If specified, only reset auths in this state
                    ("blacklist", "cooldown", or "probation").
 
         Returns:
