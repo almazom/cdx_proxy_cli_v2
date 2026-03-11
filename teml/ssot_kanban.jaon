@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "project": "cdx_proxy_cli_v2",
+  "owner": "middle-level-dev",
+  "updated_at_utc": "2026-03-11T05:40:00Z",
+  "kanban_states": [
+    "todo",
+    "in_progress",
+    "done"
+  ],
+  "board": {
+    "todo": [],
+    "in_progress": [],
+    "done": [
+      {
+        "id": "PLAN-01",
+        "title": "Unify runtime auth health with rate-limit windows",
+        "acceptance": [
+          "Health payload exposes eligible_now/reason/reason_origin/until",
+          "Weekly/5h cooldown blocks key selection"
+        ],
+        "artifacts": [
+          "src/cdx_proxy_cli_v2/auth/eligibility.py",
+          "src/cdx_proxy_cli_v2/auth/models.py",
+          "src/cdx_proxy_cli_v2/auth/rotation.py",
+          "src/cdx_proxy_cli_v2/proxy/server.py"
+        ]
+      },
+      {
+        "id": "PLAN-02",
+        "title": "Harden blacklist policy for auth failures",
+        "acceptance": [
+          "401/403 trigger hard blacklist immediately",
+          "max_ejection does not force-restore hard-auth failures"
+        ],
+        "artifacts": [
+          "src/cdx_proxy_cli_v2/auth/rotation.py",
+          "tests/auth/test_rotation.py",
+          "tests/e2e/test_auto_heal_e2e.py"
+        ]
+      },
+      {
+        "id": "PLAN-03",
+        "title": "Make probe mode non-destructive",
+        "acceptance": [
+          "doctor --probe does not mutate runtime state",
+          "Probe result labels action intent only"
+        ],
+        "artifacts": [
+          "src/cdx_proxy_cli_v2/proxy/server.py",
+          "tests/proxy/test_server.py"
+        ]
+      },
+      {
+        "id": "PLAN-04",
+        "title": "Fix models response compatibility for Codex",
+        "acceptance": [
+          "Models payload includes display_name for UI compatibility",
+          "No local synthetic bypass on models proxy path"
+        ],
+        "artifacts": [
+          "src/cdx_proxy_cli_v2/proxy/server.py",
+          "tests/proxy/test_server.py"
+        ]
+      },
+      {
+        "id": "PLAN-05",
+        "title": "Stabilize doctor/health management UX",
+        "acceptance": [
+          "doctor --json succeeds reliably under slow health fetch",
+          "No BrokenPipe traceback on disconnected management clients"
+        ],
+        "artifacts": [
+          "src/cdx_proxy_cli_v2/cli/main.py",
+          "src/cdx_proxy_cli_v2/proxy/server.py"
+        ]
+      },
+      {
+        "id": "PLAN-06",
+        "title": "Regression validation",
+        "acceptance": [
+          "Full test suite passes",
+          "Live proxy smoke confirms rotation and trace",
+          "codex exec request goes through proxy endpoint"
+        ],
+        "artifacts": [
+          "tests/",
+          "runtime smoke outputs"
+        ]
+      }
+    ]
+  }
+}

@@ -26,6 +26,8 @@ from cdx_proxy_cli_v2.proxy.http_client import fetch_json
 from cdx_proxy_cli_v2.observability.tui import run_trace_tui
 from cdx_proxy_cli_v2.auth.store import extract_auth_fields, read_auth_json
 
+DOCTOR_HEALTH_TIMEOUT_SECONDS = 8.0
+
 
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auth-dir", default=None)
@@ -293,7 +295,7 @@ def handle_doctor(args: argparse.Namespace) -> int:
                     base_url=base_url,
                     path="/health?refresh=1",
                     headers=headers,
-                    timeout=2.0,
+                    timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
                 )
             except Exception as exc:
                 print(f"Doctor failed to read /health after probe: {exc}", file=sys.stderr)
@@ -334,7 +336,7 @@ def handle_doctor(args: argparse.Namespace) -> int:
             base_url=base_url,
             path="/health?refresh=1",
             headers=headers,
-            timeout=2.0,
+            timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         print(f"Doctor failed to read /health: {exc}", file=sys.stderr)

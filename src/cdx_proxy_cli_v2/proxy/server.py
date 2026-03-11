@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from cdx_proxy_cli_v2.auth.store import load_auth_records
+from cdx_proxy_cli_v2.auth.eligibility import fetch_limit_health, merge_runtime_with_limits, merged_ok
 from cdx_proxy_cli_v2.observability.event_log import EventLogger
 from cdx_proxy_cli_v2.proxy.rules import (
     CHATGPT_HOSTS,
@@ -121,6 +122,39 @@ def _normalize_chatgpt_request_body(body: bytes, headers: Dict[str, str]) -> byt
     return json.dumps(payload).encode("utf-8")
 
 
+def _is_models_request_path(path: str) -> bool:
+    path_only = urlsplit(path or "").path.rstrip("/")
+    return path_only in {"/models", "/backend-api/models"}
+
+
+def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
+    if not body or not _is_models_request_path(request_path):
+        return body
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body
+    changed = False
+    if isinstance(payload, dict):
+        for key in ("models", "data"):
+            models = payload.get(key)
+            if not isinstance(models, list):
+                continue
+            for item in models:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("display_name"):
+                    continue
+                display_name = item.get("title") or item.get("slug") or item.get("id")
+                if not isinstance(display_name, str) or not display_name.strip():
+                    continue
+                item["display_name"] = display_name
+                changed = True
+    if not changed:
+        return body
+    return json.dumps(payload).encode("utf-8")
+
+
 @dataclass
 class UpstreamAttemptResult:
     status: int
@@ -144,6 +178,8 @@ class ProxyRuntime:
     # Auto-heal background checker
     _auto_heal_thread: Optional[threading.Thread] = field(default=None, init=False, repr=False)
     _auto_heal_stop: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _limit_health_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
+    _limit_health_cache_at: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.trace_store = TraceStore(max_size=self.settings.trace_max)
@@ -159,6 +195,19 @@ class ProxyRuntime:
         )
         # Start background auto-heal checker
         self._start_auto_heal_checker()
+
+    def _refresh_limit_health(self, *, force: bool = False) -> Dict[str, Dict[str, Any]]:
+        now = time.time()
+        if not force and self._limit_health_cache and (now - self._limit_health_cache_at) < 60.0:
+            return self._limit_health_cache
+        try:
+            self._limit_health_cache = fetch_limit_health(self.settings.auth_dir)
+            self._limit_health_cache_at = now
+        except Exception:
+            # Keep last known limit view on fetch errors; runtime auth health still works.
+            pass
+        self.auth_pool.apply_limit_health(self._limit_health_cache)
+        return self._limit_health_cache
 
     def _start_auto_heal_checker(self) -> None:
         """Start background thread for health checking blacklisted keys."""
@@ -202,24 +251,44 @@ class ProxyRuntime:
                     self._auto_heal_last_check[auth_file] = now
                     
                     if success:
-                        # Mark as success in auth pool to trigger restoration
+                        # Reload before restoration so fresh on-disk tokens are used.
+                        self.reload_auths()
                         self.auth_pool.mark_result(auth_file, status=200)
-                        self._notify_user(
-                            level="INFO",
-                            event="auto_heal.success",
-                            message=f"Key {account.get('email') or auth_file} restored after successful health check",
-                            auth_file=auth_file,
-                            auth_email=account.get("email"),
-                        )
+                        merged_state = {
+                            item.get("file", ""): item
+                            for item in self.health_snapshot(refresh=False).get("accounts", [])
+                        }.get(auth_file, {})
+                        if bool(merged_state.get("eligible_now")):
+                            self._notify_user(
+                                level="INFO",
+                                event="auto_heal.success",
+                                message=f"Key {account.get('email') or auth_file} restored after successful health check",
+                                auth_file=auth_file,
+                                auth_email=account.get("email"),
+                            )
+                        else:
+                            self._notify_user(
+                                level="INFO",
+                                event="auto_heal.progress",
+                                message=f"Health check passed for {account.get('email') or auth_file}, waiting for full re-entry",
+                                auth_file=auth_file,
+                                auth_email=account.get("email"),
+                            )
                     else:
                         # Mark as failure to extend blacklist
                         self.auth_pool.mark_auto_heal_failure(auth_file, now)
+                        state = {
+                            item.get("file", ""): item
+                            for item in self.auth_pool.health_snapshot()
+                        }.get(auth_file, {})
                         self._notify_user(
                             level="WARN",
                             event="auto_heal.failure",
                             message=f"Health check failed for {account.get('email') or auth_file}, blacklist extended",
                             auth_file=auth_file,
                             auth_email=account.get("email"),
+                            cooldown_seconds=state.get("cooldown_seconds"),
+                            blacklist_seconds=state.get("blacklist_seconds"),
                         )
                 
             except Exception:
@@ -274,7 +343,8 @@ class ProxyRuntime:
             parsed = urlsplit(self.settings.upstream)
             host = parsed.hostname or "chatgpt.com"
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            path = "/backend-api/models"
+            base_path = parsed.path.rstrip("/")
+            path = f"{base_path}/models" if base_path else "/models"
 
             conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
             conn = conn_cls(host, port, timeout=timeout)
@@ -291,23 +361,24 @@ class ProxyRuntime:
                 result["http_status"] = response.status
                 result["latency_ms"] = int((time.time() - start_time) * 1000)
 
-                # Read and discard body
+                # Read and classify body
                 try:
-                    _ = response.read()
+                    raw_body = response.read()
                 except Exception:
-                    pass
+                    raw_body = b""
+                extracted_error_code = _extract_error_code(raw_body, status=response.status)
 
                 # Determine success based on status code
                 if 200 <= response.status < 300:
                     result["success"] = True
                 elif response.status in {401, 403}:
-                    result["error_code"] = "token_invalid" if response.status == 401 else "forbidden"
+                    result["error_code"] = extracted_error_code or ("token_invalid" if response.status == 401 else "forbidden")
                 elif response.status == 429:
-                    result["error_code"] = "rate_limited"
+                    result["error_code"] = extracted_error_code or "rate_limited"
                 elif response.status >= 500:
-                    result["error_code"] = "server_error"
+                    result["error_code"] = extracted_error_code or "server_error"
                 else:
-                    result["error_code"] = f"http_{response.status}"
+                    result["error_code"] = extracted_error_code or f"http_{response.status}"
 
             finally:
                 conn.close()
@@ -369,66 +440,28 @@ class ProxyRuntime:
                 prev_state = snapshot_before.get(record.name, {})
                 prev_status = prev_state.get("status", "UNKNOWN")
 
-                # Determine action and update state via mark_result
-                http_status = probe_result.get("http_status") or 0
+                # Determine action without mutating runtime state.
+                http_status = probe_result.get("http_status")
                 error_code = probe_result.get("error_code")
 
                 if probe_result.get("success"):
-                    # Success - mark as 200
-                    self.auth_pool.mark_result(
-                        record.name,
-                        status=200,
-                        error_code=None,
-                    )
-                    if prev_status == "BLACKLIST":
-                        action = "restored"
-                    else:
-                        action = "none"
+                    action = "healthy"
                 elif http_status == 429:
-                    # Rate limited - mark as 429
-                    self.auth_pool.mark_result(
-                        record.name,
-                        status=429,
-                        error_code=error_code,
-                    )
-                    action = "cooldown"
+                    action = "would_cooldown"
                 elif http_status in {401, 403}:
-                    # Auth failure - mark as blacklist (force immediate blacklist for probe)
-                    self.auth_pool.mark_result(
-                        record.name,
-                        status=http_status,
-                        error_code=error_code,
-                        force_blacklist=True,
-                    )
-                    if prev_status != "BLACKLIST":
-                        action = "blacklisted"
-                    else:
-                        action = "none"
+                    action = "auth_failed"
+                elif is_auth_incompatible_error(int(http_status or 0), str(error_code or "")):
+                    action = "compat_failed"
                 elif http_status is not None:
-                    # Other HTTP errors - mark as transient
-                    self.auth_pool.mark_result(
-                        record.name,
-                        status=http_status,
-                        error_code=error_code,
-                    )
                     action = "error"
                 else:
-                    # Network/connection error
-                    action = "error"
-
-                # Get current status after marking
-                snapshot_after = {
-                    item.get("file", ""): item
-                    for item in self.auth_pool.health_snapshot()
-                }
-                current_state = snapshot_after.get(record.name, {})
-                current_status = current_state.get("status", "UNKNOWN")
+                    action = "network_error"
 
                 results.append({
                     "file": record.name,
                     "email": record.email,
                     "previous_status": prev_status,
-                    "status": current_status,
+                    "status": prev_status,
                     "http_status": http_status,
                     "action": action,
                     "latency_ms": probe_result.get("latency_ms", 0),
@@ -474,9 +507,10 @@ class ProxyRuntime:
     def health_snapshot(self, *, refresh: bool = False) -> Dict[str, Any]:
         if refresh:
             self.reload_auths()
-        accounts = self.auth_pool.health_snapshot()
+        limit_health = self._refresh_limit_health(force=refresh)
+        accounts = merge_runtime_with_limits(self.auth_pool.health_snapshot(), limit_health)
         return {
-            "ok": bool(accounts),
+            "ok": merged_ok(accounts),
             "accounts": accounts,
         }
 
@@ -693,23 +727,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
             self._handle_management(route)
             return
-        
-        # Handle codex exec /backend-api/models endpoint
-        if self.path == "/backend-api/models" or self.path.startswith("/backend-api/models?"):
-            self._handle_models_endpoint()
-            return
-        
         self._proxy_request()
 
     def _handle_models_endpoint(self) -> None:
-        """Handle codex exec models endpoint.
-        
-        Codex exec calls this during initialization to get available models.
-        Returns a ChatGPT-account-compatible models list.
-        """
+        """Compatibility helper for tests and direct local probes."""
         models_response = {
             "data": [
-                {"id": model_id, "object": "model", "owned_by": "openai"}
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "owned_by": "openai",
+                    "display_name": model_id,
+                }
                 for model_id in CHATGPT_ACCOUNT_MODELS
             ]
         }
@@ -728,7 +757,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # Client disconnected before body flush; keep server alive without noisy traceback.
+            return
 
     def _read_body(self) -> Optional[bytes]:
         raw_length = self.headers.get("Content-Length", "0")
@@ -909,6 +942,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     headers=[("Content-Type", "application/json")],
                     body=json.dumps({"error": "response body too large"}).encode("utf-8"),
                 )
+            data = _normalize_models_response_body(data, request_path=rewritten_path)
 
             return UpstreamAttemptResult(
                 status=status,
@@ -936,6 +970,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _proxy_request(self) -> None:
         runtime = self.server.runtime
+        runtime._refresh_limit_health()
         upstream = urlsplit(runtime.settings.upstream)
         scheme = upstream.scheme or "https"
         host = upstream.hostname

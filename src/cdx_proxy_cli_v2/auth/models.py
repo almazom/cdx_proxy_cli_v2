@@ -17,6 +17,8 @@ class AuthRecord:
 class AuthState:
     record: AuthRecord
     cooldown_until: float = 0.0
+    limit_until: float = 0.0
+    limit_reason: Optional[str] = None
     blacklist_until: float = 0.0
     blacklist_reason: Optional[str] = None
     probation_successes: int = 2
@@ -37,6 +39,8 @@ class AuthState:
     def available(self, now: float) -> bool:
         if now < self.blacklist_until:
             return False
+        if now < self.limit_until:
+            return False
         if now < self.cooldown_until:
             return False
         if self.probation_successes < self.probation_target and now < self.next_probe_after:
@@ -46,25 +50,51 @@ class AuthState:
     def status(self, now: float) -> str:
         if now < self.blacklist_until:
             return "BLACKLIST"
+        if self.probation_successes < self.probation_target:
+            return "PROBATION"
+        if now < self.limit_until:
+            return "COOLDOWN"
         if now < self.cooldown_until:
             return "COOLDOWN"
-        if self.probation_successes < self.probation_target:
-            if now < self.next_probe_after:
-                return "BLACKLIST"
-            return "PROBATION"
         return "OK"
 
     def health(self, now: float) -> Dict[str, Any]:
-        remaining = int(self.cooldown_until - now) if self.cooldown_until > now else 0
+        runtime_remaining = int(self.cooldown_until - now) if self.cooldown_until > now else 0
+        limit_remaining = int(self.limit_until - now) if self.limit_until > now else 0
+        remaining = max(runtime_remaining, limit_remaining)
         blacklist_remaining = int(self.blacklist_until - now) if self.blacklist_until > now else 0
         status = self.status(now)
+        reason = None
+        reason_origin = None
+        until = None
+        if status == "BLACKLIST":
+            reason = self.blacklist_reason
+            reason_origin = "auth"
+            until = self.blacklist_until if self.blacklist_until > now else None
+        elif status == "PROBATION":
+            reason = "probation"
+            reason_origin = "probation"
+            until = self.next_probe_after if self.next_probe_after > now else None
+        elif limit_remaining > 0:
+            reason = self.limit_reason
+            reason_origin = "limit"
+            until = self.limit_until
+        elif runtime_remaining > 0:
+            reason = "rate_limited" if self.rate_limit_strikes > 0 else "cooldown"
+            reason_origin = "runtime"
+            until = self.cooldown_until
         return {
             "file": self.record.name,
             "email": self.record.email,
             "status": status,
+            "eligible_now": self.available(now),
             "cooldown_seconds": remaining if remaining > 0 else None,
             "blacklist_seconds": blacklist_remaining if blacklist_remaining > 0 else None,
             "blacklist_reason": self.blacklist_reason,
+            "limit_reason": self.limit_reason,
+            "reason": reason,
+            "reason_origin": reason_origin,
+            "until": until,
             "probation": status == "PROBATION",
             "probation_successes": self.probation_successes,
             "probation_target": self.probation_target,

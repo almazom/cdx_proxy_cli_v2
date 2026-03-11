@@ -285,7 +285,7 @@ class TestAutoHealE2E:
         )
         
         # Step 2: Mock upstream still failing (health checks will fail)
-        MockUpstreamHandler.set_response_sequence([401, 401, 401, 401, 401])
+        MockUpstreamHandler.set_response_sequence([401] * 30)
         
         # Step 3: Wait for multiple auto-heal attempts
         time.sleep(4)
@@ -305,15 +305,15 @@ class TestAutoHealE2E:
 # E2E Tests: Consecutive Error Threshold
 # ============================================================================
 
-class TestConsecutiveErrorThreshold:
-    """E2E tests for consecutive error threshold (Envoy pattern)."""
+class TestHardAuthEjection:
+    """E2E tests for immediate hard-auth ejection."""
     
-    def test_single_error_does_not_blacklist(
+    def test_single_error_blacklists_immediately(
         self,
         running_proxy: Dict[str, Any],
         mock_upstream_server: HTTPServer,
     ) -> None:
-        """E2E: Single 401 should not blacklist (threshold=3)."""
+        """E2E: Single 401 should immediately eject the key from rotation."""
         runtime = running_proxy["runtime"]
         base_url = running_proxy["base_url"]
         
@@ -322,53 +322,29 @@ class TestConsecutiveErrorThreshold:
         
         make_proxy_request(base_url)
         
-        # Key should NOT be blacklisted yet
+        # Key should be blacklisted immediately
         snapshot = runtime.auth_pool.health_snapshot()
         blacklisted = [acc for acc in snapshot if acc["status"] == "BLACKLIST"]
-        assert len(blacklisted) == 0
+        assert len(blacklisted) >= 1
     
-    def test_consecutive_errors_trigger_blacklist(
+    def test_success_clears_consecutive_counter_for_non_hard_failures(
         self,
         running_proxy: Dict[str, Any],
         mock_upstream_server: HTTPServer,
     ) -> None:
-        """E2E: 3 consecutive 401s on same key should blacklist."""
+        """E2E: Success should clear transient counters even after prior failures."""
         runtime = running_proxy["runtime"]
         base_url = running_proxy["base_url"]
-        
-        # Override to blacklist on first error for this test
-        runtime.auth_pool.consecutive_error_threshold = 1
-        
-        # 3 consecutive 401 errors
-        MockUpstreamHandler.set_response_sequence([401, 401, 401])
-        
-        for _ in range(3):
-            make_proxy_request(base_url)
-        
-        # Key should be blacklisted
-        snapshot = runtime.auth_pool.health_snapshot()
-        blacklisted = [acc for acc in snapshot if acc["status"] == "BLACKLIST"]
-        assert len(blacklisted) > 0, "At least one key should be blacklisted"
-    
-    def test_success_resets_consecutive_counter(
-        self,
-        running_proxy: Dict[str, Any],
-        mock_upstream_server: HTTPServer,
-    ) -> None:
-        """E2E: Success between errors resets counter."""
-        runtime = running_proxy["runtime"]
-        base_url = running_proxy["base_url"]
-        
-        # Pattern: 401, 200, 401, 200, 401 (never reaches threshold)
-        MockUpstreamHandler.set_response_sequence([401, 200, 401, 200, 401, 200])
-        
-        for _ in range(6):
-            make_proxy_request(base_url)
-        
-        # Key should NOT be blacklisted
-        snapshot = runtime.auth_pool.health_snapshot()
-        blacklisted = [acc for acc in snapshot if acc["status"] == "BLACKLIST"]
-        assert len(blacklisted) == 0
+
+        first_auth = runtime.auth_pool.pick()
+        assert first_auth is not None
+        runtime.auth_pool.mark_result(first_auth.record.name, status=429)
+        runtime.auth_pool.mark_result(first_auth.record.name, status=200)
+
+        snapshot = {acc["file"]: acc for acc in runtime.auth_pool.health_snapshot()}
+        assert snapshot[first_auth.record.name]["status"] == "OK"
+        auth_state = next(state for state in runtime.auth_pool._states if state.record.name == first_auth.record.name)
+        assert auth_state.consecutive_errors == 0
 
 
 # ============================================================================
@@ -376,14 +352,14 @@ class TestConsecutiveErrorThreshold:
 # ============================================================================
 
 class TestMaxEjectionPercent:
-    """E2E tests for max ejection percent (Envoy pattern)."""
+    """E2E tests for max ejection behavior."""
     
-    def test_max_ejection_prevents_total_blackout(
+    def test_max_ejection_does_not_restore_hard_auth_failures(
         self,
         temp_auth_dir: Path,
         mock_upstream_server: HTTPServer,
     ) -> None:
-        """E2E: Max ejection percent should prevent total blackout."""
+        """E2E: Hard auth failures stay ejected even if the pool is exhausted."""
         # Create settings with 50% max ejection
         settings = build_settings(
             auth_dir=str(temp_auth_dir),
@@ -405,18 +381,13 @@ class TestMaxEjectionPercent:
         for auth_name in runtime.auth_pool.auth_files():
             runtime.auth_pool.mark_result(auth_name, status=401, error_code="token_invalid")
         
-        # Try to pick a key - this should trigger max ejection logic
+        # Hard-auth-failed keys must not be force-restored
         picked = runtime.auth_pool.pick()
-        
-        # Should be able to pick at least one key
-        assert picked is not None, "Should be able to pick a key after max ejection logic"
-        
-        # Verify that not all keys are blacklisted
+        assert picked is None
+
         snapshot = runtime.auth_pool.health_snapshot()
-        available = [acc for acc in snapshot if acc["status"] == "OK"]
-        
-        # At least one key should be available after pick() triggers max ejection
-        assert len(available) >= 1, "At least one key should be available after max ejection"
+        blacklisted = [acc for acc in snapshot if acc["status"] == "BLACKLIST"]
+        assert len(blacklisted) == 3
 
 
 # ============================================================================

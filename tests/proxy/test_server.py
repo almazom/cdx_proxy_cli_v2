@@ -5,14 +5,20 @@ from dataclasses import replace
 import json
 from io import BytesIO
 from typing import Any, Dict
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.auth.rotation import RoundRobinAuthPool
 from cdx_proxy_cli_v2.config.settings import Settings
-from cdx_proxy_cli_v2.proxy.server import ProxyHandler, ProxyRuntime, UpstreamAttemptResult, _extract_error_code
+from cdx_proxy_cli_v2.proxy.server import (
+    ProxyHandler,
+    ProxyRuntime,
+    UpstreamAttemptResult,
+    _extract_error_code,
+    _normalize_models_response_body,
+)
 
 
 # ============================================================================
@@ -493,6 +499,73 @@ class TestModelsEndpoint:
             "gpt-5.1-codex",
             "gpt-5.1-codex-mini",
         ]
+        assert all(item["display_name"] for item in payload["data"])
+
+    def test_normalizes_upstream_models_payload_for_codex_cli(self):
+        """Upstream /models payloads should gain display_name for CLI compatibility."""
+        body = json.dumps({
+            "models": [
+                {"slug": "gpt-5-3", "title": "GPT-5.3"},
+                {"slug": "gpt-5-mini"},
+            ]
+        }).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_models_response_body(body, request_path="/models?client_version=0.114.0").decode("utf-8")
+        )
+
+        assert normalized["models"][0]["display_name"] == "GPT-5.3"
+        assert normalized["models"][1]["display_name"] == "gpt-5-mini"
+
+
+class TestMergedHealth:
+    """Tests for merged runtime + limit health output."""
+
+    def test_health_snapshot_respects_limit_cooldown(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "COOLDOWN",
+                    "weekly": {
+                        "status": "COOLDOWN",
+                        "used_percent": 100.0,
+                        "reset_after_seconds": 300,
+                    },
+                }
+            }
+            snapshot = runtime.health_snapshot(refresh=False)
+
+        assert snapshot["ok"] is False
+        assert snapshot["accounts"][0]["status"] == "COOLDOWN"
+        assert snapshot["accounts"][0]["reason"] == "limit_weekly"
+        assert snapshot["accounts"][0]["reason_origin"] == "limit"
+        assert snapshot["accounts"][0]["eligible_now"] is False
+
+
+class TestProbeBehavior:
+    """Tests for non-destructive probe behavior."""
+
+    def test_probe_all_auths_does_not_mutate_runtime_state(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        before = runtime.auth_pool.health_snapshot()
+
+        with patch("cdx_proxy_cli_v2.proxy.server.load_auth_records", return_value=[sample_auth_record]):
+            runtime._probe_single_auth = MagicMock(return_value={
+                "file": sample_auth_record.name,
+                "success": False,
+                "http_status": 403,
+                "error_code": "forbidden",
+                "latency_ms": 7,
+            })
+
+            result = runtime.probe_all_auths(timeout=5)
+        after = runtime.auth_pool.health_snapshot()
+
+        assert result["results"][0]["action"] == "auth_failed"
+        assert before == after
 
 
 # ============================================================================

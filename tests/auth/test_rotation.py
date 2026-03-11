@@ -105,7 +105,7 @@ def test_prefers_stable_keys_when_available(monkeypatch) -> None:
     assert picked.record.name == "b.json"
 
 
-def test_max_ejection_force_restore_makes_key_immediately_available() -> None:
+def test_hard_auth_failures_are_not_force_restored_by_max_ejection() -> None:
     pool = RoundRobinAuthPool(max_ejection_percent=50, consecutive_error_threshold=1)
     pool.load(
         [
@@ -118,6 +118,5 @@ def test_max_ejection_force_restore_makes_key_immediately_available() -> None:
     for auth_name in ["a.json", "b.json", "c.json"]:
         pool.mark_result(auth_name, status=401, error_code="token_invalid")
 
-    picked = pool.pick()
-    assert picked is not None
-    assert pool.stats()["ok"] >= 1
+    assert pool.pick() is None
+    assert pool.stats()["blacklist"] == 3
