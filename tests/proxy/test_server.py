@@ -556,6 +556,7 @@ class TestModelsEndpoint:
         ]
         assert all(item["display_name"] for item in payload["data"])
         assert all(item["shell_type"] == "shell_command" for item in payload["data"])
+        assert all(item["visibility"] == "list" for item in payload["data"])
 
     def test_normalizes_upstream_models_payload_for_codex_cli(self):
         """Upstream /models payloads should gain display_name for CLI compatibility."""
@@ -606,17 +607,17 @@ class TestModelsEndpoint:
         )
 
         assert normalized["models"][0]["supported_reasoning_levels"] == [
-            "standard",
-            "extended",
+            {"effort": "standard", "description": "standard"},
+            {"effort": "extended", "description": "extended"},
         ]
         assert normalized["models"][1]["supported_reasoning_levels"] == []
 
     def test_normalizes_shell_type_for_codex_cli(self):
-        """Upstream /models payloads should expose shell_type."""
+        """Upstream /models payloads should expose Codex-required fields."""
         body = json.dumps(
             {
                 "models": [
-                    {"slug": "gpt-5-3", "title": "GPT-5.3"},
+                    {"slug": "gpt-5-3", "title": "GPT-5.3", "max_tokens": 64000},
                     {"slug": "gpt-5", "title": "GPT-5"},
                 ]
             }
@@ -630,6 +631,20 @@ class TestModelsEndpoint:
 
         assert normalized["models"][0]["shell_type"] == "shell_command"
         assert normalized["models"][1]["shell_type"] == "default"
+        assert normalized["models"][0]["visibility"] == "list"
+        assert normalized["models"][0]["supported_in_api"] is True
+        assert normalized["models"][0]["priority"] == 0
+        assert normalized["models"][0]["default_reasoning_level"] == "low"
+        assert normalized["models"][0]["context_window"] == 64000
+        assert normalized["models"][0]["input_modalities"] == ["text"]
+        assert normalized["models"][0]["truncation_policy"] == {
+            "mode": "tokens",
+            "limit": 10000,
+        }
+        assert normalized["models"][0]["model_messages"] == {
+            "instructions_template": ""
+        }
+        assert normalized["models"][1]["default_reasoning_level"] == "low"
 
 
 class TestMergedHealth:

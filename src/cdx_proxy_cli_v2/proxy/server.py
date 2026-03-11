@@ -142,6 +142,144 @@ def _normalize_model_shell_type(item: dict[str, Any]) -> str:
     return "shell_command"
 
 
+def _codex_cli_static_model_fields() -> dict[str, Any]:
+    return {
+        "visibility": "list",
+        "supported_in_api": True,
+        "priority": 0,
+        "availability_nux": None,
+        "upgrade": None,
+        "base_instructions": "",
+        "model_messages": {"instructions_template": ""},
+        "supports_reasoning_summaries": True,
+        "default_reasoning_summary": "none",
+        "support_verbosity": True,
+        "default_verbosity": "low",
+        "apply_patch_tool_type": "freeform",
+        "web_search_tool_type": "text_and_image",
+        "truncation_policy": {"mode": "tokens", "limit": 10000},
+        "supports_parallel_tool_calls": True,
+        "supports_image_detail_original": True,
+        "effective_context_window_percent": 95,
+        "experimental_supported_tools": [],
+        "prefer_websockets": True,
+    }
+
+
+def _normalize_model_input_modalities(item: dict[str, Any]) -> list[str]:
+    product_features = item.get("product_features")
+    if isinstance(product_features, dict):
+        attachments = product_features.get("attachments")
+        if isinstance(attachments, dict):
+            image_mime_types = attachments.get("image_mime_types")
+            if isinstance(image_mime_types, list) and image_mime_types:
+                return ["text", "image"]
+    return ["text"]
+
+
+def _normalize_model_context_window(item: dict[str, Any]) -> int:
+    for key in ("context_window", "max_tokens"):
+        raw = item.get(key)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 128000
+
+
+def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
+    existing = item.get("default_reasoning_level")
+    if isinstance(existing, str) and existing.strip():
+        return existing.strip()
+    supported = item.get("supported_reasoning_levels")
+    if isinstance(supported, list):
+        for candidate in supported:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+            if isinstance(candidate, dict):
+                effort = candidate.get("effort") or candidate.get("thinking_effort")
+                if isinstance(effort, str) and effort.strip():
+                    return effort.strip()
+    if str(item.get("reasoning_type") or "").strip().lower() == "reasoning":
+        return "medium"
+    return "low"
+
+
+def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[dict[str, str]]:
+    existing = item.get("supported_reasoning_levels")
+    normalized: list[dict[str, str]] = []
+    if isinstance(existing, list):
+        for candidate in existing:
+            if isinstance(candidate, dict):
+                effort = candidate.get("effort") or candidate.get("thinking_effort")
+                description = candidate.get("description")
+                if isinstance(effort, str) and effort.strip():
+                    normalized.append(
+                        {
+                            "effort": effort.strip(),
+                            "description": str(description or "").strip(),
+                        }
+                    )
+            elif isinstance(candidate, str) and candidate.strip():
+                normalized.append(
+                    {"effort": candidate.strip(), "description": candidate.strip()}
+                )
+        if normalized:
+            return normalized
+
+    thinking_efforts = item.get("thinking_efforts")
+    if not isinstance(thinking_efforts, list):
+        return []
+    for effort in thinking_efforts:
+        if not isinstance(effort, dict):
+            continue
+        effort_name = effort.get("thinking_effort")
+        if not isinstance(effort_name, str) or not effort_name.strip():
+            continue
+        description = (
+            effort.get("description")
+            or effort.get("full_label")
+            or effort.get("mobile_full_label")
+            or effort.get("short_label")
+            or effort_name
+        )
+        normalized.append(
+            {
+                "effort": effort_name.strip(),
+                "description": str(description).strip(),
+            }
+        )
+    return normalized
+
+
+def _normalize_codex_cli_model_fields(item: dict[str, Any]) -> bool:
+    changed = False
+
+    def ensure(key: str, value: Any) -> None:
+        nonlocal changed
+        if key in item:
+            return
+        item[key] = value
+        changed = True
+
+    for key, value in _codex_cli_static_model_fields().items():
+        ensure(key, value)
+
+    if "default_reasoning_level" not in item:
+        item["default_reasoning_level"] = _normalize_model_default_reasoning_level(item)
+        changed = True
+    if "context_window" not in item:
+        item["context_window"] = _normalize_model_context_window(item)
+        changed = True
+    if "input_modalities" not in item:
+        item["input_modalities"] = _normalize_model_input_modalities(item)
+        changed = True
+
+    return changed
+
+
 def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
     if not body or not _is_models_request_path(request_path):
         return body
@@ -167,23 +305,19 @@ def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
                     if isinstance(display_name, str) and display_name.strip():
                         item["display_name"] = display_name
                         changed = True
-                if not isinstance(item.get("supported_reasoning_levels"), list):
-                    supported_reasoning_levels: list[str] = []
-                    thinking_efforts = item.get("thinking_efforts")
-                    if isinstance(thinking_efforts, list):
-                        for effort in thinking_efforts:
-                            if not isinstance(effort, dict):
-                                continue
-                            level = effort.get("thinking_effort")
-                            if isinstance(level, str) and level.strip():
-                                supported_reasoning_levels.append(level.strip())
-                    item["supported_reasoning_levels"] = supported_reasoning_levels
+                normalized_reasoning_levels = (
+                    _normalize_model_supported_reasoning_levels(item)
+                )
+                if item.get("supported_reasoning_levels") != normalized_reasoning_levels:
+                    item["supported_reasoning_levels"] = normalized_reasoning_levels
                     changed = True
                 if (
                     not isinstance(item.get("shell_type"), str)
                     or not str(item.get("shell_type") or "").strip()
                 ):
                     item["shell_type"] = _normalize_model_shell_type(item)
+                    changed = True
+                if _normalize_codex_cli_model_fields(item):
                     changed = True
     if not changed:
         return body
@@ -985,6 +1119,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "display_name": model_id,
                     "supported_reasoning_levels": [],
                     "shell_type": "shell_command",
+                    "default_reasoning_level": "low",
+                    "context_window": 128000,
+                    "input_modalities": ["text"],
+                    **_codex_cli_static_model_fields(),
                 }
                 for model_id in CHATGPT_ACCOUNT_MODELS
             ]
