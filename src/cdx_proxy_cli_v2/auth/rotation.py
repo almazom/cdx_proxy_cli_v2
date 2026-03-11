@@ -402,7 +402,7 @@ class RoundRobinAuthPool:
 
                 # Filter by state if specified
                 if state is not None:
-                    current_status = auth_state.status(now).lower()
+                    current_status = self._resettable_status(auth_state, now).lower()
                     if current_status != state.lower():
                         continue
 
@@ -422,3 +422,14 @@ class RoundRobinAuthPool:
                 count += 1
 
             return count
+
+    @staticmethod
+    def _resettable_status(auth_state: AuthState, now: float) -> str:
+        """Return only runtime states that reset_auth can actually clear."""
+        if auth_state.blacklist_until > now:
+            return "BLACKLIST"
+        if auth_state.cooldown_until > now:
+            return "COOLDOWN"
+        if auth_state.probation_successes < auth_state.probation_target:
+            return "PROBATION"
+        return "OK"

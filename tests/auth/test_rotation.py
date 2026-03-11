@@ -313,6 +313,28 @@ def test_probation_recovery_returns_key_to_round_robin(monkeypatch) -> None:
     assert "a.json" in pick_names
 
 
+def test_reset_ignores_limit_only_cooldown(monkeypatch) -> None:
+    now = 5500.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            )
+        ]
+    )
+
+    pool._states[0].limit_until = now + 300.0
+    pool._states[0].limit_reason = "limit_5h"
+
+    assert pool.reset_auth(state="cooldown") == 0
+    snapshot = pool.health_snapshot()[0]
+    assert snapshot["status"] == "COOLDOWN"
+    assert snapshot["reason"] == "limit_5h"
+
+
 def test_non_auth_4xx_does_not_penalize_key(monkeypatch) -> None:
     now = 5000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
