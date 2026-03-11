@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Automated testing loop for cdx proxy - runs without human intervention."""
+
 from __future__ import annotations
 
 import json
@@ -59,10 +60,13 @@ def run_codex_test(prompt: str = "say hello", timeout: int = 60) -> TestResult:
     timestamp = datetime.now().isoformat()
 
     cmd = [
-        "codex", "exec",
-        "-s", "danger-full-access",
-        "--enable", "multi_agent",
-        prompt
+        "codex",
+        "exec",
+        "-s",
+        "danger-full-access",
+        "--enable",
+        "multi_agent",
+        prompt,
     ]
 
     try:
@@ -83,7 +87,7 @@ def run_codex_test(prompt: str = "say hello", timeout: int = 60) -> TestResult:
                 timestamp=timestamp,
                 success=True,
                 duration_ms=duration_ms,
-                response_preview=stdout[:200] if stdout else "OK"
+                response_preview=stdout[:200] if stdout else "OK",
             )
 
         # Check for specific error patterns
@@ -106,7 +110,7 @@ def run_codex_test(prompt: str = "say hello", timeout: int = 60) -> TestResult:
             success=False,
             duration_ms=duration_ms,
             error=error,
-            response_preview=stderr[:200] if stderr else "No error output"
+            response_preview=stderr[:200] if stderr else "No error output",
         )
 
     except subprocess.TimeoutExpired:
@@ -114,14 +118,14 @@ def run_codex_test(prompt: str = "say hello", timeout: int = 60) -> TestResult:
             timestamp=timestamp,
             success=False,
             duration_ms=timeout * 1000,
-            error="TIMEOUT"
+            error="TIMEOUT",
         )
     except Exception as exc:
         return TestResult(
             timestamp=timestamp,
             success=False,
             duration_ms=int((time.time() - start) * 1000),
-            error=f"EXCEPTION: {type(exc).__name__}"
+            error=f"EXCEPTION: {type(exc).__name__}",
         )
 
 
@@ -129,10 +133,7 @@ def check_proxy_health() -> Dict[str, any]:
     """Check if proxy is healthy."""
     try:
         result = subprocess.run(
-            ["cdx", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["cdx", "status", "--json"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
