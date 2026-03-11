@@ -13,7 +13,7 @@ def test_taad_401_blacklists_then_reenters_via_probation(monkeypatch) -> None:
     now = 1000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
-    pool = RoundRobinAuthPool()
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
     pool.load([AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com")])
 
     picked = pool.pick()
@@ -38,7 +38,7 @@ def test_taad_401_blacklists_then_reenters_via_probation(monkeypatch) -> None:
 
 def test_taad_429_cooldown_rotates_to_next_key() -> None:
     """TaaD Functional Fit: rate-limited key is cooled down and rotation continues."""
-    pool = RoundRobinAuthPool()
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
     pool.load(
         [
             AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"),
@@ -54,12 +54,27 @@ def test_taad_429_cooldown_rotates_to_next_key() -> None:
     assert second.record.name != first.record.name
 
 
+def test_taad_400_account_incompatibility_blacklists_immediately(monkeypatch) -> None:
+    """TaaD Safety: account-incompatible 400s are ejected immediately and not retried blindly."""
+    now = 1200.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load([AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com")])
+
+    picked = pool.pick()
+    assert picked is not None
+    pool.mark_result("a.json", status=400, error_code="chatgpt_account_incompatible")
+
+    assert pool.pick() is None
+
+
 def test_taad_prefers_stable_key_over_recently_blacklisted_key(monkeypatch) -> None:
     """TaaD Perf: when at least one stable key exists, avoid retry-latency on known bad keys."""
     now = 1000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
-    pool = RoundRobinAuthPool()
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
     pool.load(
         [
             AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"),

@@ -9,6 +9,11 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from cdx_proxy_cli_v2.config.settings import (
+    ENV_AUTO_RESET_COOLDOWN,
+    ENV_AUTO_RESET_ON_SINGLE_KEY,
+    ENV_AUTO_RESET_STREAK,
+)
 from cdx_proxy_cli_v2.runtime import service as service_module
 from cdx_proxy_cli_v2.runtime.service import (
     start_service,
@@ -201,7 +206,7 @@ class TestStopService:
         with patch('cdx_proxy_cli_v2.runtime.service._is_expected_proxy_process', return_value=True):
             with patch('cdx_proxy_cli_v2.runtime.service.fetch_json') as mock_fetch:
                 mock_fetch.return_value = {"status": "shutting_down"}
-                with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid') as mock_terminate:
+                with patch('cdx_proxy_cli_v2.runtime.service._terminate_pid'):
                     with patch('cdx_proxy_cli_v2.runtime.service._remove_file'):
                         result = stop_service(settings)
         
@@ -265,6 +270,9 @@ class TestServiceHardening:
         monkeypatch.setenv("CLIPROXY_PORT", "0")
         monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
         monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "env-key")
+        monkeypatch.setenv(ENV_AUTO_RESET_ON_SINGLE_KEY, "1")
+        monkeypatch.setenv(ENV_AUTO_RESET_STREAK, "7")
+        monkeypatch.setenv(ENV_AUTO_RESET_COOLDOWN, "180")
 
         from cdx_proxy_cli_v2.config.settings import build_settings
         settings = build_settings()
@@ -277,6 +285,9 @@ class TestServiceHardening:
         env = mock_popen.call_args.kwargs["env"]
         assert "--management-key" not in argv
         assert env["CLIPROXY_MANAGEMENT_KEY"] == "secret-key"
+        assert env[ENV_AUTO_RESET_ON_SINGLE_KEY] == "1"
+        assert env[ENV_AUTO_RESET_STREAK] == "7"
+        assert env[ENV_AUTO_RESET_COOLDOWN] == "180"
 
 
 class TestServiceStatus:

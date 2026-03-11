@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, Iterator, Optional, Tuple
 from urllib.error import HTTPError

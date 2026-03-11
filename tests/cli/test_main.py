@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import tomllib
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from cdx_proxy_cli_v2.cli.main import (
     handle_doctor,
@@ -16,6 +15,7 @@ from cdx_proxy_cli_v2.cli.main import (
     handle_reset,
     handle_status,
     handle_stop,
+    handle_rotate,
     _settings_from_args,
     format_shell_exports,
     main,
@@ -276,6 +276,27 @@ class TestSettingsFromArgs:
 
         assert settings.auth_dir == temp_auth_dir  # CLI override
 
+    def test_settings_from_args_propagates_auto_reset_options(self, temp_auth_dir):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            auto_reset_on_single_key=True,
+            auto_reset_streak=5,
+            auto_reset_cooldown=120,
+        )
+
+        settings = _settings_from_args(args)
+
+        assert settings.auto_reset_on_single_key is True
+        assert settings.auto_reset_streak == 5
+        assert settings.auto_reset_cooldown == 120
+
 
 class TestCliContracts:
     """Tests for user-facing CLI contracts."""
@@ -322,3 +343,251 @@ class TestFormatShellExports:
         
         # The function escapes single quotes by ending quote, adding escaped quote, starting new quote
         assert "'/test/auth" in output
+
+
+class TestHandleRotate:
+    """Tests for handle_rotate function."""
+
+    def test_rotate_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
+        """Test rotate fails when proxy is not running."""
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=False,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status:
+            mock_status.return_value = {
+                "healthy": False,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Proxy is not healthy/running" in captured.err
+
+    def test_rotate_no_healthy_auths(self, capsys, temp_auth_dir):
+        """Test rotate when no healthy auths available."""
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=False,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
+             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            # All auths in bad states
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "auth1.json", "status": "COOLDOWN", "used": 5},
+                    {"file": "auth2.json", "status": "BLACKLIST", "used": 10},
+                    {"file": "auth3.json", "status": "PROBATION", "used": 3},
+                ]
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No healthy auth keys available" in captured.err
+
+    def test_rotate_successful(self, capsys, temp_auth_dir, tmp_path, monkeypatch):
+        """Test successful rotation to a healthy auth."""
+        # Create auth dir with a healthy auth file
+        auth_dir = Path(temp_auth_dir)
+        auth_file = auth_dir / "healthy_auth.json"
+        auth_data = {
+            "email": "test@example.com",
+            "tokens": {
+                "access_token": "secret_token_123",
+                "account_id": "acc_123",
+            }
+        }
+        auth_file.write_text(json.dumps(auth_data))
+
+        # Set up codex home to be a temp directory
+        codex_home = tmp_path / ".codex"
+        codex_home.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=False,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
+             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "healthy_auth.json", "status": "OK", "used": 5, "email": "test@example.com"},
+                    {"file": "cooldown_auth.json", "status": "COOLDOWN", "used": 10},
+                ]
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Rotated to auth key: healthy_auth.json" in captured.out
+        assert "test@example.com" in captured.out
+
+        # Verify the auth file was written
+        dest_path = codex_home / "auth.json"
+        assert dest_path.exists()
+        written_data = json.loads(dest_path.read_text())
+        assert written_data["email"] == "test@example.com"
+        assert written_data["tokens"]["access_token"] == "secret_token_123"
+
+    def test_rotate_dry_run(self, capsys, temp_auth_dir):
+        """Test rotate --dry-run shows what would happen."""
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=True,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
+             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "auth1.json", "status": "OK", "used": 5, "email": "user1@example.com"},
+                ]
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Dry run: Would rotate to auth key" in captured.out
+        assert "auth1.json" in captured.out
+
+    def test_rotate_json_output(self, capsys, temp_auth_dir, tmp_path, monkeypatch):
+        """Test rotate --json outputs JSON."""
+        # Create auth dir with a healthy auth file
+        auth_dir = Path(temp_auth_dir)
+        auth_file = auth_dir / "auth1.json"
+        auth_data = {"email": "user1@example.com", "tokens": {"access_token": "token123"}}
+        auth_file.write_text(json.dumps(auth_data))
+
+        codex_home = tmp_path / ".codex"
+        codex_home.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=False,
+            json=True,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
+             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "auth1.json", "status": "OK", "used": 5, "email": "user1@example.com"},
+                ]
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        output = json.loads(captured.out)
+        assert output["success"] is True
+        assert output["selected"]["file"] == "auth1.json"
+        assert output["selected"]["email"] == "user1@example.com"
+
+    def test_rotate_prefers_least_used(self, capsys, temp_auth_dir, tmp_path, monkeypatch):
+        """Test rotate selects the least-used healthy auth."""
+        # Create auth files
+        auth_dir = Path(temp_auth_dir)
+        (auth_dir / "auth_new.json").write_text(json.dumps({"email": "new@example.com", "tokens": {"access_token": "new"}}))
+        (auth_dir / "auth_old.json").write_text(json.dumps({"email": "old@example.com", "tokens": {"access_token": "old"}}))
+
+        codex_home = tmp_path / ".codex"
+        codex_home.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            dry_run=True,
+            json=False,
+        )
+
+        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
+             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            # Both OK, but auth_new has lower used count
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "auth_old.json", "status": "OK", "used": 100, "email": "old@example.com"},
+                    {"file": "auth_new.json", "status": "OK", "used": 5, "email": "new@example.com"},
+                ]
+            }
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        # Should pick the one with lower used count
+        assert "auth_new.json" in captured.out

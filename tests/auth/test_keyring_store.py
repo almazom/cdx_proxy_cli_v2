@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from cdx_proxy_cli_v2.auth.store import (

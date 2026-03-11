@@ -4,8 +4,8 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from io import BytesIO
-from typing import Any, Dict, Optional
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -52,7 +52,7 @@ def sample_auth_record() -> AuthRecord:
 @pytest.fixture
 def mock_auth_pool(sample_auth_record) -> RoundRobinAuthPool:
     """Create a mock auth pool with a sample record."""
-    pool = RoundRobinAuthPool()
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
     pool.load([sample_auth_record])
     return pool
 
@@ -128,6 +128,13 @@ class TestExtractErrorCode:
         """Should return None for non-string code."""
         body = json.dumps({"error": {"code": 12345}}).encode()
         assert _extract_error_code(body) is None
+
+    def test_classifies_chatgpt_account_incompatibility_from_detail(self):
+        """Known ChatGPT-account incompatibility details should map to a hard auth error code."""
+        body = json.dumps({
+            "detail": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
+        }).encode()
+        assert _extract_error_code(body, status=400) == "chatgpt_account_incompatible"
 
 
 # ============================================================================
@@ -267,7 +274,6 @@ class TestHeaderHandling:
         """drop_header_case_insensitive should remove headers case-insensitively."""
         from cdx_proxy_cli_v2.proxy.rules import drop_header_case_insensitive
         headers = {"Content-Type": "application/json", "content-length": "100"}
-        from cdx_proxy_cli_v2.proxy.rules import drop_header_case_insensitive
         drop_header_case_insensitive(headers, "content-type")
         assert "Content-Type" not in headers
         assert "content-length" in headers
@@ -358,6 +364,136 @@ class TestHeaderHandling:
         assert captured_headers["Authorization"] == f"Bearer {sample_auth_record.token}"
         assert "chatgpt-account-id" not in captured_headers
 
+    def test_chatgpt_backend_rewrites_incompatible_model_ids(self, test_settings, sample_auth_record):
+        """ChatGPT backend should normalize unsupported model ids before forwarding."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://chatgpt.com/backend-api"),
+            sample_auth_record,
+        )
+        body = json.dumps({"model": "gpt-5.4", "input": "Hello"}).encode("utf-8")
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=body,
+        )
+        captured_body: Dict[str, Any] = {}
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            captured_body.update(json.loads(kwargs["body"].decode("utf-8")))
+            return UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert captured_body["model"] == "gpt-5.1-codex-max"
+        assert captured_body["input"] == "Hello"
+
+    def test_non_chatgpt_backend_preserves_model_id(self, test_settings, sample_auth_record):
+        """Non-ChatGPT upstreams should forward the caller model unchanged."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://api.example.com/v1"),
+            sample_auth_record,
+        )
+        body = json.dumps({"model": "gpt-5.4", "input": "Hello"}).encode("utf-8")
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=body,
+        )
+        captured_body: Dict[str, Any] = {}
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            captured_body.update(json.loads(kwargs["body"].decode("utf-8")))
+            return UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert captured_body["model"] == "gpt-5.4"
+        assert captured_body["input"] == "Hello"
+
+    def test_chatgpt_websocket_upgrade_preserves_upgrade_headers(self, test_settings, sample_auth_record):
+        """ChatGPT websocket upgrade requests should keep the handshake headers."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://chatgpt.com/backend-api"),
+            sample_auth_record,
+        )
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/responses",
+            method="GET",
+            headers={
+                "Accept": "*/*",
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+                "Sec-WebSocket-Key": "test-key",
+                "Sec-WebSocket-Version": "13",
+            },
+        )
+        captured_headers: Dict[str, str] = {}
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            captured_headers.update(dict(kwargs["headers"]))
+            return UpstreamAttemptResult(
+                status=405,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"detail":"Method Not Allowed"}',
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert captured_headers["Connection"] == "Upgrade"
+        assert captured_headers["Upgrade"] == "websocket"
+        assert captured_headers["Sec-WebSocket-Key"] == "test-key"
+        assert captured_headers["Sec-WebSocket-Version"] == "13"
+        assert captured_headers["Origin"] == "https://chatgpt.com"
+        assert captured_headers["Referer"] == "https://chatgpt.com/"
+        assert captured_headers["User-Agent"] == "codex-cli"
+
+
+# ============================================================================
+# Test: Models Endpoint
+# ============================================================================
+
+class TestModelsEndpoint:
+    """Tests for the synthetic /backend-api/models endpoint."""
+
+    def test_returns_chatgpt_account_supported_models(self, test_settings, sample_auth_record):
+        """Models endpoint should advertise only ChatGPT-account-compatible models."""
+        runtime = _build_runtime(
+            replace(test_settings, upstream="https://chatgpt.com/backend-api"),
+            sample_auth_record,
+        )
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/backend-api/models",
+            headers={},
+            method="GET",
+        )
+
+        handler._handle_models_endpoint()
+
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        assert [item["id"] for item in payload["data"]] == [
+            "gpt-5.1-codex-max",
+            "gpt-5.1-codex",
+            "gpt-5.1-codex-mini",
+        ]
+
 
 # ============================================================================
 # Test: Loopback Host Detection
@@ -421,6 +557,13 @@ class TestRetryLogic:
         """403 response should blacklist the auth."""
         mock_auth_pool.mark_result("test_auth.json", status=403, error_code="forbidden")
         
+        stats = mock_auth_pool.stats()
+        assert stats["ok"] == 0
+
+    def test_400_account_incompatibility_triggers_blacklist(self, mock_auth_pool):
+        """Known account-incompatible 400s should blacklist the auth immediately."""
+        mock_auth_pool.mark_result("test_auth.json", status=400, error_code="chatgpt_account_incompatible")
+
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 0
 

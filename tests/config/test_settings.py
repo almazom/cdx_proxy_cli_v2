@@ -1,27 +1,25 @@
 """Comprehensive tests for config settings module."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any, Dict
 
 import pytest
 
 from cdx_proxy_cli_v2.config.settings import (
-    ENV_AUTH_DIR,
+    ENV_AUTO_RESET_COOLDOWN,
+    ENV_AUTO_RESET_ON_SINGLE_KEY,
+    ENV_AUTO_RESET_STREAK,
     ENV_COMPACT_TIMEOUT,
     ENV_HOST,
-    ENV_MANAGEMENT_KEY,
     ENV_PORT,
     ENV_REQUEST_TIMEOUT,
     ENV_TRACE_MAX,
     ENV_UPSTREAM,
-    DEFAULT_HOST,
+    DEFAULT_AUTO_RESET_COOLDOWN,
+    DEFAULT_AUTO_RESET_STREAK,
     DEFAULT_UPSTREAM,
-    DEFAULT_TRACE_MAX,
     Settings,
     build_settings,
-    ensure_management_key,
     load_env_file,
     parse_bool,
     parse_port,
@@ -325,6 +323,22 @@ class TestBuildSettingsPrecedence:
         assert settings.host == "127.0.0.1"
         assert settings.upstream == "https://api.example.com"
 
+    def test_chatgpt_upstream_without_backend_path_is_normalized(self):
+        """Bare ChatGPT upstreams should route to /backend-api automatically."""
+        settings = build_settings(
+            auth_dir="/tmp",
+            upstream="https://chatgpt.com",
+        )
+
+        assert settings.upstream == DEFAULT_UPSTREAM
+
+    def test_chatgpt_upstream_from_env_without_backend_path_is_normalized(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(ENV_UPSTREAM, "https://chat.openai.com/")
+
+        settings = build_settings(auth_dir=str(tmp_path))
+
+        assert settings.upstream == "https://chat.openai.com/backend-api"
+
 
 class TestBuildSettingsNumericResolution:
     """Tests for numeric resolution precedence and clamping."""
@@ -345,12 +359,16 @@ class TestBuildSettingsNumericResolution:
         monkeypatch.setenv(ENV_TRACE_MAX, "700")
         monkeypatch.setenv(ENV_REQUEST_TIMEOUT, "60")
         monkeypatch.setenv(ENV_COMPACT_TIMEOUT, "180")
+        monkeypatch.setenv(ENV_AUTO_RESET_STREAK, "9")
+        monkeypatch.setenv(ENV_AUTO_RESET_COOLDOWN, "240")
 
         settings = build_settings(auth_dir=str(tmp_path))
 
         assert settings.trace_max == 700
         assert settings.request_timeout == 60
         assert settings.compact_timeout == 180
+        assert settings.auto_reset_streak == 9
+        assert settings.auto_reset_cooldown == 240
 
     def test_numeric_cli_overrides_clamp_minimum(self, tmp_path: Path):
         settings = build_settings(
@@ -358,11 +376,43 @@ class TestBuildSettingsNumericResolution:
             trace_max=0,
             request_timeout=-10,
             compact_timeout=0,
+            auto_reset_streak=0,
+            auto_reset_cooldown=-5,
         )
 
         assert settings.trace_max == 1
         assert settings.request_timeout == 1
         assert settings.compact_timeout == 1
+        assert settings.auto_reset_streak == 1
+        assert settings.auto_reset_cooldown == 1
+
+
+class TestBuildSettingsAutoReset:
+    """Tests for one-key starvation recovery settings."""
+
+    def test_auto_reset_defaults_are_safe(self, tmp_path: Path):
+        settings = build_settings(auth_dir=str(tmp_path))
+
+        assert settings.auto_reset_on_single_key is False
+        assert settings.auto_reset_streak == DEFAULT_AUTO_RESET_STREAK
+        assert settings.auto_reset_cooldown == DEFAULT_AUTO_RESET_COOLDOWN
+
+    def test_auto_reset_bool_falls_back_to_env(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(ENV_AUTO_RESET_ON_SINGLE_KEY, "true")
+
+        settings = build_settings(auth_dir=str(tmp_path))
+
+        assert settings.auto_reset_on_single_key is True
+
+    def test_auto_reset_cli_bool_overrides_env(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv(ENV_AUTO_RESET_ON_SINGLE_KEY, "true")
+
+        settings = build_settings(
+            auth_dir=str(tmp_path),
+            auto_reset_on_single_key=False,
+        )
+
+        assert settings.auto_reset_on_single_key is False
 
 
 # ============================================================================
