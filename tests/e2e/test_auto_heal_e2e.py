@@ -334,7 +334,6 @@ class TestHardAuthEjection:
     ) -> None:
         """E2E: Success should clear transient counters even after prior failures."""
         runtime = running_proxy["runtime"]
-        base_url = running_proxy["base_url"]
 
         first_auth = runtime.auth_pool.pick()
         assert first_auth is not None
@@ -470,7 +469,7 @@ class TestEventNotifications:
         events = runtime.trace_store.list(limit=50)
         blacklist_events = [
             e for e in events
-            if e.get("event") == "auth.blacklisted"
+            if e.get("event") == "auth.ejected"
         ]
         
         assert len(blacklist_events) > 0, "Should log blacklist event"

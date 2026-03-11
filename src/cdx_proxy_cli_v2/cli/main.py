@@ -37,6 +37,18 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--management-key", default=None)
     parser.add_argument("--trace-max", type=int, default=None)
     parser.add_argument("--request-timeout", type=int, default=None, help="timeout seconds for /responses endpoints")
+    parser.add_argument(
+        "--max-in-flight-requests",
+        type=int,
+        default=None,
+        help="local overload guard: max concurrent proxied requests (0 disables)",
+    )
+    parser.add_argument(
+        "--max-pending-requests",
+        type=int,
+        default=None,
+        help="local overload guard: max waiting requests once in-flight is full",
+    )
     parser.add_argument("--allow-non-loopback", action="store_true", default=None)
     parser.set_defaults(auto_reset_on_single_key=None)
     parser.add_argument(
@@ -66,6 +78,8 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         allow_non_loopback=getattr(args, "allow_non_loopback", None),
         trace_max=getattr(args, "trace_max", None),
         request_timeout=getattr(args, "request_timeout", None),
+        max_in_flight_requests=getattr(args, "max_in_flight_requests", None),
+        max_pending_requests=getattr(args, "max_pending_requests", None),
         auto_reset_on_single_key=getattr(args, "auto_reset_on_single_key", None),
         auto_reset_streak=getattr(args, "auto_reset_streak", None),
         auto_reset_cooldown=getattr(args, "auto_reset_cooldown", None),

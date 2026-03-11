@@ -11,6 +11,8 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTO_RESET_STREAK,
     ENV_COMPACT_TIMEOUT,
     ENV_HOST,
+    ENV_MAX_IN_FLIGHT_REQUESTS,
+    ENV_MAX_PENDING_REQUESTS,
     ENV_PORT,
     ENV_REQUEST_TIMEOUT,
     ENV_TRACE_MAX,
@@ -359,6 +361,8 @@ class TestBuildSettingsNumericResolution:
         monkeypatch.setenv(ENV_TRACE_MAX, "700")
         monkeypatch.setenv(ENV_REQUEST_TIMEOUT, "60")
         monkeypatch.setenv(ENV_COMPACT_TIMEOUT, "180")
+        monkeypatch.setenv(ENV_MAX_IN_FLIGHT_REQUESTS, "21")
+        monkeypatch.setenv(ENV_MAX_PENDING_REQUESTS, "4")
         monkeypatch.setenv(ENV_AUTO_RESET_STREAK, "9")
         monkeypatch.setenv(ENV_AUTO_RESET_COOLDOWN, "240")
 
@@ -367,6 +371,8 @@ class TestBuildSettingsNumericResolution:
         assert settings.trace_max == 700
         assert settings.request_timeout == 60
         assert settings.compact_timeout == 180
+        assert settings.max_in_flight_requests == 21
+        assert settings.max_pending_requests == 4
         assert settings.auto_reset_streak == 9
         assert settings.auto_reset_cooldown == 240
 
@@ -376,6 +382,8 @@ class TestBuildSettingsNumericResolution:
             trace_max=0,
             request_timeout=-10,
             compact_timeout=0,
+            max_in_flight_requests=-3,
+            max_pending_requests=-1,
             auto_reset_streak=0,
             auto_reset_cooldown=-5,
         )
@@ -383,6 +391,8 @@ class TestBuildSettingsNumericResolution:
         assert settings.trace_max == 1
         assert settings.request_timeout == 1
         assert settings.compact_timeout == 1
+        assert settings.max_in_flight_requests == 0
+        assert settings.max_pending_requests == 0
         assert settings.auto_reset_streak == 1
         assert settings.auto_reset_cooldown == 1
 

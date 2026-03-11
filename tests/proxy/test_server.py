@@ -545,6 +545,87 @@ class TestMergedHealth:
         assert snapshot["accounts"][0]["eligible_now"] is False
 
 
+class TestRuntimeTransitionsAndOverload:
+    """Tests for KISS runtime transitions and local overload handling."""
+
+    def test_overloaded_request_returns_503_without_touching_auth_pool(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(
+            replace(test_settings, max_in_flight_requests=1, max_pending_requests=0),
+            sample_auth_record,
+        )
+        lease = runtime.overload_guard.acquire()
+        assert lease.admitted is True
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+        )
+        before = runtime.auth_pool.health_snapshot()
+        try:
+            handler._proxy_request()
+        finally:
+            lease.release()
+        after = runtime.auth_pool.health_snapshot()
+
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        assert payload["error"] == "proxy overloaded"
+        assert before == after
+        handler._run_upstream_attempt.assert_not_called()
+        assert any(
+            event.get("event") == "proxy.overloaded"
+            for event in runtime.trace_store.list(limit=20)
+        )
+
+    def test_proxy_request_logs_auth_ejected_transition(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=401,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"error":{"code":"token_invalid"}}',
+                error_code="token_invalid",
+            )
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(event.get("event") == "auth.ejected" for event in events)
+        assert not any(event.get("event") == "auth.blacklisted" for event in events)
+
+    def test_debug_payload_includes_overload_limits_and_metrics(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(
+            replace(test_settings, max_in_flight_requests=3, max_pending_requests=2),
+            sample_auth_record,
+        )
+
+        payload = runtime.debug_payload(host="127.0.0.1", port=43123)
+
+        assert payload["max_in_flight_requests"] == 3
+        assert payload["max_pending_requests"] == 2
+        metrics = payload["metrics"]
+        assert metrics["requests_total"] == 0
+        assert metrics["upstream_errors_total"] == 0
+        assert metrics["auth_ejections_total"] == 0
+        assert metrics["auth_restores_total"] == 0
+        assert metrics["auth_available"] == 1
+        assert metrics["in_flight_requests"] == 0
+
+
 class TestProbeBehavior:
     """Tests for non-destructive probe behavior."""
 

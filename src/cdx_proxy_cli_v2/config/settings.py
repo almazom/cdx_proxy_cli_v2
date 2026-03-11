@@ -17,6 +17,8 @@ DEFAULT_REQUEST_TIMEOUT = 45
 DEFAULT_COMPACT_TIMEOUT = 120
 DEFAULT_AUTO_RESET_STREAK = 12
 DEFAULT_AUTO_RESET_COOLDOWN = 5 * 60
+DEFAULT_MAX_IN_FLIGHT_REQUESTS = 0
+DEFAULT_MAX_PENDING_REQUESTS = 0
 
 # Auto-heal blacklist configuration defaults (Envoy-inspired)
 DEFAULT_AUTO_HEAL_INTERVAL = 60  # seconds between health checks
@@ -35,6 +37,8 @@ ENV_ALLOW_NON_LOOPBACK = "CLIPROXY_ALLOW_NON_LOOPBACK"
 ENV_TRACE_MAX = "CLIPROXY_TRACE_MAX"
 ENV_REQUEST_TIMEOUT = "CLIPROXY_REQUEST_TIMEOUT"
 ENV_COMPACT_TIMEOUT = "CLIPROXY_COMPACT_TIMEOUT"
+ENV_MAX_IN_FLIGHT_REQUESTS = "CLIPROXY_MAX_IN_FLIGHT_REQUESTS"
+ENV_MAX_PENDING_REQUESTS = "CLIPROXY_MAX_PENDING_REQUESTS"
 ENV_AUTO_RESET_ON_SINGLE_KEY = "CLIPROXY_AUTO_RESET_ON_SINGLE_KEY"
 ENV_AUTO_RESET_STREAK = "CLIPROXY_AUTO_RESET_STREAK"
 ENV_AUTO_RESET_COOLDOWN = "CLIPROXY_AUTO_RESET_COOLDOWN"
@@ -171,6 +175,8 @@ class Settings:
     trace_max: int
     request_timeout: int
     compact_timeout: int
+    max_in_flight_requests: int = DEFAULT_MAX_IN_FLIGHT_REQUESTS
+    max_pending_requests: int = DEFAULT_MAX_PENDING_REQUESTS
     auto_reset_on_single_key: bool = False
     auto_reset_streak: int = DEFAULT_AUTO_RESET_STREAK
     auto_reset_cooldown: int = DEFAULT_AUTO_RESET_COOLDOWN
@@ -207,6 +213,8 @@ def build_settings(
     trace_max: Optional[int] = None,
     request_timeout: Optional[int] = None,
     compact_timeout: Optional[int] = None,
+    max_in_flight_requests: Optional[int] = None,
+    max_pending_requests: Optional[int] = None,
     auto_reset_on_single_key: Optional[bool] = None,
     auto_reset_streak: Optional[int] = None,
     auto_reset_cooldown: Optional[int] = None,
@@ -286,6 +294,32 @@ def build_settings(
         min_cli_value=1,
     )
 
+    resolved_max_in_flight_requests = (
+        DEFAULT_MAX_IN_FLIGHT_REQUESTS
+        if max_in_flight_requests is None
+        else max(0, int(max_in_flight_requests))
+    )
+    if max_in_flight_requests is None:
+        raw_max_in_flight = merged.get(ENV_MAX_IN_FLIGHT_REQUESTS)
+        if raw_max_in_flight is not None:
+            try:
+                resolved_max_in_flight_requests = max(0, int(raw_max_in_flight))
+            except ValueError:
+                resolved_max_in_flight_requests = DEFAULT_MAX_IN_FLIGHT_REQUESTS
+
+    resolved_max_pending_requests = (
+        DEFAULT_MAX_PENDING_REQUESTS
+        if max_pending_requests is None
+        else max(0, int(max_pending_requests))
+    )
+    if max_pending_requests is None:
+        raw_max_pending = merged.get(ENV_MAX_PENDING_REQUESTS)
+        if raw_max_pending is not None:
+            try:
+                resolved_max_pending_requests = max(0, int(raw_max_pending))
+            except ValueError:
+                resolved_max_pending_requests = DEFAULT_MAX_PENDING_REQUESTS
+
     if auto_reset_on_single_key is None:
         resolved_auto_reset_on_single_key = parse_bool(
             merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY),
@@ -360,6 +394,8 @@ def build_settings(
         trace_max=resolved_trace_max,
         request_timeout=resolved_request_timeout,
         compact_timeout=resolved_compact_timeout,
+        max_in_flight_requests=resolved_max_in_flight_requests,
+        max_pending_requests=resolved_max_pending_requests,
         auto_reset_on_single_key=resolved_auto_reset_on_single_key,
         auto_reset_streak=resolved_auto_reset_streak,
         auto_reset_cooldown=resolved_auto_reset_cooldown,
