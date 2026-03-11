@@ -40,14 +40,14 @@ class TestHandleMigrate:
         v1_dir.mkdir()
         (v1_dir / "rr_proxy.pid").write_text("12345")
         (v1_dir / "rr_proxy.state.json").write_text('{"status": "running"}')
-        
+
         args = argparse.Namespace(
             v1_auth_dir=str(v1_dir),
             dry_run=True,
         )
-        
+
         result = handle_migrate(args)
-        
+
         captured = capsys.readouterr()
         assert result == 0
         assert "Would migrate: rr_proxy.pid" in captured.out
@@ -60,14 +60,14 @@ class TestHandleMigrate:
         v1_dir.mkdir()
         (v1_dir / "rr_proxy.pid").write_text("12345")
         (v1_dir / "rr_proxy.state.json").write_text('{"status": "running"}')
-        
+
         args = argparse.Namespace(
             v1_auth_dir=str(v1_dir),
             dry_run=False,
         )
-        
+
         result = handle_migrate(args)
-        
+
         captured = capsys.readouterr()
         assert result == 0
         assert "Migrated: rr_proxy.pid" in captured.out
@@ -79,9 +79,9 @@ class TestHandleMigrate:
             v1_auth_dir="/nonexistent/path",
             dry_run=False,
         )
-        
+
         result = handle_migrate(args)
-        
+
         captured = capsys.readouterr()
         assert result == 1
         assert "Error: V1 auth directory not found" in captured.err
@@ -97,7 +97,7 @@ class TestHandleStatus:
         monkeypatch.setenv("CLIPROXY_PORT", "8080")
         monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
         monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "test-key")
-        
+
         args = argparse.Namespace(
             auth_dir=None,
             host=None,
@@ -108,8 +108,8 @@ class TestHandleStatus:
             trace_max=None,
             json=True,
         )
-        
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status:
+
+        with patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status:
             mock_status.return_value = {
                 "pid": 12345,
                 "pid_running": True,
@@ -117,7 +117,7 @@ class TestHandleStatus:
                 "base_url": "http://127.0.0.1:8080",
             }
             result = handle_status(args)
-        
+
         captured = capsys.readouterr()
         assert result == 0
         output = json.loads(captured.out)
@@ -126,7 +126,7 @@ class TestHandleStatus:
     def test_handle_status_not_running(self, capsys, temp_auth_dir, monkeypatch):
         """Test status when proxy is not running."""
         monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
-        
+
         args = argparse.Namespace(
             auth_dir=None,
             host=None,
@@ -137,11 +137,11 @@ class TestHandleStatus:
             trace_max=None,
             json=False,
         )
-        
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status:
+
+        with patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status:
             mock_status.return_value = {"pid": None, "pid_running": False}
             result = handle_status(args)
-        
+
         assert result == 0
 
 
@@ -151,7 +151,7 @@ class TestHandleStop:
     def test_handle_stop_not_running(self, capsys, temp_auth_dir, monkeypatch):
         """Test stop when proxy is not running."""
         monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
-        
+
         args = argparse.Namespace(
             auth_dir=None,
             host=None,
@@ -161,18 +161,20 @@ class TestHandleStop:
             allow_non_loopback=None,
             trace_max=None,
         )
-        
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status:
+
+        with patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status:
             mock_status.return_value = {"pid": None, "pid_running": False}
             result = handle_stop(args)
-        
+
         assert result == 0
 
 
 class TestDoctorResetPreflight:
     """Tests for shared doctor/reset healthy proxy preflight."""
 
-    def test_handle_doctor_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
+    def test_handle_doctor_returns_error_when_proxy_not_healthy(
+        self, capsys, temp_auth_dir
+    ):
         args = argparse.Namespace(
             auth_dir=temp_auth_dir,
             host=None,
@@ -185,7 +187,10 @@ class TestDoctorResetPreflight:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": False,
                 "base_url": "http://127.0.0.1:8080",
@@ -197,7 +202,9 @@ class TestDoctorResetPreflight:
         assert "Proxy is not healthy/running" in captured.err
         mock_fetch.assert_not_called()
 
-    def test_handle_reset_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
+    def test_handle_reset_returns_error_when_proxy_not_healthy(
+        self, capsys, temp_auth_dir
+    ):
         args = argparse.Namespace(
             auth_dir=temp_auth_dir,
             host=None,
@@ -212,7 +219,10 @@ class TestDoctorResetPreflight:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": False,
                 "base_url": "http://127.0.0.1:8080",
@@ -239,7 +249,10 @@ class TestDoctorResetPreflight:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
@@ -248,7 +261,80 @@ class TestDoctorResetPreflight:
             result = handle_reset(args)
 
         assert result == 0
-        assert mock_fetch.call_args.kwargs["path"] == "/reset?name=foo%26state%3Dblacklist.json&state=probation"
+        assert (
+            mock_fetch.call_args.kwargs["path"]
+            == "/reset?name=foo%26state%3Dblacklist.json&state=probation"
+        )
+
+    def test_handle_doctor_probe_describes_non_mutating_outcomes(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            probe=True,
+            probe_timeout=7,
+            json=False,
+        )
+
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {
+                "probed": 3,
+                "results": [
+                    {
+                        "file": "healthy.json",
+                        "previous_status": "OK",
+                        "status": "OK",
+                        "action": "healthy",
+                        "http_status": 200,
+                        "latency_ms": 15,
+                    },
+                    {
+                        "file": "rate.json",
+                        "previous_status": "OK",
+                        "status": "OK",
+                        "action": "would_cooldown",
+                        "http_status": 429,
+                        "latency_ms": 22,
+                    },
+                    {
+                        "file": "auth.json",
+                        "previous_status": "OK",
+                        "status": "OK",
+                        "action": "auth_failed",
+                        "http_status": 403,
+                        "latency_ms": 31,
+                    },
+                ],
+            }
+
+            result = handle_doctor(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Probe outcomes:" in captured.out
+        assert (
+            "would_cooldown: 1 (Probe hit 429; key would enter cooldown if used live)"
+            in captured.out
+        )
+        assert (
+            "auth_failed: 1 (Probe hit 401/403; auth looks unhealthy)" in captured.out
+        )
+        assert "cdx doctor | probe findings" in captured.out
+        assert "Probe outcomes" not in captured.err
 
 
 class TestSettingsFromArgs:
@@ -261,7 +347,7 @@ class TestSettingsFromArgs:
         monkeypatch.setenv("CLIPROXY_PORT", "8080")
         monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
         monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "env-key")
-        
+
         args = argparse.Namespace(
             auth_dir=temp_auth_dir,  # Override env
             host=None,
@@ -271,7 +357,7 @@ class TestSettingsFromArgs:
             allow_non_loopback=None,
             trace_max=None,
         )
-        
+
         settings = _settings_from_args(args)
 
         assert settings.auth_dir == temp_auth_dir  # CLI override
@@ -326,9 +412,9 @@ class TestFormatShellExports:
             "CLIPROXY_HOST": "127.0.0.1",
             "CLIPROXY_PORT": "8080",
         }
-        
+
         output = format_shell_exports(exports)
-        
+
         assert "export CLIPROXY_AUTH_DIR='/test/auths'" in output
         assert "export CLIPROXY_HOST='127.0.0.1'" in output
         assert "export CLIPROXY_PORT='8080'" in output
@@ -338,9 +424,9 @@ class TestFormatShellExports:
         exports = {
             "CLIPROXY_AUTH_DIR": "/test/auth's",
         }
-        
+
         output = format_shell_exports(exports)
-        
+
         # The function escapes single quotes by ending quote, adding escaped quote, starting new quote
         assert "'/test/auth" in output
 
@@ -363,7 +449,7 @@ class TestHandleRotate:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status:
+        with patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status:
             mock_status.return_value = {
                 "healthy": False,
                 "base_url": "http://127.0.0.1:8080",
@@ -389,8 +475,10 @@ class TestHandleRotate:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
-             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
@@ -419,7 +507,7 @@ class TestHandleRotate:
             "tokens": {
                 "access_token": "secret_token_123",
                 "account_id": "acc_123",
-            }
+            },
         }
         auth_file.write_text(json.dumps(auth_data))
 
@@ -442,15 +530,22 @@ class TestHandleRotate:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
-             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
             }
             mock_fetch.return_value = {
                 "accounts": [
-                    {"file": "healthy_auth.json", "status": "OK", "used": 5, "email": "test@example.com"},
+                    {
+                        "file": "healthy_auth.json",
+                        "status": "OK",
+                        "used": 5,
+                        "email": "test@example.com",
+                    },
                     {"file": "cooldown_auth.json", "status": "COOLDOWN", "used": 10},
                 ]
             }
@@ -483,15 +578,22 @@ class TestHandleRotate:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
-             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
             }
             mock_fetch.return_value = {
                 "accounts": [
-                    {"file": "auth1.json", "status": "OK", "used": 5, "email": "user1@example.com"},
+                    {
+                        "file": "auth1.json",
+                        "status": "OK",
+                        "used": 5,
+                        "email": "user1@example.com",
+                    },
                 ]
             }
             result = handle_rotate(args)
@@ -506,7 +608,10 @@ class TestHandleRotate:
         # Create auth dir with a healthy auth file
         auth_dir = Path(temp_auth_dir)
         auth_file = auth_dir / "auth1.json"
-        auth_data = {"email": "user1@example.com", "tokens": {"access_token": "token123"}}
+        auth_data = {
+            "email": "user1@example.com",
+            "tokens": {"access_token": "token123"},
+        }
         auth_file.write_text(json.dumps(auth_data))
 
         codex_home = tmp_path / ".codex"
@@ -527,15 +632,22 @@ class TestHandleRotate:
             json=True,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
-             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
             }
             mock_fetch.return_value = {
                 "accounts": [
-                    {"file": "auth1.json", "status": "OK", "used": 5, "email": "user1@example.com"},
+                    {
+                        "file": "auth1.json",
+                        "status": "OK",
+                        "used": 5,
+                        "email": "user1@example.com",
+                    },
                 ]
             }
             result = handle_rotate(args)
@@ -547,12 +659,18 @@ class TestHandleRotate:
         assert output["selected"]["file"] == "auth1.json"
         assert output["selected"]["email"] == "user1@example.com"
 
-    def test_rotate_prefers_least_used(self, capsys, temp_auth_dir, tmp_path, monkeypatch):
+    def test_rotate_prefers_least_used(
+        self, capsys, temp_auth_dir, tmp_path, monkeypatch
+    ):
         """Test rotate selects the least-used healthy auth."""
         # Create auth files
         auth_dir = Path(temp_auth_dir)
-        (auth_dir / "auth_new.json").write_text(json.dumps({"email": "new@example.com", "tokens": {"access_token": "new"}}))
-        (auth_dir / "auth_old.json").write_text(json.dumps({"email": "old@example.com", "tokens": {"access_token": "old"}}))
+        (auth_dir / "auth_new.json").write_text(
+            json.dumps({"email": "new@example.com", "tokens": {"access_token": "new"}})
+        )
+        (auth_dir / "auth_old.json").write_text(
+            json.dumps({"email": "old@example.com", "tokens": {"access_token": "old"}})
+        )
 
         codex_home = tmp_path / ".codex"
         codex_home.mkdir()
@@ -572,8 +690,10 @@ class TestHandleRotate:
             json=False,
         )
 
-        with patch('cdx_proxy_cli_v2.cli.main.service_status') as mock_status, \
-             patch('cdx_proxy_cli_v2.cli.main.fetch_json') as mock_fetch:
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
             mock_status.return_value = {
                 "healthy": True,
                 "base_url": "http://127.0.0.1:8080",
@@ -581,8 +701,18 @@ class TestHandleRotate:
             # Both OK, but auth_new has lower used count
             mock_fetch.return_value = {
                 "accounts": [
-                    {"file": "auth_old.json", "status": "OK", "used": 100, "email": "old@example.com"},
-                    {"file": "auth_new.json", "status": "OK", "used": 5, "email": "new@example.com"},
+                    {
+                        "file": "auth_old.json",
+                        "status": "OK",
+                        "used": 100,
+                        "email": "old@example.com",
+                    },
+                    {
+                        "file": "auth_new.json",
+                        "status": "OK",
+                        "used": 5,
+                        "email": "new@example.com",
+                    },
                 ]
             }
             result = handle_rotate(args)

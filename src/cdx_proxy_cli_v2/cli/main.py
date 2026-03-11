@@ -13,7 +13,10 @@ from rich.console import Console
 from rich.table import Table
 
 from cdx_proxy_cli_v2 import __version__
-from cdx_proxy_cli_v2.observability.collective_dashboard import build_collective_payload, render_collective_dashboard
+from cdx_proxy_cli_v2.observability.collective_dashboard import (
+    build_collective_payload,
+    render_collective_dashboard,
+)
 from cdx_proxy_cli_v2.proxy.server import run_proxy_server
 from cdx_proxy_cli_v2.runtime.service import (
     service_status,
@@ -21,7 +24,11 @@ from cdx_proxy_cli_v2.runtime.service import (
     stop_service,
     tail_service_logs,
 )
-from cdx_proxy_cli_v2.config.settings import Settings, build_settings, format_shell_exports
+from cdx_proxy_cli_v2.config.settings import (
+    Settings,
+    build_settings,
+    format_shell_exports,
+)
 from cdx_proxy_cli_v2.proxy.http_client import fetch_json
 from cdx_proxy_cli_v2.observability.tui import run_trace_tui
 from cdx_proxy_cli_v2.auth.store import extract_auth_fields, read_auth_json
@@ -36,7 +43,12 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--upstream", default=None)
     parser.add_argument("--management-key", default=None)
     parser.add_argument("--trace-max", type=int, default=None)
-    parser.add_argument("--request-timeout", type=int, default=None, help="timeout seconds for /responses endpoints")
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=None,
+        help="timeout seconds for /responses endpoints",
+    )
     parser.add_argument(
         "--max-in-flight-requests",
         type=int,
@@ -63,9 +75,25 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         action="store_false",
         help="disable one-key starvation auto-reset even if enabled in env",
     )
-    parser.add_argument("--auto-reset-streak", type=int, default=None, help="recent same-key trace events required before auto-reset")
-    parser.add_argument("--auto-reset-cooldown", type=int, default=None, help="minimum seconds between automatic recovery resets")
-    parser.add_argument("--quiet", "-q", action="store_true", default=False, help="Suppress non-error output")
+    parser.add_argument(
+        "--auto-reset-streak",
+        type=int,
+        default=None,
+        help="recent same-key trace events required before auto-reset",
+    )
+    parser.add_argument(
+        "--auto-reset-cooldown",
+        type=int,
+        default=None,
+        help="minimum seconds between automatic recovery resets",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        default=False,
+        help="Suppress non-error output",
+    )
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
@@ -86,7 +114,9 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     )
 
 
-def _proxy_exports(settings: Settings, *, base_url: str, host: str, port: int) -> Dict[str, str]:
+def _proxy_exports(
+    settings: Settings, *, base_url: str, host: str, port: int
+) -> Dict[str, str]:
     return {
         "OPENAI_BASE_URL": base_url,
         "OPENAI_API_BASE": base_url,
@@ -130,14 +160,15 @@ def _load_codex_auth_identity() -> tuple[Optional[str], Optional[str], Optional[
 
 def handle_proxy(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    
+
     # Handle --force: stop any existing proxy first
     if getattr(args, "force", False):
         from cdx_proxy_cli_v2.runtime.service import stop_service
+
         stopped = stop_service(settings)
         if stopped and not bool(getattr(args, "quiet", False)):
             print("Stopped existing proxy (force mode)", file=sys.stderr)
-    
+
     result = start_service(settings)
     exports = _proxy_exports(
         settings,
@@ -146,7 +177,7 @@ def handle_proxy(args: argparse.Namespace) -> int:
         port=result.port,
     )
     quiet = bool(getattr(args, "quiet", False))
-    
+
     if bool(getattr(args, "print_env_only", False)):
         print(format_shell_exports(exports))
         return 0
@@ -173,11 +204,11 @@ def handle_proxy(args: argparse.Namespace) -> int:
 def handle_status(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     payload = service_status(settings)
-    
-    if getattr(args, 'json', False):
+
+    if getattr(args, "json", False):
         print(json.dumps(payload, indent=2))
         return 0
-    
+
     table = Table(title="cdx service status")
     table.add_column("Field")
     table.add_column("Value")
@@ -216,7 +247,10 @@ def _healthy_base_url_or_none(settings: Settings) -> Optional[str]:
     base_url = str(status_payload.get("base_url") or settings.base_url)
     healthy = bool(status_payload.get("healthy"))
     if not healthy:
-        print("Proxy is not healthy/running. Start with `cdx proxy` first.", file=sys.stderr)
+        print(
+            "Proxy is not healthy/running. Start with `cdx proxy` first.",
+            file=sys.stderr,
+        )
         return None
     return base_url
 
@@ -260,24 +294,25 @@ def handle_doctor(args: argparse.Namespace) -> int:
             print(f"Probed {probed} auth key(s) with timeout={timeout}s")
             print()
 
-            # Show summary table
+            # Show probe outcome summary
             if action_counts:
-                print("Actions taken:")
+                print("Probe outcomes:")
                 for action, count in sorted(action_counts.items()):
                     action_desc = {
-                        "none": "No change (healthy)",
-                        "restored": "Restored from blacklist",
-                        "blacklisted": "Added to blacklist",
-                        "cooldown": "Put in cooldown",
-                        "error": "Network/error during test",
+                        "healthy": "Probe succeeded; runtime state unchanged",
+                        "would_cooldown": "Probe hit 429; key would enter cooldown if used live",
+                        "auth_failed": "Probe hit 401/403; auth looks unhealthy",
+                        "compat_failed": "Probe saw account/provider incompatibility",
+                        "error": "Probe got a non-auth HTTP error",
+                        "network_error": "Probe failed before getting an HTTP response",
                     }.get(action, action)
                     print(f"  {action}: {count} ({action_desc})")
                 print()
 
-            # Show details for non-none actions
-            notable_results = [r for r in results if r.get("action") != "none"]
+            # Show details for non-healthy outcomes
+            notable_results = [r for r in results if r.get("action") != "healthy"]
             if notable_results:
-                table = Table(title="cdx doctor | probe changes")
+                table = Table(title="cdx doctor | probe findings")
                 table.add_column("File")
                 table.add_column("Previous")
                 table.add_column("Current")
@@ -312,11 +347,17 @@ def handle_doctor(args: argparse.Namespace) -> int:
                     timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
                 )
             except Exception as exc:
-                print(f"Doctor failed to read /health after probe: {exc}", file=sys.stderr)
+                print(
+                    f"Doctor failed to read /health after probe: {exc}", file=sys.stderr
+                )
                 return 1
 
             accounts_raw = health_payload.get("accounts", [])
-            accounts: List[Dict[str, Any]] = [item for item in accounts_raw if isinstance(item, dict)] if isinstance(accounts_raw, list) else []
+            accounts: List[Dict[str, Any]] = (
+                [item for item in accounts_raw if isinstance(item, dict)]
+                if isinstance(accounts_raw, list)
+                else []
+            )
             summary = {
                 "whitelist": 0,
                 "probation": 0,
@@ -357,7 +398,11 @@ def handle_doctor(args: argparse.Namespace) -> int:
         return 1
 
     accounts_raw = health_payload.get("accounts", [])
-    accounts: List[Dict[str, Any]] = [item for item in accounts_raw if isinstance(item, dict)] if isinstance(accounts_raw, list) else []
+    accounts: List[Dict[str, Any]] = (
+        [item for item in accounts_raw if isinstance(item, dict)]
+        if isinstance(accounts_raw, list)
+        else []
+    )
     summary = {
         "whitelist": 0,
         "probation": 0,
@@ -413,7 +458,9 @@ def handle_doctor(args: argparse.Namespace) -> int:
         f"white={summary['whitelist']} probation={summary['probation']} "
         f"cooldown={summary['cooldown']} black={summary['blacklist']} unknown={summary['unknown']}"
     )
-    print("Policy: 401/403 -> blacklist, 429 -> exponential cooldown, re-entry via probation")
+    print(
+        "Policy: 401/403 -> blacklist, 429 -> exponential cooldown, re-entry via probation"
+    )
     return 0
 
 
@@ -483,7 +530,9 @@ def handle_logs(args: argparse.Namespace) -> int:
 def handle_all(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     _status_payload = service_status(settings)
-    usage_base_url = os.environ.get("CLIPROXY_USAGE_BASE_URL") or "https://chatgpt.com/backend-api"
+    usage_base_url = (
+        os.environ.get("CLIPROXY_USAGE_BASE_URL") or "https://chatgpt.com/backend-api"
+    )
     current_access_token = os.environ.get("OPENAI_API_KEY")
     current_file = os.environ.get("CLIPROXY_CURRENT_AUTH_FILE")
     codex_access_token, codex_email, codex_account_id = _load_codex_auth_identity()
@@ -583,6 +632,7 @@ def _get_codex_home() -> Path:
 def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
     """Atomically write JSON data to a file to prevent corruption."""
     import tempfile
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -635,18 +685,21 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
     # Filter for healthy auths (status == "OK")
     healthy_auths = [
-        acc for acc in accounts
-        if str(acc.get("status", "")).upper() == "OK"
+        acc for acc in accounts if str(acc.get("status", "")).upper() == "OK"
     ]
 
     if not healthy_auths:
         print("Error: No healthy auth keys available.", file=sys.stderr)
-        print("All keys are in cooldown, blacklist, or probation state.", file=sys.stderr)
+        print(
+            "All keys are in cooldown, blacklist, or probation state.", file=sys.stderr
+        )
         print("Run `cdx doctor` to see current auth states.", file=sys.stderr)
         return 1
 
     # Sort by used count (ascending) to pick least-used, then by file name for stability
-    healthy_auths.sort(key=lambda a: (int(a.get("used") or 0), str(a.get("file") or "")))
+    healthy_auths.sort(
+        key=lambda a: (int(a.get("used") or 0), str(a.get("file") or ""))
+    )
     selected = healthy_auths[0]
 
     selected_file = str(selected.get("file") or "")
@@ -737,37 +790,47 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
 def handle_migrate(args: argparse.Namespace) -> int:
     """Migrate from cdx_proxy_cli v1 to v2."""
-    v1_dir = getattr(args, 'v1_auth_dir', None)
-    dry_run = bool(getattr(args, 'dry_run', False))
-    
+    v1_dir = getattr(args, "v1_auth_dir", None)
+    dry_run = bool(getattr(args, "dry_run", False))
+
     if not v1_dir:
         v1_dir = os.path.expanduser("~/.codex/_auths")
-    
+
     v1_path = Path(v1_dir)
     if not v1_path.exists():
         print(f"Error: V1 auth directory not found: {v1_dir}", file=sys.stderr)
         return 1
-    
+
     # V1 file names
-    v1_files = ["rr_proxy.pid", "rr_proxy.state.json", "rr_proxy.log", "rr_proxy.events.jsonl"]
-    # V2 file names  
-    v2_files = ["rr_proxy_v2.pid", "rr_proxy_v2.state.json", "rr_proxy_v2.log", "rr_proxy_v2.events.jsonl"]
-    
+    v1_files = [
+        "rr_proxy.pid",
+        "rr_proxy.state.json",
+        "rr_proxy.log",
+        "rr_proxy.events.jsonl",
+    ]
+    # V2 file names
+    v2_files = [
+        "rr_proxy_v2.pid",
+        "rr_proxy_v2.state.json",
+        "rr_proxy_v2.log",
+        "rr_proxy_v2.events.jsonl",
+    ]
+
     print(f"Scanning V1 directory: {v1_dir}")
     print("-" * 50)
-    
+
     migrated = 0
     for v1_name, v2_name in zip(v1_files, v2_files):
         v1_file = v1_path / v1_name
         v2_file = v1_path / v2_name
-        
+
         if v1_file.exists():
             if dry_run:
                 print(f"Would migrate: {v1_name} → {v2_name}")
             else:
                 # Migrate file
                 content = v1_file.read_text(encoding="utf-8")
-                
+
                 # For state file, add schema version
                 if v1_name == "rr_proxy.state.json":
                     try:
@@ -776,19 +839,19 @@ def handle_migrate(args: argparse.Namespace) -> int:
                         content = json.dumps(state_data, indent=2)
                     except json.JSONDecodeError:
                         pass
-                
+
                 v2_file.write_text(content, encoding="utf-8")
                 print(f"Migrated: {v1_name} → {v2_name}")
             migrated += 1
         else:
             print(f"Skipped (not found): {v1_name}")
-    
+
     print("-" * 50)
     print(f"Migrated: {migrated} files")
-    
+
     if dry_run:
         print("\nThis was a dry run. Remove --dry-run to actually migrate.")
-    
+
     return 0
 
 
@@ -797,7 +860,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="cdx proxy cli v2",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     proxy_parser = sub.add_parser(
@@ -809,9 +874,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  start only:\n"
             "    cdx proxy --auth-dir ~/.codex/_auths\n"
             "  safe env export into current shell:\n"
-            "    eval \"$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)\"\n"
+            '    eval "$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)"\n'
             "  full setup + trace in one line:\n"
-            "    eval \"$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)\" && cdx trace --auth-dir ~/.codex/_auths --limit 20\n"
+            '    eval "$(cdx proxy --auth-dir ~/.codex/_auths --print-env-only)" && cdx trace --auth-dir ~/.codex/_auths --limit 20\n'
             "  then open trace:\n"
             "    cdx trace --auth-dir ~/.codex/_auths --limit 20\n"
         ),
@@ -823,7 +888,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="force restart: stop any existing proxy before starting",
     )
     proxy_mode_group = proxy_parser.add_mutually_exclusive_group()
-    proxy_mode_group.add_argument("--print-env", action="store_true", help="print shell exports (with status line to stderr)")
+    proxy_mode_group.add_argument(
+        "--print-env",
+        action="store_true",
+        help="print shell exports (with status line to stderr)",
+    )
     proxy_mode_group.add_argument(
         "--print-env-only",
         action="store_true",
@@ -833,16 +902,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = sub.add_parser("status", help="service status")
     _add_runtime_options(status_parser)
-    status_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
+    status_parser.add_argument(
+        "--json", action="store_true", help="JSON output for scripting"
+    )
     status_parser.set_defaults(handler=handle_status)
 
-    doctor_parser = sub.add_parser("doctor", help="rotation doctor (white/black/probation)")
+    doctor_parser = sub.add_parser(
+        "doctor", help="rotation doctor (white/black/probation)"
+    )
     _add_runtime_options(doctor_parser)
     doctor_parser.add_argument("--json", action="store_true")
-    doctor_parser.add_argument("--probe", action="store_true", help="proactively test auth keys via HTTP requests")
-    doctor_parser.add_argument("--fix", dest="probe", action="store_true", help="alias for --probe")
-    doctor_parser.add_argument("--repair", dest="probe", action="store_true", help="alias for --probe")
-    doctor_parser.add_argument("--probe-timeout", type=int, default=10, help="per-key timeout in seconds (default: 10, max: 30)")
+    doctor_parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="proactively test auth keys via HTTP requests",
+    )
+    doctor_parser.add_argument(
+        "--fix", dest="probe", action="store_true", help="alias for --probe"
+    )
+    doctor_parser.add_argument(
+        "--repair", dest="probe", action="store_true", help="alias for --probe"
+    )
+    doctor_parser.add_argument(
+        "--probe-timeout",
+        type=int,
+        default=10,
+        help="per-key timeout in seconds (default: 10, max: 30)",
+    )
     doctor_parser.set_defaults(handler=handle_doctor)
 
     stop_parser = sub.add_parser("stop", help="stop proxy service")
@@ -860,26 +946,42 @@ def build_parser() -> argparse.ArgumentParser:
     logs_parser.add_argument("--lines", type=int, default=120)
     logs_parser.set_defaults(handler=handle_logs)
 
-    migrate_parser = sub.add_parser("migrate", help="migrate from cdx_proxy_cli v1 to v2")
-    migrate_parser.add_argument("--v1-auth-dir", dest="v1_auth_dir", default=None,
-                                help="V1 auth directory (default: ~/.codex/_auths)")
-    migrate_parser.add_argument("--dry-run", dest="dry_run", action="store_true",
-                                help="Show what would be migrated without making changes")
+    migrate_parser = sub.add_parser(
+        "migrate", help="migrate from cdx_proxy_cli v1 to v2"
+    )
+    migrate_parser.add_argument(
+        "--v1-auth-dir",
+        dest="v1_auth_dir",
+        default=None,
+        help="V1 auth directory (default: ~/.codex/_auths)",
+    )
+    migrate_parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Show what would be migrated without making changes",
+    )
     migrate_parser.set_defaults(handler=handle_migrate)
 
     reset_parser = sub.add_parser("reset", help="reset auth key(s) to healthy state")
     _add_runtime_options(reset_parser)
-    reset_parser.add_argument("--name", default=None, help="reset specific auth file by name")
+    reset_parser.add_argument(
+        "--name", default=None, help="reset specific auth file by name"
+    )
     reset_parser.add_argument(
         "--state",
         choices=["blacklist", "cooldown", "probation"],
         default=None,
         help="reset only keys in this state",
     )
-    reset_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
+    reset_parser.add_argument(
+        "--json", action="store_true", help="JSON output for scripting"
+    )
     reset_parser.set_defaults(handler=handle_reset)
 
-    rotate_parser = sub.add_parser("rotate", help="rotate active auth key for codex CLI")
+    rotate_parser = sub.add_parser(
+        "rotate", help="rotate active auth key for codex CLI"
+    )
     _add_runtime_options(rotate_parser)
     rotate_parser.add_argument(
         "--dry-run",
@@ -887,21 +989,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show what would be rotated without making changes",
     )
-    rotate_parser.add_argument("--json", action="store_true", help="JSON output for scripting")
+    rotate_parser.add_argument(
+        "--json", action="store_true", help="JSON output for scripting"
+    )
     rotate_parser.set_defaults(handler=handle_rotate)
 
     all_parser = sub.add_parser("all", help="show all keys cards dashboard (v1 style)")
     _add_runtime_options(all_parser)
-    all_parser.add_argument("--warn-at", type=int, default=70, help="warn threshold in used percent")
-    all_parser.add_argument("--cooldown-at", type=int, default=90, help="cooldown threshold in used percent")
-    all_parser.add_argument("--timeout", type=int, default=8, help="usage endpoint request timeout seconds")
+    all_parser.add_argument(
+        "--warn-at", type=int, default=70, help="warn threshold in used percent"
+    )
+    all_parser.add_argument(
+        "--cooldown-at", type=int, default=90, help="cooldown threshold in used percent"
+    )
+    all_parser.add_argument(
+        "--timeout", type=int, default=8, help="usage endpoint request timeout seconds"
+    )
     all_parser.add_argument(
         "--only",
         choices=["both", "5h", "weekly"],
         default="both",
         help="window filter for limits dashboard",
     )
-    all_parser.add_argument("--json", action="store_true", help="machine-readable output for agents/automation")
+    all_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="machine-readable output for agents/automation",
+    )
     all_parser.set_defaults(handler=handle_all)
 
     run_server_parser = sub.add_parser("run-server", help=argparse.SUPPRESS)
@@ -913,7 +1027,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     """Main entry point for cdx CLI.
-    
+
     Exit codes:
         0: Success
         1: Runtime error (service not running, network error)

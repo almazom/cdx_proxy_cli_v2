@@ -1,4 +1,5 @@
 """Comprehensive tests for proxy server module."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -24,6 +25,7 @@ from cdx_proxy_cli_v2.proxy.server import (
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def test_settings(tmp_path) -> Settings:
@@ -58,7 +60,9 @@ def sample_auth_record() -> AuthRecord:
 @pytest.fixture
 def mock_auth_pool(sample_auth_record) -> RoundRobinAuthPool:
     """Create a mock auth pool with a sample record."""
-    pool = RoundRobinAuthPool(consecutive_error_threshold=1)  # Blacklist on first error for test
+    pool = RoundRobinAuthPool(
+        consecutive_error_threshold=1
+    )  # Blacklist on first error for test
     pool.load([sample_auth_record])
     return pool
 
@@ -99,6 +103,7 @@ def _build_proxy_handler(
 # Test: _extract_error_code
 # ============================================================================
 
+
 class TestExtractErrorCode:
     """Tests for _extract_error_code helper function."""
 
@@ -137,9 +142,11 @@ class TestExtractErrorCode:
 
     def test_classifies_chatgpt_account_incompatibility_from_detail(self):
         """Known ChatGPT-account incompatibility details should map to a hard auth error code."""
-        body = json.dumps({
-            "detail": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
-        }).encode()
+        body = json.dumps(
+            {
+                "detail": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
+            }
+        ).encode()
         assert _extract_error_code(body, status=400) == "chatgpt_account_incompatible"
 
 
@@ -147,37 +154,44 @@ class TestExtractErrorCode:
 # Test: Management Route Detection
 # ============================================================================
 
+
 class TestManagementRouteDetection:
     """Tests for management route detection."""
 
     def test_management_route_debug(self):
         """Debug endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/debug") == "debug"
 
     def test_management_route_trace(self):
         """Trace endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/trace") == "trace"
 
     def test_management_route_health(self):
         """Health endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/health") == "health"
 
     def test_management_route_auth_files(self):
         """Auth-files endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/auth-files") == "auth-files"
 
     def test_management_route_shutdown(self):
         """Shutdown endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/shutdown") == "shutdown"
 
     def test_non_management_route_returns_none(self):
         """Non-management paths should return None."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
+
         assert management_route("/v1/chat/completions") is None
         assert management_route("/api/models") is None
         assert management_route("/some/random/path") is None
@@ -187,32 +201,38 @@ class TestManagementRouteDetection:
 # Test: Trace Route Classification
 # ============================================================================
 
+
 class TestTraceRouteClassification:
     """Tests for trace route classification."""
 
     def test_trace_route_request(self):
         """/responses path should be classified as 'request'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
-        assert trace_route("/responses") == "request"
-        assert trace_route("/codex/responses") == "request"
+
+        assert trace_route("/responses") == "responses"
+        assert trace_route("/codex/responses") == "responses"
 
     def test_trace_route_compact(self):
         """Paths ending in /compact should be classified as 'compact'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
+
         assert trace_route("/responses/compact") == "compact"
         assert trace_route("/responses/compact?x=1") == "compact"
 
     def test_trace_route_other(self):
         """Other paths should be classified as 'other'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
-        assert trace_route("/health") == "other"
-        assert trace_route("/debug") == "other"
-        assert trace_route("/v1/models") == "other"
+
+        assert trace_route("/health") == "management"
+        assert trace_route("/debug") == "management"
+        assert trace_route("/v1/models") == "models"
+        assert trace_route("/totally/unknown") == ""
 
 
 # ============================================================================
 # Test: Path Rewriting
 # ============================================================================
+
 
 class TestPathRewriting:
     """Tests for request path rewriting."""
@@ -220,43 +240,60 @@ class TestPathRewriting:
     def test_rewrite_chatgpt_responses_paths(self):
         """ChatGPT responses paths should be rewritten."""
         from cdx_proxy_cli_v2.proxy.rules import rewrite_request_path
-        assert rewrite_request_path(
-            req_path="/responses",
-            upstream_host="chatgpt.com",
-            upstream_base_path="/backend-api",
-        ) == "/codex/responses"
+
+        assert (
+            rewrite_request_path(
+                req_path="/responses",
+                upstream_host="chatgpt.com",
+                upstream_base_path="/backend-api",
+            )
+            == "/codex/responses"
+        )
 
     def test_rewrite_chatgpt_v1_responses_paths(self):
         """ChatGPT v1/responses paths should be rewritten."""
         from cdx_proxy_cli_v2.proxy.rules import rewrite_request_path
-        assert rewrite_request_path(
-            req_path="/v1/responses",
-            upstream_host="chatgpt.com",
-            upstream_base_path="/backend-api",
-        ) == "/codex/responses"
+
+        assert (
+            rewrite_request_path(
+                req_path="/v1/responses",
+                upstream_host="chatgpt.com",
+                upstream_base_path="/backend-api",
+            )
+            == "/codex/responses"
+        )
 
     def test_rewrite_compact_paths(self):
         """Compact paths should be rewritten."""
         from cdx_proxy_cli_v2.proxy.rules import rewrite_request_path
-        assert rewrite_request_path(
-            req_path="/v1/responses/compact",
-            upstream_host="chat.openai.com",
-            upstream_base_path="/backend-api",
-        ) == "/codex/responses/compact"
+
+        assert (
+            rewrite_request_path(
+                req_path="/v1/responses/compact",
+                upstream_host="chat.openai.com",
+                upstream_base_path="/backend-api",
+            )
+            == "/codex/responses/compact"
+        )
 
     def test_no_rewrite_for_other_upstreams(self):
         """Other upstreams should not have paths rewritten."""
         from cdx_proxy_cli_v2.proxy.rules import rewrite_request_path
-        assert rewrite_request_path(
-            req_path="/responses",
-            upstream_host="api.openai.com",
-            upstream_base_path="/v1",
-        ) == "/responses"
+
+        assert (
+            rewrite_request_path(
+                req_path="/responses",
+                upstream_host="api.openai.com",
+                upstream_base_path="/v1",
+            )
+            == "/responses"
+        )
 
 
 # ============================================================================
 # Test: Header Handling
 # ============================================================================
+
 
 class TestHeaderHandling:
     """Tests for header manipulation."""
@@ -264,6 +301,7 @@ class TestHeaderHandling:
     def test_set_header_case_insensitive_adds_new(self):
         """set_header_case_insensitive should add new headers."""
         from cdx_proxy_cli_v2.proxy.rules import set_header_case_insensitive
+
         headers = {"Content-Type": "application/json"}
         set_header_case_insensitive(headers, "Authorization", "Bearer token")
         assert headers["Authorization"] == "Bearer token"
@@ -271,6 +309,7 @@ class TestHeaderHandling:
     def test_set_header_case_insensitive_replaces_existing(self):
         """set_header_case_insensitive should replace existing headers case-insensitively."""
         from cdx_proxy_cli_v2.proxy.rules import set_header_case_insensitive
+
         headers = {"authorization": "old-token"}
         set_header_case_insensitive(headers, "Authorization", "new-token")
         assert "authorization" not in headers
@@ -279,12 +318,15 @@ class TestHeaderHandling:
     def test_drop_header_case_insensitive(self):
         """drop_header_case_insensitive should remove headers case-insensitively."""
         from cdx_proxy_cli_v2.proxy.rules import drop_header_case_insensitive
+
         headers = {"Content-Type": "application/json", "content-length": "100"}
         drop_header_case_insensitive(headers, "content-type")
         assert "Content-Type" not in headers
         assert "content-length" in headers
 
-    def test_chatgpt_backend_headers_are_replaced_case_insensitively(self, test_settings, sample_auth_record):
+    def test_chatgpt_backend_headers_are_replaced_case_insensitively(
+        self, test_settings, sample_auth_record
+    ):
         """ChatGPT backend should replace conflicting header variants with canonical values."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://chatgpt.com/backend-api"),
@@ -325,9 +367,13 @@ class TestHeaderHandling:
         assert "user-agent" not in captured_headers
         assert captured_headers["X-Trace-Id"] == "trace-123"
         assert captured_headers["Authorization"] == f"Bearer {sample_auth_record.token}"
-        assert captured_headers["chatgpt-account-id"] == str(sample_auth_record.account_id)
+        assert captured_headers["chatgpt-account-id"] == str(
+            sample_auth_record.account_id
+        )
 
-    def test_non_chatgpt_backend_preserves_caller_header_variants(self, test_settings, sample_auth_record):
+    def test_non_chatgpt_backend_preserves_caller_header_variants(
+        self, test_settings, sample_auth_record
+    ):
         """Non-ChatGPT upstreams should keep caller-provided header casing and values."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://api.example.com/v1"),
@@ -370,7 +416,9 @@ class TestHeaderHandling:
         assert captured_headers["Authorization"] == f"Bearer {sample_auth_record.token}"
         assert "chatgpt-account-id" not in captured_headers
 
-    def test_chatgpt_backend_rewrites_incompatible_model_ids(self, test_settings, sample_auth_record):
+    def test_chatgpt_backend_rewrites_incompatible_model_ids(
+        self, test_settings, sample_auth_record
+    ):
         """ChatGPT backend should normalize unsupported model ids before forwarding."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://chatgpt.com/backend-api"),
@@ -400,7 +448,9 @@ class TestHeaderHandling:
         assert captured_body["model"] == "gpt-5.1-codex-max"
         assert captured_body["input"] == "Hello"
 
-    def test_non_chatgpt_backend_preserves_model_id(self, test_settings, sample_auth_record):
+    def test_non_chatgpt_backend_preserves_model_id(
+        self, test_settings, sample_auth_record
+    ):
         """Non-ChatGPT upstreams should forward the caller model unchanged."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://api.example.com/v1"),
@@ -430,7 +480,9 @@ class TestHeaderHandling:
         assert captured_body["model"] == "gpt-5.4"
         assert captured_body["input"] == "Hello"
 
-    def test_chatgpt_websocket_upgrade_preserves_upgrade_headers(self, test_settings, sample_auth_record):
+    def test_chatgpt_websocket_upgrade_preserves_upgrade_headers(
+        self, test_settings, sample_auth_record
+    ):
         """ChatGPT websocket upgrade requests should keep the handshake headers."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://chatgpt.com/backend-api"),
@@ -475,10 +527,13 @@ class TestHeaderHandling:
 # Test: Models Endpoint
 # ============================================================================
 
+
 class TestModelsEndpoint:
     """Tests for the synthetic /backend-api/models endpoint."""
 
-    def test_returns_chatgpt_account_supported_models(self, test_settings, sample_auth_record):
+    def test_returns_chatgpt_account_supported_models(
+        self, test_settings, sample_auth_record
+    ):
         """Models endpoint should advertise only ChatGPT-account-compatible models."""
         runtime = _build_runtime(
             replace(test_settings, upstream="https://chatgpt.com/backend-api"),
@@ -503,25 +558,65 @@ class TestModelsEndpoint:
 
     def test_normalizes_upstream_models_payload_for_codex_cli(self):
         """Upstream /models payloads should gain display_name for CLI compatibility."""
-        body = json.dumps({
-            "models": [
-                {"slug": "gpt-5-3", "title": "GPT-5.3"},
-                {"slug": "gpt-5-mini"},
-            ]
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "models": [
+                    {"slug": "gpt-5-3", "title": "GPT-5.3"},
+                    {"slug": "gpt-5-mini"},
+                ]
+            }
+        ).encode("utf-8")
 
         normalized = json.loads(
-            _normalize_models_response_body(body, request_path="/models?client_version=0.114.0").decode("utf-8")
+            _normalize_models_response_body(
+                body, request_path="/models?client_version=0.114.0"
+            ).decode("utf-8")
         )
 
         assert normalized["models"][0]["display_name"] == "GPT-5.3"
         assert normalized["models"][1]["display_name"] == "gpt-5-mini"
 
+    def test_normalizes_supported_reasoning_levels_for_codex_cli(self):
+        """Upstream /models payloads should expose supported_reasoning_levels."""
+        body = json.dumps(
+            {
+                "models": [
+                    {
+                        "slug": "gpt-5-4-thinking",
+                        "title": "GPT-5.4 Thinking",
+                        "thinking_efforts": [
+                            {"thinking_effort": "standard"},
+                            {"thinking_effort": "extended"},
+                        ],
+                    },
+                    {
+                        "slug": "gpt-5-3-instant",
+                        "title": "GPT-5.3 Instant",
+                        "reasoning_type": "none",
+                    },
+                ]
+            }
+        ).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_models_response_body(
+                body, request_path="/models?client_version=0.114.0"
+            ).decode("utf-8")
+        )
+
+        assert normalized["models"][0]["supported_reasoning_levels"] == [
+            "standard",
+            "extended",
+        ]
+        assert normalized["models"][1]["supported_reasoning_levels"] == []
+
 
 class TestMergedHealth:
     """Tests for merged runtime + limit health output."""
 
-    def test_health_snapshot_respects_limit_cooldown(self, test_settings, sample_auth_record):
+    def test_health_snapshot_respects_limit_cooldown(
+        self, test_settings, sample_auth_record
+    ):
         runtime = _build_runtime(test_settings, sample_auth_record)
 
         with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
@@ -548,7 +643,9 @@ class TestMergedHealth:
 class TestRuntimeTransitionsAndOverload:
     """Tests for KISS runtime transitions and local overload handling."""
 
-    def test_overloaded_request_returns_503_without_touching_auth_pool(self, test_settings, sample_auth_record):
+    def test_overloaded_request_returns_503_without_touching_auth_pool(
+        self, test_settings, sample_auth_record
+    ):
         runtime = _build_runtime(
             replace(test_settings, max_in_flight_requests=1, max_pending_requests=0),
             sample_auth_record,
@@ -584,8 +681,66 @@ class TestRuntimeTransitionsAndOverload:
             for event in runtime.trace_store.list(limit=20)
         )
 
-    def test_proxy_request_logs_auth_ejected_transition(self, test_settings, sample_auth_record):
+    def test_proxy_request_logs_auth_cooldown_transition(
+        self, test_settings, sample_auth_record
+    ):
         runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=401,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"error":{"code":"token_invalid"}}',
+                error_code="token_invalid",
+            )
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(event.get("event") == "auth.cooldown" for event in events)
+        assert not any(event.get("event") == "auth.blacklisted" for event in events)
+        assert not any(event.get("event") == "auth.ejected" for event in events)
+
+    def test_non_auth_4xx_does_not_cooldown_auth(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/responses",
+            method="GET",
+            headers={},
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=405,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"detail":"Method Not Allowed"}',
+            )
+        )
+
+        handler._proxy_request()
+
+        snapshot = runtime.auth_pool.health_snapshot()[0]
+        events = runtime.trace_store.list(limit=20)
+        assert snapshot["status"] == "OK"
+        assert not any(event.get("event") == "auth.cooldown" for event in events)
+
+    def test_proxy_request_logs_auth_ejected_transition_at_threshold(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = _build_runtime(
+            replace(test_settings, consecutive_error_threshold=1),
+            sample_auth_record,
+        )
         handler = _build_proxy_handler(
             runtime=runtime,
             path="/v1/responses",
@@ -607,7 +762,9 @@ class TestRuntimeTransitionsAndOverload:
         assert any(event.get("event") == "auth.ejected" for event in events)
         assert not any(event.get("event") == "auth.blacklisted" for event in events)
 
-    def test_debug_payload_includes_overload_limits_and_metrics(self, test_settings, sample_auth_record):
+    def test_debug_payload_includes_overload_limits_and_metrics(
+        self, test_settings, sample_auth_record
+    ):
         runtime = _build_runtime(
             replace(test_settings, max_in_flight_requests=3, max_pending_requests=2),
             sample_auth_record,
@@ -629,18 +786,25 @@ class TestRuntimeTransitionsAndOverload:
 class TestProbeBehavior:
     """Tests for non-destructive probe behavior."""
 
-    def test_probe_all_auths_does_not_mutate_runtime_state(self, test_settings, sample_auth_record):
+    def test_probe_all_auths_does_not_mutate_runtime_state(
+        self, test_settings, sample_auth_record
+    ):
         runtime = _build_runtime(test_settings, sample_auth_record)
         before = runtime.auth_pool.health_snapshot()
 
-        with patch("cdx_proxy_cli_v2.proxy.server.load_auth_records", return_value=[sample_auth_record]):
-            runtime._probe_single_auth = MagicMock(return_value={
-                "file": sample_auth_record.name,
-                "success": False,
-                "http_status": 403,
-                "error_code": "forbidden",
-                "latency_ms": 7,
-            })
+        with patch(
+            "cdx_proxy_cli_v2.proxy.server.load_auth_records",
+            return_value=[sample_auth_record],
+        ):
+            runtime._probe_single_auth = MagicMock(
+                return_value={
+                    "file": sample_auth_record.name,
+                    "success": False,
+                    "http_status": 403,
+                    "error_code": "forbidden",
+                    "latency_ms": 7,
+                }
+            )
 
             result = runtime.probe_all_auths(timeout=5)
         after = runtime.auth_pool.health_snapshot()
@@ -648,10 +812,62 @@ class TestProbeBehavior:
         assert result["results"][0]["action"] == "auth_failed"
         assert before == after
 
+    def test_probe_single_auth_uses_chatgpt_backend_headers(
+        self, test_settings, sample_auth_record
+    ):
+        settings = replace(test_settings, upstream="https://chatgpt.com/backend-api")
+        runtime = _build_runtime(settings, sample_auth_record)
+
+        mock_connection = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.read.return_value = b"{}"
+        mock_connection.getresponse.return_value = mock_response
+
+        with patch("http.client.HTTPSConnection", return_value=mock_connection):
+            result = runtime._probe_single_auth(
+                sample_auth_record.name,
+                sample_auth_record.token,
+                sample_auth_record.account_id,
+                timeout=5,
+            )
+
+        headers = mock_connection.request.call_args.kwargs["headers"]
+        assert result["success"] is True
+        assert headers["Authorization"] == f"Bearer {sample_auth_record.token}"
+        assert headers["ChatGPT-Account-Id"] == sample_auth_record.account_id
+        assert headers["Origin"] == "https://chatgpt.com"
+        assert headers["Referer"] == "https://chatgpt.com/"
+        assert headers["User-Agent"] == "codex-cli"
+
+    def test_single_upstream_5xx_increments_error_metric(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/v1/responses",
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=502,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"error":"bad gateway"}',
+                error_code="upstream_request_failed",
+            )
+        )
+
+        handler._proxy_request()
+
+        assert runtime.metrics_snapshot()["upstream_errors_total"] == 1
+
 
 # ============================================================================
 # Test: Loopback Host Detection
 # ============================================================================
+
 
 class TestLoopbackHostDetection:
     """Tests for loopback host detection."""
@@ -659,17 +875,20 @@ class TestLoopbackHostDetection:
     def test_localhost_is_loopback(self):
         """'localhost' should be detected as loopback."""
         from cdx_proxy_cli_v2.proxy.rules import is_loopback_host
+
         assert is_loopback_host("localhost") is True
 
     def test_127_ip_is_loopback(self):
         """127.x.x.x should be detected as loopback."""
         from cdx_proxy_cli_v2.proxy.rules import is_loopback_host
+
         assert is_loopback_host("127.0.0.1") is True
         assert is_loopback_host("127.0.0.100") is True
 
     def test_non_loopback_detected(self):
         """Non-loopback addresses should not be detected as loopback."""
         from cdx_proxy_cli_v2.proxy.rules import is_loopback_host
+
         assert is_loopback_host("192.168.1.1") is False
         assert is_loopback_host("10.0.0.1") is False
         assert is_loopback_host("example.com") is False
@@ -679,20 +898,23 @@ class TestLoopbackHostDetection:
 # Test: Retry Logic
 # ============================================================================
 
+
 class TestRetryLogic:
     """Tests for auth retry logic on failures."""
 
     def test_401_triggers_blacklist(self, mock_auth_pool):
         """401 response should blacklist the auth."""
-        mock_auth_pool.mark_result("test_auth.json", status=401, error_code="token_invalid")
-        
+        mock_auth_pool.mark_result(
+            "test_auth.json", status=401, error_code="token_invalid"
+        )
+
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 0
 
     def test_429_triggers_cooldown(self, mock_auth_pool):
         """429 response should trigger cooldown."""
         mock_auth_pool.mark_result("test_auth.json", status=429)
-        
+
         stats = mock_auth_pool.stats()
         assert stats["cooldown"] == 1
 
@@ -700,23 +922,25 @@ class TestRetryLogic:
         """200 response should clear cooldown."""
         # First trigger cooldown
         mock_auth_pool.mark_result("test_auth.json", status=429)
-        
+
         # Then success
         mock_auth_pool.mark_result("test_auth.json", status=200)
-        
+
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 1
 
     def test_403_triggers_blacklist(self, mock_auth_pool):
         """403 response should blacklist the auth."""
         mock_auth_pool.mark_result("test_auth.json", status=403, error_code="forbidden")
-        
+
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 0
 
     def test_400_account_incompatibility_triggers_blacklist(self, mock_auth_pool):
         """Known account-incompatible 400s should blacklist the auth immediately."""
-        mock_auth_pool.mark_result("test_auth.json", status=400, error_code="chatgpt_account_incompatible")
+        mock_auth_pool.mark_result(
+            "test_auth.json", status=400, error_code="chatgpt_account_incompatible"
+        )
 
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 0
