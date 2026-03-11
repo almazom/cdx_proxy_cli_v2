@@ -231,7 +231,7 @@ def handle_status(args: argparse.Namespace) -> int:
 
 def _state_bucket(status: object) -> str:
     normalized = str(status or "UNKNOWN").upper()
-    if normalized == "OK":
+    if normalized in {"OK", "WARN"}:
         return "whitelist"
     if normalized == "PROBATION":
         return "probation"

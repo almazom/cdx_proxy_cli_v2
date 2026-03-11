@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cdx_proxy_cli_v2.cli.main import (
+    _state_bucket,
     handle_doctor,
     handle_migrate,
     handle_reset,
@@ -335,6 +336,10 @@ class TestDoctorResetPreflight:
         )
         assert "cdx doctor | probe findings" in captured.out
         assert "Probe outcomes" not in captured.err
+
+
+def test_state_bucket_treats_warn_as_whitelist():
+    assert _state_bucket("WARN") == "whitelist"
 
 
 class TestSettingsFromArgs:
