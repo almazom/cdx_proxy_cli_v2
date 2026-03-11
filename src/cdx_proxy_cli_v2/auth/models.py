@@ -26,6 +26,13 @@ class AuthState:
     errors: int = 0
     rate_limit_strikes: int = 0
     hard_failures: int = 0
+    # Auto-heal tracking
+    auto_heal_successes: int = 0
+    auto_heal_target: int = 2
+    auto_heal_failures: int = 0
+    auto_heal_last_check: float = 0.0
+    # Consecutive error tracking (Envoy pattern)
+    consecutive_errors: int = 0
 
     def available(self, now: float) -> bool:
         if now < self.blacklist_until:

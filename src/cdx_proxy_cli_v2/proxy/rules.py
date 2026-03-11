@@ -30,6 +30,7 @@ MANAGEMENT_ROUTES = {
     "/auth-files": "auth-files",
     "/shutdown": "shutdown",
     "/reset": "reset",
+    "/probe": "probe",
 }
 
 
@@ -91,10 +92,10 @@ def get_request_timeout(req_path: str, default: int = 25, compact: int = 120) ->
 
 
 def drop_header_case_insensitive(headers: Dict[str, str], key: str) -> None:
+    target = key.lower()
     for existing in list(headers.keys()):
-        if existing.lower() == key.lower():
+        if existing.lower() == target:
             headers.pop(existing, None)
-            return
 
 
 def set_header_case_insensitive(headers: Dict[str, str], key: str, value: str) -> None:
@@ -102,18 +103,39 @@ def set_header_case_insensitive(headers: Dict[str, str], key: str, value: str) -
     headers[key] = value
 
 
-def build_forward_headers(incoming_headers: Dict[str, str], *, chatgpt_responses_mode: bool) -> Dict[str, str]:
+def build_forward_headers(
+    incoming_headers: Dict[str, str],
+    *,
+    chatgpt_backend: bool = False,
+    chatgpt_responses_mode: bool = False,
+    websocket_upgrade: bool = False,
+) -> Dict[str, str]:
     headers: Dict[str, str] = {}
-    allowed_chatgpt_headers = {"accept", "content-type", "content-encoding", "user-agent"}
+    # Hop-by-hop headers that should not be forwarded
+    hop_by_hop = {"host", "content-length", "transfer-encoding", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "upgrade"}
+
     for key, value in incoming_headers.items():
         normalized = key.lower()
-        if normalized in {"host", "content-length", "connection", "transfer-encoding"}:
-            continue
-        if chatgpt_responses_mode and (normalized in CHATGPT_RESPONSES_DROP_HEADERS or "_" in key):
-            continue
-        if chatgpt_responses_mode:
-            if normalized in allowed_chatgpt_headers or normalized.startswith("x-openai-") or normalized.startswith("openai-"):
+        # Skip hop-by-hop headers (except for WebSocket upgrade)
+        if normalized in hop_by_hop:
+            if websocket_upgrade and normalized in {"upgrade", "connection"}:
                 headers[key] = value
             continue
-        headers[key] = value
+
+        if chatgpt_responses_mode:
+            # For ChatGPT mode: forward ALL headers transparently
+            # except known problematic ones for responses endpoints
+            if normalized in CHATGPT_RESPONSES_DROP_HEADERS:
+                continue
+            headers[key] = value
+        else:
+            # API mode: forward everything except hop-by-hop
+            headers[key] = value
+
+    if chatgpt_backend:
+        # Enforce canonical headers for ChatGPT backend to avoid CSRF/Referer blocks
+        set_header_case_insensitive(headers, "Origin", "https://chatgpt.com")
+        set_header_case_insensitive(headers, "Referer", "https://chatgpt.com/")
+        set_header_case_insensitive(headers, "User-Agent", "codex-cli")
+
     return headers
