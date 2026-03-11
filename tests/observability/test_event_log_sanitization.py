@@ -1,4 +1,5 @@
 """Test that EventLogger sanitizes sensitive fields."""
+
 from __future__ import annotations
 
 import json
@@ -18,8 +19,12 @@ class TestSensitiveFieldDetection:
         """Exact matches should be detected as sensitive."""
         for field in SENSITIVE_FIELD_NAMES:
             assert _is_sensitive_field(field), f"{field} should be sensitive"
-            assert _is_sensitive_field(field.upper()), f"{field.upper()} should be sensitive"
-            assert _is_sensitive_field(field.title()), f"{field.title()} should be sensitive"
+            assert _is_sensitive_field(field.upper()), (
+                f"{field.upper()} should be sensitive"
+            )
+            assert _is_sensitive_field(field.title()), (
+                f"{field.title()} should be sensitive"
+            )
 
     def test_compound_sensitive_fields(self):
         """Compound names containing sensitive words should be detected."""
@@ -40,6 +45,9 @@ class TestSensitiveFieldDetection:
             "file",
             "status",
             "count",
+            "auth_file",
+            "auth_email",
+            "auth_count",
             "latency_ms",
             "request_id",
             "method",
@@ -156,3 +164,21 @@ class TestEventLoggerSanitization:
             assert record["api_key"] == "[REDACTED]"
             assert record["email"] == "user@example.com"
             assert record["status"] == 200
+
+    def test_auth_traceability_fields_are_preserved(self):
+        """Operational auth trace fields should remain visible in durable logs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = EventLogger(tmpdir)
+            logger.write(
+                level="INFO",
+                event="proxy.request",
+                message="request completed",
+                auth_file="worker-a.json",
+                auth_email="worker-a@example.com",
+                auth_count=5,
+            )
+
+            record = json.loads(logger.path.read_text().strip())
+            assert record["auth_file"] == "worker-a.json"
+            assert record["auth_email"] == "worker-a@example.com"
+            assert record["auth_count"] == 5

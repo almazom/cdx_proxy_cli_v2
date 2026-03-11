@@ -8,32 +8,47 @@ from typing import Any, Dict, FrozenSet
 
 from cdx_proxy_cli_v2.config.settings import resolve_path
 
-# Field names that should never be logged (case-insensitive matching)
-SENSITIVE_FIELD_NAMES: FrozenSet[str] = frozenset({
-    "token",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "password",
-    "secret",
-    "api_key",
-    "apikey",
-    "authorization",
-    "auth",
-    "credential",
-    "private_key",
-    "session_key",
-})
+# Exact field names that should never be logged.
+SENSITIVE_FIELD_NAMES: FrozenSet[str] = frozenset(
+    {
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "authorization",
+        "auth",
+        "credential",
+        "private_key",
+        "session_key",
+    }
+)
+
+# High-signal fragments that should remain redacted even inside compound names.
+SENSITIVE_FIELD_SUBSTRINGS: FrozenSet[str] = frozenset(
+    {
+        "token",
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "authorization",
+        "private_key",
+        "session_key",
+    }
+)
 
 
 def _is_sensitive_field(field_name: str) -> bool:
     """Check if a field name matches a sensitive pattern."""
     normalized = str(field_name).lower().strip()
-    # Direct match
     if normalized in SENSITIVE_FIELD_NAMES:
         return True
     # Substring match for compound names like "user_token", "api_secret_key"
-    for sensitive in SENSITIVE_FIELD_NAMES:
+    for sensitive in SENSITIVE_FIELD_SUBSTRINGS:
         if sensitive in normalized:
             return True
     return False
@@ -53,7 +68,7 @@ def _to_jsonable(value: Any) -> Any:
 
 class EventLogger:
     """Structured JSONL writer for operational proxy events.
-    
+
     Automatically sanitizes sensitive fields before logging to prevent
     credential exposure in log files.
     """
@@ -66,7 +81,9 @@ class EventLogger:
     def path(self) -> Path:
         return self._path
 
-    def write(self, *, level: str, event: str, message: str = "", **fields: Any) -> None:
+    def write(
+        self, *, level: str, event: str, message: str = "", **fields: Any
+    ) -> None:
         record: Dict[str, Any] = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "level": str(level).upper(),

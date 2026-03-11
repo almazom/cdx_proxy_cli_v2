@@ -47,7 +47,9 @@ def _shorten_account(name: str, max_len: int = 16) -> str:
 
 
 def _event_label(event: Dict[str, Any], shorten: bool = True) -> str:
-    name = str(event.get("auth_email") or event.get("auth_file") or event.get("auth_id") or "-")
+    name = str(
+        event.get("auth_email") or event.get("auth_file") or event.get("auth_id") or "-"
+    )
     return _shorten_account(name) if shorten else name
 
 
@@ -75,14 +77,25 @@ def trim_request_preview(value: object, width: int = 30) -> str:
     return compact
 
 
-def _event_line(event: Dict[str, Any], show_preview: bool = False) -> Tuple[str, str, str, str, str]:
+def _event_line(
+    event: Dict[str, Any], show_preview: bool = False
+) -> Tuple[str, str, str, str, str]:
     age = _format_age(event.get("ts"))
     # Show full account identity in table rows to avoid collisions like
     # almazomam@gmail.com vs almazomru@gmail.com both becoming alma…@gmail.com.
     account = _event_label(event, shorten=False)
-    route = str(event.get("route") or trace_route(str(event.get("path") or "")))
+    route = str(event.get("route") or trace_route(str(event.get("path") or ""))).strip()
     message = trim_request_preview(event.get("request_preview")) if show_preview else ""
     status = str(event.get("status") or "-")
+    method = str(event.get("method") or "").upper()
+    if route == "responses" and status == "101":
+        route = "ws"
+    elif route == "responses" and method == "POST":
+        route = "responses"
+    elif route == "management":
+        route = "mgmt"
+    elif not route:
+        route = "-"
     return age, account, status, message, route
 
 
@@ -139,7 +152,9 @@ class HighlightTracker:
 
     def update(self, events: List[Dict[str, Any]]) -> Set[int]:
         current_time = time.time()
-        ids: List[int] = [int(event["id"]) for event in events if isinstance(event.get("id"), int)]
+        ids: List[int] = [
+            int(event["id"]) for event in events if isinstance(event.get("id"), int)
+        ]
         current_ids = set(ids)
 
         if not self._initialized:
@@ -152,7 +167,10 @@ class HighlightTracker:
             self._highlight_until[event_id] = current_time + self.HIGHLIGHT_SECONDS
 
         for event_id in list(self._highlight_until.keys()):
-            if event_id not in current_ids or current_time > self._highlight_until[event_id]:
+            if (
+                event_id not in current_ids
+                or current_time > self._highlight_until[event_id]
+            ):
                 self._highlight_until.pop(event_id, None)
 
         self._seen_ids = current_ids
@@ -170,12 +188,15 @@ def _build_view(
     last_error: Optional[str] = None,
 ) -> Panel:
     show_preview = log_request_preview is True
-    title = f"CDX TRACE | latest-first | showing={min(len(events), 20)}"
+    ordered = [
+        event
+        for event in order_events_latest_first(events)
+        if _event_line(event, show_preview=show_preview)[4] != "-"
+    ]
+    title = f"CDX TRACE | latest-first | showing={min(len(ordered), 20)}"
     if log_request_preview is not None:
         preview_mode = "on" if log_request_preview else "off"
         title = f"{title} | preview={preview_mode}"
-
-    ordered = order_events_latest_first(events)
     table = Table(show_header=True, header_style="bold")
     table.add_column("AGE", style="cyan", no_wrap=True)
     table.add_column("ACCOUNT", style="white")
@@ -184,7 +205,9 @@ def _build_view(
         table.add_column("MESSAGE", style="white", no_wrap=True)
     table.add_column("ROUTE", style="dim", no_wrap=True)
     for event in ordered[:20]:
-        age, account, status, message, route = _event_line(event, show_preview=show_preview)
+        age, account, status, message, route = _event_line(
+            event, show_preview=show_preview
+        )
         ev_id = event.get("id")
         # Color-code status
         try:
@@ -202,18 +225,31 @@ def _build_view(
         # Build row with color-coded status
         if isinstance(ev_id, int) and ev_id in highlight_ids:
             if show_preview:
-                table.add_row(age, account, Text(status, style=status_style), message, route, style="bold")
+                table.add_row(
+                    age,
+                    account,
+                    Text(status, style=status_style),
+                    message,
+                    route,
+                    style="bold",
+                )
             else:
-                table.add_row(age, account, Text(status, style=status_style), route, style="bold")
+                table.add_row(
+                    age, account, Text(status, style=status_style), route, style="bold"
+                )
         else:
             if show_preview:
-                table.add_row(age, account, Text(status, style=status_style), message, route)
+                table.add_row(
+                    age, account, Text(status, style=status_style), message, route
+                )
             else:
                 table.add_row(age, account, Text(status, style=status_style), route)
 
     body: Any = table if ordered else Text("no entries")
     if last_error:
-        body = Panel(Text(f"error: {last_error}", style="red"), title="Trace Error", expand=True)
+        body = Panel(
+            Text(f"error: {last_error}", style="red"), title="Trace Error", expand=True
+        )
     return Panel(body, title=title, expand=True)
 
 

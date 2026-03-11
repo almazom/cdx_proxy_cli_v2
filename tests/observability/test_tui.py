@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from cdx_proxy_cli_v2.observability.tui import _event_line, order_events_latest_first, trim_request_preview
+from cdx_proxy_cli_v2.observability.tui import (
+    _event_line,
+    order_events_latest_first,
+    trim_request_preview,
+)
 
 
 def test_trace_tui_event_line_falls_back_to_path_route() -> None:
@@ -14,7 +18,19 @@ def test_trace_tui_event_line_falls_back_to_path_route() -> None:
     assert account == "a.json"
     assert status == "-"
     assert message == ""
-    assert route == "request"
+    assert route == "responses"
+
+
+def test_trace_tui_event_line_labels_websocket_handshake() -> None:
+    event = {
+        "ts": None,
+        "auth_file": "a.json",
+        "path": "/responses?x=1",
+        "method": "GET",
+        "status": 101,
+    }
+    _age, _account, _status, _message, route = _event_line(event, show_preview=False)
+    assert route == "ws"
 
 
 def test_trace_tui_orders_latest_by_id() -> None:
@@ -31,4 +47,3 @@ def test_trace_tui_orders_latest_by_id() -> None:
 def test_trace_tui_trims_and_compacts_preview() -> None:
     raw = "hello     world with   extra spaces"
     assert trim_request_preview(raw, width=12) == "hello world ..."
-
