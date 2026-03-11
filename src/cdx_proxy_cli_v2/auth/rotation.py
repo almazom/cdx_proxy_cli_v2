@@ -4,6 +4,7 @@ import threading
 import time
 from typing import List, Optional
 
+from cdx_proxy_cli_v2.auth.eligibility import limit_block_details
 from cdx_proxy_cli_v2.auth.models import AuthRecord, AuthState
 
 DEFAULT_COOLDOWN_SECONDS = 30
@@ -95,6 +96,7 @@ class RoundRobinAuthPool:
                 self._index = 0
 
     def pick(self) -> Optional[AuthState]:
+        """Choose the next currently eligible auth from already-known state only."""
         with self._lock:
             now = time.time()
             available = [state for state in self._states if state.available(now)]
@@ -321,32 +323,15 @@ class RoundRobinAuthPool:
 
     def apply_limit_health(self, limit_health_by_file: dict[str, dict]) -> None:
         with self._lock:
-            now = time.time()
             for state in self._states:
                 limit_health = limit_health_by_file.get(state.record.name) or {}
-                cooldown_windows: List[tuple[str, int]] = []
-                for key in ("five_hour", "weekly"):
-                    window = limit_health.get(key)
-                    if not isinstance(window, dict):
-                        continue
-                    if str(window.get("status") or "").upper() != "COOLDOWN":
-                        continue
-                    reset_after = window.get("reset_after_seconds")
-                    if isinstance(reset_after, (int, float)) and int(reset_after) > 0:
-                        cooldown_windows.append((key, int(reset_after)))
-                if not cooldown_windows:
+                block = limit_block_details(limit_health)
+                if not block:
                     state.limit_until = 0.0
                     state.limit_reason = None
                     continue
-                limit_seconds = max(seconds for _key, seconds in cooldown_windows)
-                window_keys = {key for key, _seconds in cooldown_windows}
-                state.limit_until = now + limit_seconds
-                if window_keys == {"five_hour", "weekly"}:
-                    state.limit_reason = "limit_weekly_and_5h"
-                elif "weekly" in window_keys:
-                    state.limit_reason = "limit_weekly"
-                else:
-                    state.limit_reason = "limit_5h"
+                state.limit_until = float(block["until"])
+                state.limit_reason = str(block["reason"])
 
     @staticmethod
     def _is_stable(state: AuthState) -> bool:

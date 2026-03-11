@@ -10,6 +10,7 @@ DEFAULT_LIMIT_WARN_AT = 70
 DEFAULT_LIMIT_COOLDOWN_AT = 90
 DEFAULT_LIMIT_TIMEOUT = 8
 DEFAULT_USAGE_BASE_URL = "https://chatgpt.com/backend-api"
+ELIGIBLE_ACCOUNT_STATUSES = {"OK", "WARN"}
 
 
 def usage_base_url() -> str:
@@ -92,6 +93,59 @@ def limit_block_details(limit_health: Optional[Dict[str, Any]], *, now: Optional
     }
 
 
+def merged_account_state(
+    runtime_item: Dict[str, Any],
+    limit_item: Dict[str, Any],
+) -> Dict[str, Any]:
+    item: Dict[str, Any] = {}
+    item.update(limit_item)
+    item.update(runtime_item)
+
+    runtime_status = str(runtime_item.get("status") or "UNKNOWN").upper()
+    runtime_eligible = bool(runtime_item.get("eligible_now", runtime_status == "OK"))
+    runtime_reason = str(runtime_item.get("reason") or "").strip()
+    runtime_origin = str(runtime_item.get("reason_origin") or "").strip()
+    runtime_until = runtime_item.get("until")
+
+    limit_block = limit_block_details(limit_item)
+    limit_status = str(limit_item.get("status") or "UNKNOWN").upper()
+
+    status = runtime_status
+    if runtime_status in {"BLACKLIST", "PROBATION", "COOLDOWN"}:
+        status = runtime_status
+    elif limit_block:
+        status = "COOLDOWN"
+    elif limit_status == "WARN":
+        status = "WARN"
+    elif runtime_status == "UNKNOWN" and limit_status in ELIGIBLE_ACCOUNT_STATUSES:
+        status = limit_status
+
+    item["status"] = status
+    item["eligible_now"] = bool(runtime_eligible and status in ELIGIBLE_ACCOUNT_STATUSES)
+
+    if runtime_reason:
+        item["reason"] = runtime_reason
+        item["reason_origin"] = runtime_origin or "runtime"
+    elif limit_block and status == "COOLDOWN":
+        item["reason"] = limit_block["reason"]
+        item["reason_origin"] = limit_block["reason_origin"]
+
+    if limit_block and status == "COOLDOWN":
+        item["until"] = max(
+            float(runtime_until) if isinstance(runtime_until, (int, float)) else 0.0,
+            float(limit_block["until"]),
+        )
+        runtime_cooldown = runtime_item.get("cooldown_seconds")
+        item["cooldown_seconds"] = max(
+            int(runtime_cooldown) if isinstance(runtime_cooldown, (int, float)) else 0,
+            int(limit_block["cooldown_seconds"]),
+        ) or None
+    elif isinstance(runtime_until, (int, float)):
+        item["until"] = float(runtime_until)
+
+    return item
+
+
 def merge_runtime_with_limits(
     runtime_accounts: List[Dict[str, Any]],
     limit_health_by_file: Dict[str, Dict[str, Any]],
@@ -108,56 +162,8 @@ def merge_runtime_with_limits(
     for auth_file in sorted(set(runtime_by_file.keys()) | set(limit_health_by_file.keys())):
         runtime_item = dict(runtime_by_file.get(auth_file, {}))
         limit_item = dict(limit_health_by_file.get(auth_file, {}))
-        item: Dict[str, Any] = {}
-        item.update(limit_item)
-        item.update(runtime_item)
+        item = merged_account_state(runtime_item, limit_item)
         item["file"] = auth_file
-
-        runtime_status = str(runtime_item.get("status") or "UNKNOWN").upper()
-        runtime_eligible = bool(runtime_item.get("eligible_now", runtime_status == "OK"))
-        limit_block = limit_block_details(limit_item)
-        limit_status = str(limit_item.get("status") or "UNKNOWN").upper()
-
-        status = runtime_status
-        if runtime_status == "BLACKLIST":
-            status = "BLACKLIST"
-        elif runtime_status == "PROBATION":
-            status = "PROBATION"
-        elif runtime_status == "COOLDOWN":
-            status = "COOLDOWN"
-        elif limit_block:
-            status = "COOLDOWN"
-        elif limit_status == "WARN":
-            status = "WARN"
-        elif runtime_status == "UNKNOWN" and limit_status in {"OK", "WARN"}:
-            status = limit_status
-
-        item["status"] = status
-        item["eligible_now"] = bool(runtime_eligible and status in {"OK", "WARN"})
-
-        runtime_reason = str(runtime_item.get("reason") or "").strip()
-        runtime_origin = str(runtime_item.get("reason_origin") or "").strip()
-        if runtime_reason:
-            item["reason"] = runtime_reason
-            item["reason_origin"] = runtime_origin or "runtime"
-        elif limit_block and status == "COOLDOWN":
-            item["reason"] = limit_block["reason"]
-            item["reason_origin"] = limit_block["reason_origin"]
-
-        runtime_until = runtime_item.get("until")
-        if limit_block and status == "COOLDOWN":
-            item["until"] = max(
-                float(runtime_until) if isinstance(runtime_until, (int, float)) else 0.0,
-                float(limit_block["until"]),
-            )
-            runtime_cooldown = runtime_item.get("cooldown_seconds")
-            item["cooldown_seconds"] = max(
-                int(runtime_cooldown) if isinstance(runtime_cooldown, (int, float)) else 0,
-                int(limit_block["cooldown_seconds"]),
-            ) or None
-        elif isinstance(runtime_until, (int, float)):
-            item["until"] = float(runtime_until)
-
         merged.append(item)
     return merged
 
