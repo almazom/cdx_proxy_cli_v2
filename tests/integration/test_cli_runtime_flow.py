@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 
 from tests.integration.support import (
+    DEFAULT_TEST_INPUT,
+    DEFAULT_TEST_MODEL,
+    LOOPBACK_HOST,
+    RESPONSES_PATH,
+    TRACE_PATH,
     MockUpstreamHandler,
     make_usage_payload,
     parse_shell_exports,
@@ -34,7 +39,7 @@ def _start_proxy(auth_dir: Path, upstream_base_url: str) -> str:
         "--upstream",
         upstream_base_url,
         "--host",
-        "127.0.0.1",
+        LOOPBACK_HOST,
         "--port",
         "0",
         "--print-env-only",
@@ -114,16 +119,16 @@ def test_cli_runtime_flow_covers_status_doctor_all_reset_and_trace(
 
         response_status, response_body = request_json(
             base_url=base_url,
-            path="/v1/responses",
+            path=RESPONSES_PATH,
             method="POST",
-            payload={"model": "gpt-4", "input": "hello"},
+            payload={"model": DEFAULT_TEST_MODEL, "input": DEFAULT_TEST_INPUT},
         )
         assert response_status == 200
         assert response_body["status"] == "completed"
 
         trace_status, trace_body = request_json(
             base_url=base_url,
-            path="/trace?limit=10",
+            path=f"{TRACE_PATH}?limit=10",
             headers={"X-Management-Key": env["CLIPROXY_MANAGEMENT_KEY"]},
         )
         assert trace_status == 200

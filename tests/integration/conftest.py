@@ -10,7 +10,7 @@ import pytest
 from cdx_proxy_cli_v2.config.settings import Settings, build_settings
 from cdx_proxy_cli_v2.proxy.server import ProxyHTTPServer, ProxyRuntime
 
-from tests.integration.support import MockUpstreamHandler, write_auth
+from tests.integration.support import LOOPBACK_HOST, MockUpstreamHandler, write_auth
 
 MANAGEMENT_KEY = "mgmt-secret"
 
@@ -21,7 +21,7 @@ def test_settings(tmp_path: Path) -> Settings:
     auth_dir.mkdir()
     return Settings(
         auth_dir=str(auth_dir),
-        host="127.0.0.1",
+        host=LOOPBACK_HOST,
         port=0,
         upstream="https://api.openai.com/v1",
         management_key=MANAGEMENT_KEY,
@@ -60,7 +60,7 @@ def proxy_server(
 ) -> Iterator[dict[str, Any]]:
     settings = build_settings(
         auth_dir=test_settings.auth_dir,
-        host="127.0.0.1",
+        host=LOOPBACK_HOST,
         port=0,
         upstream=upstream_server,
         management_key=MANAGEMENT_KEY,

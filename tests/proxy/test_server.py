@@ -14,12 +14,47 @@ from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.auth.rotation import RoundRobinAuthPool
 from cdx_proxy_cli_v2.config.settings import Settings
 from cdx_proxy_cli_v2.proxy.server import (
+    CHATGPT_ACCOUNT_MODEL_FALLBACK,
+    CHATGPT_ACCOUNT_MODEL_REWRITES,
+    CHATGPT_ACCOUNT_MODELS,
     ProxyHandler,
     ProxyRuntime,
     UpstreamAttemptResult,
     _extract_error_code,
     _normalize_models_response_body,
 )
+
+REWRITE_SOURCE_MODEL = next(iter(CHATGPT_ACCOUNT_MODEL_REWRITES))
+INCOMPATIBLE_MODEL_DETAIL = (
+    f"The '{REWRITE_SOURCE_MODEL}' model is not supported when using Codex with a ChatGPT account."
+)
+CLIENT_MODELS_PATH = "/models?client_version=0.114.0"
+BACKEND_MODELS_PATH = "/backend-api/models"
+API_MODELS_PATH = "/api/models"
+OPENAI_MODELS_PATH = "/v1/models"
+PRIMARY_RESPONSES_PATH = "/v1/responses"
+RESPONSES_PATH = "/responses"
+CODEX_RESPONSES_PATH = "/codex/responses"
+RESPONSES_COMPACT_PATH = "/responses/compact"
+RESPONSES_COMPACT_WITH_QUERY = "/responses/compact?x=1"
+V1_RESPONSES_COMPACT_PATH = "/v1/responses/compact"
+DEBUG_PATH = "/debug"
+TRACE_PATH = "/trace"
+HEALTH_PATH = "/health"
+AUTH_FILES_PATH = "/auth-files"
+SHUTDOWN_PATH = "/shutdown"
+CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+UNKNOWN_PATH = "/some/random/path"
+TEST_INPUT_TEXT = "Hello"
+UPSTREAM_AUTO_MODEL_SLUG = "gpt-5-3"
+UPSTREAM_AUTO_MODEL_TITLE = "GPT-5.3"
+UPSTREAM_MINI_MODEL_SLUG = "gpt-5-mini"
+UPSTREAM_THINKING_MODEL_SLUG = "gpt-5-4-thinking"
+UPSTREAM_THINKING_MODEL_TITLE = "GPT-5.4 Thinking"
+UPSTREAM_INSTANT_MODEL_SLUG = "gpt-5-3-instant"
+UPSTREAM_INSTANT_MODEL_TITLE = "GPT-5.3 Instant"
+UPSTREAM_DEFAULT_MODEL_SLUG = "gpt-5"
+UPSTREAM_DEFAULT_MODEL_TITLE = "GPT-5"
 
 
 # ============================================================================
@@ -144,7 +179,7 @@ class TestExtractErrorCode:
         """Known ChatGPT-account incompatibility details should map to a hard auth error code."""
         body = json.dumps(
             {
-                "detail": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
+                "detail": INCOMPATIBLE_MODEL_DETAIL
             }
         ).encode()
         assert _extract_error_code(body, status=400) == "chatgpt_account_incompatible"
@@ -162,39 +197,39 @@ class TestManagementRouteDetection:
         """Debug endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/debug") == "debug"
+        assert management_route(DEBUG_PATH) == "debug"
 
     def test_management_route_trace(self):
         """Trace endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/trace") == "trace"
+        assert management_route(TRACE_PATH) == "trace"
 
     def test_management_route_health(self):
         """Health endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/health") == "health"
+        assert management_route(HEALTH_PATH) == "health"
 
     def test_management_route_auth_files(self):
         """Auth-files endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/auth-files") == "auth-files"
+        assert management_route(AUTH_FILES_PATH) == "auth-files"
 
     def test_management_route_shutdown(self):
         """Shutdown endpoint should be recognized as management route."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/shutdown") == "shutdown"
+        assert management_route(SHUTDOWN_PATH) == "shutdown"
 
     def test_non_management_route_returns_none(self):
         """Non-management paths should return None."""
         from cdx_proxy_cli_v2.proxy.rules import management_route
 
-        assert management_route("/v1/chat/completions") is None
-        assert management_route("/api/models") is None
-        assert management_route("/some/random/path") is None
+        assert management_route(CHAT_COMPLETIONS_PATH) is None
+        assert management_route(API_MODELS_PATH) is None
+        assert management_route(UNKNOWN_PATH) is None
 
 
 # ============================================================================
@@ -209,24 +244,24 @@ class TestTraceRouteClassification:
         """/responses path should be classified as 'request'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
 
-        assert trace_route("/responses") == "responses"
-        assert trace_route("/codex/responses") == "responses"
+        assert trace_route(RESPONSES_PATH) == "responses"
+        assert trace_route(CODEX_RESPONSES_PATH) == "responses"
 
     def test_trace_route_compact(self):
         """Paths ending in /compact should be classified as 'compact'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
 
-        assert trace_route("/responses/compact") == "compact"
-        assert trace_route("/responses/compact?x=1") == "compact"
+        assert trace_route(RESPONSES_COMPACT_PATH) == "compact"
+        assert trace_route(RESPONSES_COMPACT_WITH_QUERY) == "compact"
 
     def test_trace_route_other(self):
         """Other paths should be classified as 'other'."""
         from cdx_proxy_cli_v2.proxy.rules import trace_route
 
-        assert trace_route("/health") == "management"
-        assert trace_route("/debug") == "management"
-        assert trace_route("/v1/models") == "models"
-        assert trace_route("/totally/unknown") == ""
+        assert trace_route(HEALTH_PATH) == "management"
+        assert trace_route(DEBUG_PATH) == "management"
+        assert trace_route(OPENAI_MODELS_PATH) == "models"
+        assert trace_route(UNKNOWN_PATH) == ""
 
 
 # ============================================================================
@@ -243,11 +278,11 @@ class TestPathRewriting:
 
         assert (
             rewrite_request_path(
-                req_path="/responses",
+                req_path=RESPONSES_PATH,
                 upstream_host="chatgpt.com",
                 upstream_base_path="/backend-api",
             )
-            == "/codex/responses"
+            == CODEX_RESPONSES_PATH
         )
 
     def test_rewrite_chatgpt_v1_responses_paths(self):
@@ -256,11 +291,11 @@ class TestPathRewriting:
 
         assert (
             rewrite_request_path(
-                req_path="/v1/responses",
+                req_path=PRIMARY_RESPONSES_PATH,
                 upstream_host="chatgpt.com",
                 upstream_base_path="/backend-api",
             )
-            == "/codex/responses"
+            == CODEX_RESPONSES_PATH
         )
 
     def test_rewrite_compact_paths(self):
@@ -269,11 +304,11 @@ class TestPathRewriting:
 
         assert (
             rewrite_request_path(
-                req_path="/v1/responses/compact",
+                req_path=V1_RESPONSES_COMPACT_PATH,
                 upstream_host="chat.openai.com",
                 upstream_base_path="/backend-api",
             )
-            == "/codex/responses/compact"
+            == f"{CODEX_RESPONSES_PATH}/compact"
         )
 
     def test_no_rewrite_for_other_upstreams(self):
@@ -282,11 +317,11 @@ class TestPathRewriting:
 
         assert (
             rewrite_request_path(
-                req_path="/responses",
+                req_path=RESPONSES_PATH,
                 upstream_host="api.openai.com",
                 upstream_base_path="/v1",
             )
-            == "/responses"
+            == RESPONSES_PATH
         )
 
 
@@ -424,10 +459,10 @@ class TestHeaderHandling:
             replace(test_settings, upstream="https://chatgpt.com/backend-api"),
             sample_auth_record,
         )
-        body = json.dumps({"model": "gpt-5.4", "input": "Hello"}).encode("utf-8")
+        body = json.dumps({"model": REWRITE_SOURCE_MODEL, "input": TEST_INPUT_TEXT}).encode("utf-8")
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=body,
         )
@@ -445,8 +480,8 @@ class TestHeaderHandling:
 
         handler._proxy_request()
 
-        assert captured_body["model"] == "gpt-5.1-codex-max"
-        assert captured_body["input"] == "Hello"
+        assert captured_body["model"] == CHATGPT_ACCOUNT_MODEL_FALLBACK
+        assert captured_body["input"] == TEST_INPUT_TEXT
 
     def test_non_chatgpt_backend_preserves_model_id(
         self, test_settings, sample_auth_record
@@ -456,10 +491,10 @@ class TestHeaderHandling:
             replace(test_settings, upstream="https://api.example.com/v1"),
             sample_auth_record,
         )
-        body = json.dumps({"model": "gpt-5.4", "input": "Hello"}).encode("utf-8")
+        body = json.dumps({"model": REWRITE_SOURCE_MODEL, "input": TEST_INPUT_TEXT}).encode("utf-8")
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=body,
         )
@@ -477,8 +512,8 @@ class TestHeaderHandling:
 
         handler._proxy_request()
 
-        assert captured_body["model"] == "gpt-5.4"
-        assert captured_body["input"] == "Hello"
+        assert captured_body["model"] == REWRITE_SOURCE_MODEL
+        assert captured_body["input"] == TEST_INPUT_TEXT
 
     def test_chatgpt_websocket_upgrade_preserves_upgrade_headers(
         self, test_settings, sample_auth_record
@@ -541,7 +576,7 @@ class TestModelsEndpoint:
         )
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/backend-api/models",
+            path=BACKEND_MODELS_PATH,
             headers={},
             method="GET",
         )
@@ -549,11 +584,7 @@ class TestModelsEndpoint:
         handler._handle_models_endpoint()
 
         payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
-        assert [item["id"] for item in payload["data"]] == [
-            "gpt-5.1-codex-max",
-            "gpt-5.1-codex",
-            "gpt-5.1-codex-mini",
-        ]
+        assert [item["id"] for item in payload["data"]] == list(CHATGPT_ACCOUNT_MODELS)
         assert all(item["display_name"] for item in payload["data"])
         assert all(item["shell_type"] == "shell_command" for item in payload["data"])
         assert all(item["visibility"] == "list" for item in payload["data"])
@@ -563,20 +594,20 @@ class TestModelsEndpoint:
         body = json.dumps(
             {
                 "models": [
-                    {"slug": "gpt-5-3", "title": "GPT-5.3"},
-                    {"slug": "gpt-5-mini"},
+                    {"slug": UPSTREAM_AUTO_MODEL_SLUG, "title": UPSTREAM_AUTO_MODEL_TITLE},
+                    {"slug": UPSTREAM_MINI_MODEL_SLUG},
                 ]
             }
         ).encode("utf-8")
 
         normalized = json.loads(
             _normalize_models_response_body(
-                body, request_path="/models?client_version=0.114.0"
+                body, request_path=CLIENT_MODELS_PATH
             ).decode("utf-8")
         )
 
-        assert normalized["models"][0]["display_name"] == "GPT-5.3"
-        assert normalized["models"][1]["display_name"] == "gpt-5-mini"
+        assert normalized["models"][0]["display_name"] == UPSTREAM_AUTO_MODEL_TITLE
+        assert normalized["models"][1]["display_name"] == UPSTREAM_MINI_MODEL_SLUG
 
     def test_normalizes_supported_reasoning_levels_for_codex_cli(self):
         """Upstream /models payloads should expose supported_reasoning_levels."""
@@ -584,16 +615,16 @@ class TestModelsEndpoint:
             {
                 "models": [
                     {
-                        "slug": "gpt-5-4-thinking",
-                        "title": "GPT-5.4 Thinking",
+                        "slug": UPSTREAM_THINKING_MODEL_SLUG,
+                        "title": UPSTREAM_THINKING_MODEL_TITLE,
                         "thinking_efforts": [
                             {"thinking_effort": "standard"},
                             {"thinking_effort": "extended"},
                         ],
                     },
                     {
-                        "slug": "gpt-5-3-instant",
-                        "title": "GPT-5.3 Instant",
+                        "slug": UPSTREAM_INSTANT_MODEL_SLUG,
+                        "title": UPSTREAM_INSTANT_MODEL_TITLE,
                         "reasoning_type": "none",
                     },
                 ]
@@ -602,7 +633,7 @@ class TestModelsEndpoint:
 
         normalized = json.loads(
             _normalize_models_response_body(
-                body, request_path="/models?client_version=0.114.0"
+                body, request_path=CLIENT_MODELS_PATH
             ).decode("utf-8")
         )
 
@@ -618,7 +649,7 @@ class TestModelsEndpoint:
             {
                 "models": [
                     {
-                        "slug": "gpt-5-4-thinking",
+                        "slug": UPSTREAM_THINKING_MODEL_SLUG,
                         "default_reasoning_level": "standard",
                         "supported_reasoning_levels": [
                             {"effort": "standard", "description": "Balanced thinking"},
@@ -631,7 +662,7 @@ class TestModelsEndpoint:
 
         normalized = json.loads(
             _normalize_models_response_body(
-                body, request_path="/models?client_version=0.114.0"
+                body, request_path=CLIENT_MODELS_PATH
             ).decode("utf-8")
         )
 
@@ -646,15 +677,19 @@ class TestModelsEndpoint:
         body = json.dumps(
             {
                 "models": [
-                    {"slug": "gpt-5-3", "title": "GPT-5.3", "max_tokens": 64000},
-                    {"slug": "gpt-5", "title": "GPT-5"},
+                    {
+                        "slug": UPSTREAM_AUTO_MODEL_SLUG,
+                        "title": UPSTREAM_AUTO_MODEL_TITLE,
+                        "max_tokens": 64000,
+                    },
+                    {"slug": UPSTREAM_DEFAULT_MODEL_SLUG, "title": UPSTREAM_DEFAULT_MODEL_TITLE},
                 ]
             }
         ).encode("utf-8")
 
         normalized = json.loads(
             _normalize_models_response_body(
-                body, request_path="/models?client_version=0.114.0"
+                body, request_path=CLIENT_MODELS_PATH
             ).decode("utf-8")
         )
 
@@ -719,7 +754,7 @@ class TestRuntimeTransitionsAndOverload:
         assert lease.admitted is True
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=b"{}",
         )
@@ -752,7 +787,7 @@ class TestRuntimeTransitionsAndOverload:
         runtime = _build_runtime(test_settings, sample_auth_record)
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=b"{}",
         )
@@ -778,7 +813,7 @@ class TestRuntimeTransitionsAndOverload:
         runtime = _build_runtime(test_settings, sample_auth_record)
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/responses",
+            path=RESPONSES_PATH,
             method="GET",
             headers={},
         )
@@ -808,7 +843,7 @@ class TestRuntimeTransitionsAndOverload:
         )
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=b"{}",
         )
@@ -911,7 +946,7 @@ class TestProbeBehavior:
         runtime = _build_runtime(test_settings, sample_auth_record)
         handler = _build_proxy_handler(
             runtime=runtime,
-            path="/v1/responses",
+            path=PRIMARY_RESPONSES_PATH,
             headers={"Content-Type": "application/json"},
             body=b"{}",
         )

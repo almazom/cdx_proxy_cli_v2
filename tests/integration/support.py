@@ -10,10 +10,32 @@ from typing import Dict, Optional, Tuple
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from cdx_proxy_cli_v2.proxy.server import (
+    CHATGPT_ACCOUNT_MODEL_FALLBACK,
+    CHATGPT_ACCOUNT_MODEL_REWRITES,
+)
+
 FIVE_HOURS_SECONDS = 5 * 60 * 60
 WEEK_SECONDS = 7 * 24 * 60 * 60
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
+LOOPBACK_HOST = "127.0.0.1"
+RESPONSES_PATH = "/v1/responses"
+CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+MODELS_PATH = "/models"
+OPENAI_MODELS_PATH = "/v1/models"
+BACKEND_MODELS_PATH = "/backend-api/models"
+TRACE_PATH = "/trace"
+HEALTH_PATH = "/health"
+DEBUG_PATH = "/debug"
+DEFAULT_TEST_MODEL = "gpt-4"
+DEFAULT_TEST_MODEL_DISPLAY_NAME = "GPT-4"
+DEFAULT_TEST_MINI_MODEL = "gpt-4-mini"
+ACCOUNT_INCOMPATIBLE_REQUEST_MODEL = next(iter(CHATGPT_ACCOUNT_MODEL_REWRITES))
+ACCOUNT_COMPATIBLE_FALLBACK_MODEL = CHATGPT_ACCOUNT_MODEL_FALLBACK
+DEFAULT_TEST_MESSAGE = "Hello"
+DEFAULT_TEST_CHAT_MESSAGE = "Hi"
+DEFAULT_TEST_INPUT = "hello"
 
 
 def write_auth(path: Path, token: str, email: str, account_id: str = "") -> None:
@@ -120,6 +142,34 @@ def run_cli(
     )
 
 
+def build_responses_payload(
+    *,
+    model: str = DEFAULT_TEST_MODEL,
+    message_text: str = DEFAULT_TEST_MESSAGE,
+    input_text: Optional[str] = None,
+    stream: bool = False,
+) -> Dict[str, object]:
+    payload: Dict[str, object] = {"model": model}
+    if input_text is not None:
+        payload["input"] = input_text
+    else:
+        payload["messages"] = [{"role": "user", "content": message_text}]
+    if stream:
+        payload["stream"] = True
+    return payload
+
+
+def build_chat_completions_payload(
+    *,
+    model: str = DEFAULT_TEST_MODEL,
+    message_text: str = DEFAULT_TEST_CHAT_MESSAGE,
+) -> Dict[str, object]:
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": message_text}],
+    }
+
+
 class MockUpstreamHandler(BaseHTTPRequestHandler):
     responses: list[Dict[str, object]] = []
     call_count: int = 0
@@ -172,23 +222,29 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
             self._send_json(200, self._usage_payload(headers))
             return
 
-        if self.path == "/models":
+        if self.path == MODELS_PATH:
             self._send_json(
                 200,
                 {
                     "models": [
-                        {"slug": "gpt-4", "title": "GPT-4"},
-                        {"slug": "gpt-4-mini"},
+                        {
+                            "slug": DEFAULT_TEST_MODEL,
+                            "title": DEFAULT_TEST_MODEL_DISPLAY_NAME,
+                        },
+                        {"slug": DEFAULT_TEST_MINI_MODEL},
                     ]
                 },
             )
             return
 
-        if self.path in {"/v1/models", "/backend-api/models"}:
-            self._send_json(200, {"data": [{"id": "gpt-4"}, {"id": "gpt-3.5-turbo"}]})
+        if self.path in {OPENAI_MODELS_PATH, BACKEND_MODELS_PATH}:
+            self._send_json(
+                200,
+                {"data": [{"id": DEFAULT_TEST_MODEL}, {"id": DEFAULT_TEST_MINI_MODEL}]},
+            )
             return
 
-        if "/responses" in self.path:
+        if RESPONSES_PATH in self.path:
             if self.headers.get("Accept") == "text/event-stream":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -227,7 +283,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
             self._send_json(status, data if isinstance(data, dict) else {})
             return
 
-        if "/responses" in self.path:
+        if RESPONSES_PATH in self.path:
             if self.headers.get("Accept") == "text/event-stream":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -258,7 +314,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if "/chat/completions" in self.path:
+        if CHAT_COMPLETIONS_PATH in self.path:
             self._send_json(
                 200,
                 {

@@ -5,18 +5,29 @@ import threading
 from typing import Any
 from urllib.request import Request, urlopen
 
-from tests.integration.support import MockUpstreamHandler, request_json
+from tests.integration.support import (
+    ACCOUNT_COMPATIBLE_FALLBACK_MODEL,
+    ACCOUNT_INCOMPATIBLE_REQUEST_MODEL,
+    CHAT_COMPLETIONS_PATH,
+    DEBUG_PATH,
+    DEFAULT_TEST_MODEL,
+    HEALTH_PATH,
+    MODELS_PATH,
+    RESPONSES_PATH,
+    TRACE_PATH,
+    build_chat_completions_payload,
+    build_responses_payload,
+    MockUpstreamHandler,
+    request_json,
+)
 
 
 def test_responses_request_succeeds(proxy_server: dict[str, Any]) -> None:
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={
-            "model": "gpt-4",
-            "messages": [{"role": "user", "content": "Hello"}],
-        },
+        payload=build_responses_payload(),
     )
 
     assert status == 200
@@ -27,7 +38,7 @@ def test_responses_request_succeeds(proxy_server: dict[str, Any]) -> None:
 def test_models_are_normalized_for_codex(proxy_server: dict[str, Any]) -> None:
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/models",
+        path=MODELS_PATH,
     )
 
     assert status == 200
@@ -40,8 +51,8 @@ def test_models_are_normalized_for_codex(proxy_server: dict[str, Any]) -> None:
 
 def test_streaming_responses_request_succeeds(proxy_server: dict[str, Any]) -> None:
     req = Request(
-        f"{proxy_server['base_url']}/v1/responses",
-        data=json.dumps({"model": "gpt-4", "stream": True}).encode(),
+        f"{proxy_server['base_url']}{RESPONSES_PATH}",
+        data=json.dumps(build_responses_payload(stream=True)).encode(),
         method="POST",
         headers={
             "Accept": "text/event-stream",
@@ -63,9 +74,9 @@ def test_rotates_after_401(proxy_server: dict[str, Any]) -> None:
 
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={"model": "gpt-4"},
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
     )
 
     assert status == 200
@@ -80,7 +91,7 @@ def test_rotates_after_known_account_incompatible_400(
         {
             "status": 400,
             "data": {
-                "detail": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
+                "detail": f"The '{ACCOUNT_INCOMPATIBLE_REQUEST_MODEL}' model is not supported when using Codex with a ChatGPT account."
             },
         },
         {"status": 200, "data": {"id": "resp_retry_400", "status": "completed"}},
@@ -88,9 +99,9 @@ def test_rotates_after_known_account_incompatible_400(
 
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={"model": "gpt-5.1-codex-max"},
+        payload=build_responses_payload(model=ACCOUNT_COMPATIBLE_FALLBACK_MODEL),
     )
 
     assert status == 200
@@ -106,9 +117,9 @@ def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) ->
 
     status, _body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={"model": "gpt-4"},
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
     )
 
     assert status == 401
@@ -118,7 +129,7 @@ def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) ->
 def test_management_endpoints_require_key(proxy_server: dict[str, Any]) -> None:
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/trace",
+        path=TRACE_PATH,
     )
 
     assert status == 401
@@ -132,24 +143,24 @@ def test_health_debug_and_trace_reflect_runtime(proxy_server: dict[str, Any]) ->
 
     request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={"model": "gpt-4"},
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
     )
 
     health_status, health_body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/health",
+        path=HEALTH_PATH,
         headers=management_headers,
     )
     debug_status, debug_body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/debug",
+        path=DEBUG_PATH,
         headers=management_headers,
     )
     trace_status, trace_body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/trace?limit=10",
+        path=f"{TRACE_PATH}?limit=10",
         headers=management_headers,
     )
 
@@ -166,9 +177,9 @@ def test_health_debug_and_trace_reflect_runtime(proxy_server: dict[str, Any]) ->
 def test_chat_completions_request_succeeds(proxy_server: dict[str, Any]) -> None:
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/chat/completions",
+        path=CHAT_COMPLETIONS_PATH,
         method="POST",
-        payload={"model": "gpt-4", "messages": [{"role": "user", "content": "Hi"}]},
+        payload=build_chat_completions_payload(),
     )
 
     assert status == 200
@@ -183,9 +194,9 @@ def test_concurrent_responses_requests_succeed(proxy_server: dict[str, Any]) -> 
         try:
             result = request_json(
                 base_url=str(proxy_server["base_url"]),
-                path="/v1/responses",
+                path=RESPONSES_PATH,
                 method="POST",
-                payload={"model": "gpt-4"},
+                payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
                 timeout=10.0,
             )
         except Exception as exc:  # noqa: BLE001
@@ -211,9 +222,9 @@ def test_forwarded_bearer_token_comes_from_auth_pool(
 
     request_json(
         base_url=str(proxy_server["base_url"]),
-        path="/v1/responses",
+        path=RESPONSES_PATH,
         method="POST",
-        payload={"model": "gpt-4"},
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
     )
 
     assert MockUpstreamHandler.received_headers
