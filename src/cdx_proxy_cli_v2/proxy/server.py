@@ -134,6 +134,14 @@ def _is_models_request_path(path: str) -> bool:
     return path_only in {"/models", "/backend-api/models"}
 
 
+def _normalize_model_shell_type(item: dict[str, Any]) -> str:
+    slug = str(item.get("slug") or item.get("id") or "").strip().lower()
+    title = str(item.get("title") or item.get("display_name") or "").strip().lower()
+    if slug == "gpt-5" or title == "gpt-5":
+        return "default"
+    return "shell_command"
+
+
 def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
     if not body or not _is_models_request_path(request_path):
         return body
@@ -170,6 +178,12 @@ def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
                             if isinstance(level, str) and level.strip():
                                 supported_reasoning_levels.append(level.strip())
                     item["supported_reasoning_levels"] = supported_reasoning_levels
+                    changed = True
+                if (
+                    not isinstance(item.get("shell_type"), str)
+                    or not str(item.get("shell_type") or "").strip()
+                ):
+                    item["shell_type"] = _normalize_model_shell_type(item)
                     changed = True
     if not changed:
         return body
@@ -969,6 +983,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "object": "model",
                     "owned_by": "openai",
                     "display_name": model_id,
+                    "supported_reasoning_levels": [],
+                    "shell_type": "shell_command",
                 }
                 for model_id in CHATGPT_ACCOUNT_MODELS
             ]
