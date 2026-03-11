@@ -20,7 +20,6 @@ HARD_AUTH_BLACKLIST_REASONS = {
     "token_invalid",
     "forbidden",
 } | AUTH_INCOMPATIBLE_ERROR_CODES
-SOFT_RESTORABLE_BLACKLIST_REASONS = {"rate_limited_persistent"}
 
 
 def is_auth_incompatible_error(status: int, error_code: Optional[str] = None) -> bool:
@@ -110,42 +109,6 @@ class RoundRobinAuthPool:
             self._restore_stable_state_after_cooldown(now, self._states)
             available = [state for state in self._states if state.available(now)]
 
-            # Envoy pattern: max ejection percent
-            # Ensure we don't eject more than max_ejection_percent of keys
-            total = len(self._states)
-            max_ejected = int(total * max(0, self.max_ejection_percent) / 100)
-            if self.max_ejection_percent < 100:
-                max_ejected = min(max(total - 1, 0), max_ejected)
-            else:
-                max_ejected = total
-            min_available = max(0, total - max_ejected)
-            blacklisted_count = sum(1 for s in self._states if s.blacklist_until > now)
-
-            # If we've hit max ejection, force-restore some keys
-            if total > 1 and len(available) < min_available and blacklisted_count > 0:
-                # Find blacklisted keys with least failures and restore them
-                blacklisted = [
-                    s
-                    for s in self._states
-                    if s.blacklist_until > now
-                    and s.blacklist_reason in SOFT_RESTORABLE_BLACKLIST_REASONS
-                    and s not in available
-                ]
-                blacklisted.sort(key=lambda s: s.hard_failures)
-
-                # Restore the least-failed keys
-                to_restore = min(len(blacklisted), min_available - len(available))
-                for state in blacklisted[:to_restore]:
-                    state.blacklist_until = 0.0
-                    state.blacklist_reason = None
-                    state.cooldown_until = 0.0
-                    state.probation_successes = state.probation_target
-                    state.next_probe_after = 0.0
-                    state.consecutive_errors = 0
-
-                # Refresh available list
-                available = [state for state in self._states if state.available(now)]
-
             if not available:
                 return None
 
@@ -153,8 +116,18 @@ class RoundRobinAuthPool:
             # avoid sending foreground traffic through previously hard-failed keys.
             preferred = [state for state in available if self._is_stable(state)]
             pool = preferred or available
-            state = pool[self._index % len(pool)]
-            self._index = (self._index + 1) % len(pool)
+            pool_ids = {id(candidate) for candidate in pool}
+            state: Optional[AuthState] = None
+            for offset in range(len(self._states)):
+                idx = (self._index + offset) % len(self._states)
+                candidate = self._states[idx]
+                if id(candidate) not in pool_ids:
+                    continue
+                state = candidate
+                self._index = (idx + 1) % len(self._states)
+                break
+            if state is None:
+                return None
             state.used += 1
             if state.probation_successes < state.probation_target:
                 state.next_probe_after = now + PROBATION_PROBE_INTERVAL_SECONDS

@@ -53,12 +53,12 @@ class AuthState:
     def status(self, now: float) -> str:
         if now < self.blacklist_until:
             return "BLACKLIST"
-        if self.probation_successes < self.probation_target:
-            return "PROBATION"
         if now < self.limit_until:
             return "COOLDOWN"
         if now < self.cooldown_until:
             return "COOLDOWN"
+        if self.probation_successes < self.probation_target:
+            return "PROBATION"
         return "OK"
 
     def health(self, now: float) -> Dict[str, Any]:
@@ -78,10 +78,6 @@ class AuthState:
             reason = self.blacklist_reason
             reason_origin = "auth"
             until = self.blacklist_until if self.blacklist_until > now else None
-        elif status == "PROBATION":
-            reason = "probation"
-            reason_origin = "probation"
-            until = self.next_probe_after if self.next_probe_after > now else None
         elif limit_remaining > 0:
             reason = self.limit_reason
             reason_origin = "limit"
@@ -90,6 +86,10 @@ class AuthState:
             reason = "rate_limited" if self.rate_limit_strikes > 0 else "cooldown"
             reason_origin = "runtime"
             until = self.cooldown_until
+        elif status == "PROBATION":
+            reason = "probation"
+            reason_origin = "probation"
+            until = self.next_probe_after if self.next_probe_after > now else None
         return {
             "file": self.record.name,
             "email": self.record.email,
