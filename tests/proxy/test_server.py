@@ -555,6 +555,7 @@ class TestModelsEndpoint:
             "gpt-5.1-codex-mini",
         ]
         assert all(item["display_name"] for item in payload["data"])
+        assert all(item["shell_type"] == "shell_command" for item in payload["data"])
 
     def test_normalizes_upstream_models_payload_for_codex_cli(self):
         """Upstream /models payloads should gain display_name for CLI compatibility."""
@@ -609,6 +610,26 @@ class TestModelsEndpoint:
             "extended",
         ]
         assert normalized["models"][1]["supported_reasoning_levels"] == []
+
+    def test_normalizes_shell_type_for_codex_cli(self):
+        """Upstream /models payloads should expose shell_type."""
+        body = json.dumps(
+            {
+                "models": [
+                    {"slug": "gpt-5-3", "title": "GPT-5.3"},
+                    {"slug": "gpt-5", "title": "GPT-5"},
+                ]
+            }
+        ).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_models_response_body(
+                body, request_path="/models?client_version=0.114.0"
+            ).decode("utf-8")
+        )
+
+        assert normalized["models"][0]["shell_type"] == "shell_command"
+        assert normalized["models"][1]["shell_type"] == "default"
 
 
 class TestMergedHealth:

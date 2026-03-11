@@ -265,6 +265,76 @@ class TestAutoHealProbationCycle:
         finally:
             runtime.shutdown()
 
+    def test_auto_heal_skips_probation_probe_while_limit_cooldown_is_active(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        now = 7000.0
+        monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+        monkeypatch.setattr("cdx_proxy_cli_v2.proxy.server.time.time", lambda: now)
+
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        settings = Settings(
+            auth_dir=str(auth_dir),
+            host="127.0.0.1",
+            port=0,
+            upstream="https://chatgpt.com/backend-api",
+            management_key="test-mgmt",
+            allow_non_loopback=False,
+            trace_max=10,
+            request_timeout=5,
+            compact_timeout=5,
+            auto_heal_interval=1,
+            auto_heal_success_target=2,
+            auto_heal_max_attempts=3,
+            max_ejection_percent=50,
+            consecutive_error_threshold=1,
+        )
+
+        with patch.object(ProxyRuntime, "_start_auto_heal_checker", lambda self: None):
+            runtime = ProxyRuntime(settings=settings)
+
+        (auth_dir / "a.json").write_text(
+            json.dumps(
+                {
+                    "access_token": "tok-a",
+                    "email": "a@example.com",
+                    "tokens": {"account_id": "acc-a"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        runtime.reload_auths()
+
+        try:
+            runtime.auth_pool.mark_result(
+                "a.json", status=401, error_code="token_invalid"
+            )
+            runtime.auth_pool.apply_limit_health(
+                {
+                    "a.json": {
+                        "weekly": {
+                            "status": "COOLDOWN",
+                            "reset_after_seconds": 86400,
+                        }
+                    }
+                }
+            )
+
+            now = now + float(DEFAULT_BLACKLIST_SECONDS) + 1.0
+            snapshot = {
+                item["file"]: item for item in runtime.auth_pool.health_snapshot()
+            }
+            assert snapshot["a.json"]["status"] == "COOLDOWN"
+            assert snapshot["a.json"]["reason_origin"] == "limit"
+
+            runtime._perform_auto_heal_check = MagicMock(return_value=True)
+            runtime._run_auto_heal_cycle(now=now)
+
+            runtime._perform_auto_heal_check.assert_not_called()
+        finally:
+            runtime.shutdown()
+
 
 class TestAutoHealConfiguration:
     """Tests for auto-heal configuration constants."""

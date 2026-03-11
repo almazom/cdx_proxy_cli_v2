@@ -227,6 +227,62 @@ def test_rate_limited_key_rejoins_rotation_after_cooldown(monkeypatch) -> None:
     assert recovered.record.name == first.record.name
 
 
+def test_persistently_rate_limited_keys_are_not_force_restored() -> None:
+    pool = RoundRobinAuthPool(max_ejection_percent=50)
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+            AuthRecord(
+                name="c.json", path="/tmp/c.json", token="tok-c", email="c@example.com"
+            ),
+        ]
+    )
+
+    for auth_name in ["a.json", "b.json", "c.json"]:
+        for _ in range(5):
+            pool.mark_result(auth_name, status=429)
+
+    assert pool.pick() is None
+    snapshot = {item["file"]: item for item in pool.health_snapshot()}
+    assert snapshot["a.json"]["status"] == "BLACKLIST"
+    assert snapshot["b.json"]["status"] == "BLACKLIST"
+    assert snapshot["c.json"]["status"] == "BLACKLIST"
+
+
+def test_round_robin_keeps_next_healthy_auth_in_order(monkeypatch) -> None:
+    now = 5000.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+            AuthRecord(
+                name="c.json", path="/tmp/c.json", token="tok-c", email="c@example.com"
+            ),
+        ]
+    )
+
+    first = pool.pick()
+    assert first is not None
+    assert first.record.name == "a.json"
+
+    pool.mark_result("a.json", status=429, cooldown_seconds=60)
+    second = pool.pick()
+    assert second is not None
+    assert second.record.name == "b.json"
+
+
 def test_probation_recovery_returns_key_to_round_robin(monkeypatch) -> None:
     now = 4500.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
