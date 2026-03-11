@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 DEFAULT_AUTH_DIR = "~/.codex/_auths"
 DEFAULT_ENV_FILE = ".env"
@@ -14,6 +15,15 @@ DEFAULT_UPSTREAM = "https://chatgpt.com/backend-api"
 DEFAULT_TRACE_MAX = 500
 DEFAULT_REQUEST_TIMEOUT = 45
 DEFAULT_COMPACT_TIMEOUT = 120
+DEFAULT_AUTO_RESET_STREAK = 12
+DEFAULT_AUTO_RESET_COOLDOWN = 5 * 60
+
+# Auto-heal blacklist configuration defaults (Envoy-inspired)
+DEFAULT_AUTO_HEAL_INTERVAL = 60  # seconds between health checks
+DEFAULT_AUTO_HEAL_SUCCESS_TARGET = 2  # successes needed to restore
+DEFAULT_AUTO_HEAL_MAX_ATTEMPTS = 3  # failures before penalty
+DEFAULT_MAX_EJECTION_PERCENT = 50  # Max % of keys that can be blacklisted
+DEFAULT_CONSECUTIVE_ERROR_THRESHOLD = 3  # Errors before blacklist
 
 ENV_AUTH_DIR = "CLIPROXY_AUTH_DIR"
 ENV_ENV_FILE = "CLIPROXY_ENV_FILE"
@@ -25,8 +35,19 @@ ENV_ALLOW_NON_LOOPBACK = "CLIPROXY_ALLOW_NON_LOOPBACK"
 ENV_TRACE_MAX = "CLIPROXY_TRACE_MAX"
 ENV_REQUEST_TIMEOUT = "CLIPROXY_REQUEST_TIMEOUT"
 ENV_COMPACT_TIMEOUT = "CLIPROXY_COMPACT_TIMEOUT"
+ENV_AUTO_RESET_ON_SINGLE_KEY = "CLIPROXY_AUTO_RESET_ON_SINGLE_KEY"
+ENV_AUTO_RESET_STREAK = "CLIPROXY_AUTO_RESET_STREAK"
+ENV_AUTO_RESET_COOLDOWN = "CLIPROXY_AUTO_RESET_COOLDOWN"
+# Auto-heal configuration
+ENV_AUTO_HEAL_INTERVAL = "CLIPROXY_AUTO_HEAL_INTERVAL"
+ENV_AUTO_HEAL_SUCCESS_TARGET = "CLIPROXY_AUTO_HEAL_SUCCESS_TARGET"
+ENV_AUTO_HEAL_MAX_ATTEMPTS = "CLIPROXY_AUTO_HEAL_MAX_ATTEMPTS"
+ENV_MAX_EJECTION_PERCENT = "CLIPROXY_MAX_EJECTION_PERCENT"
+ENV_CONSECUTIVE_ERROR_THRESHOLD = "CLIPROXY_CONSECUTIVE_ERROR_THRESHOLD"
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_CHATGPT_BACKEND_HOSTS = {"chatgpt.com", "chat.openai.com"}
+_CHATGPT_BACKEND_PATH = "/backend-api"
 
 
 def resolve_path(path: str) -> Path:
@@ -68,6 +89,18 @@ def parse_positive_int(value: Optional[str], default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def normalize_upstream(value: Optional[str], default: str = DEFAULT_UPSTREAM) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    parsed = urlsplit(raw)
+    host = (parsed.hostname or "").strip().lower()
+    if host in _CHATGPT_BACKEND_HOSTS and (parsed.path or "") in {"", "/"}:
+        parsed = parsed._replace(path=_CHATGPT_BACKEND_PATH)
+        return urlunsplit(parsed)
+    return raw
 
 
 def ensure_private_file(path: Path) -> None:
@@ -138,6 +171,15 @@ class Settings:
     trace_max: int
     request_timeout: int
     compact_timeout: int
+    auto_reset_on_single_key: bool = False
+    auto_reset_streak: int = DEFAULT_AUTO_RESET_STREAK
+    auto_reset_cooldown: int = DEFAULT_AUTO_RESET_COOLDOWN
+    # Auto-heal configuration (Envoy-inspired)
+    auto_heal_interval: int = DEFAULT_AUTO_HEAL_INTERVAL
+    auto_heal_success_target: int = DEFAULT_AUTO_HEAL_SUCCESS_TARGET
+    auto_heal_max_attempts: int = DEFAULT_AUTO_HEAL_MAX_ATTEMPTS
+    max_ejection_percent: int = DEFAULT_MAX_EJECTION_PERCENT
+    consecutive_error_threshold: int = DEFAULT_CONSECUTIVE_ERROR_THRESHOLD
 
     @property
     def base_url(self) -> str:
@@ -165,6 +207,14 @@ def build_settings(
     trace_max: Optional[int] = None,
     request_timeout: Optional[int] = None,
     compact_timeout: Optional[int] = None,
+    auto_reset_on_single_key: Optional[bool] = None,
+    auto_reset_streak: Optional[int] = None,
+    auto_reset_cooldown: Optional[int] = None,
+    auto_heal_interval: Optional[int] = None,
+    auto_heal_success_target: Optional[int] = None,
+    auto_heal_max_attempts: Optional[int] = None,
+    max_ejection_percent: Optional[int] = None,
+    consecutive_error_threshold: Optional[int] = None,
 ) -> Settings:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
@@ -198,7 +248,10 @@ def build_settings(
     if not (0 <= resolved_port <= 65535):
         raise ValueError("port must be between 0 and 65535")
 
-    resolved_upstream = (upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM).strip() or DEFAULT_UPSTREAM
+    resolved_upstream = normalize_upstream(
+        upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM,
+        default=DEFAULT_UPSTREAM,
+    )
     raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
     # Handle both Python None and string "None" from env files
     key_str = str(raw_key).strip()
@@ -233,6 +286,70 @@ def build_settings(
         min_cli_value=1,
     )
 
+    if auto_reset_on_single_key is None:
+        resolved_auto_reset_on_single_key = parse_bool(
+            merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY),
+            default=False,
+        )
+    else:
+        resolved_auto_reset_on_single_key = bool(auto_reset_on_single_key)
+
+    resolved_auto_reset_streak = resolve_numeric_setting(
+        cli_value=auto_reset_streak,
+        env_key=ENV_AUTO_RESET_STREAK,
+        default=DEFAULT_AUTO_RESET_STREAK,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_auto_reset_cooldown = resolve_numeric_setting(
+        cli_value=auto_reset_cooldown,
+        env_key=ENV_AUTO_RESET_COOLDOWN,
+        default=DEFAULT_AUTO_RESET_COOLDOWN,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_auto_heal_interval = resolve_numeric_setting(
+        cli_value=auto_heal_interval,
+        env_key=ENV_AUTO_HEAL_INTERVAL,
+        default=DEFAULT_AUTO_HEAL_INTERVAL,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_auto_heal_success_target = resolve_numeric_setting(
+        cli_value=auto_heal_success_target,
+        env_key=ENV_AUTO_HEAL_SUCCESS_TARGET,
+        default=DEFAULT_AUTO_HEAL_SUCCESS_TARGET,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_auto_heal_max_attempts = resolve_numeric_setting(
+        cli_value=auto_heal_max_attempts,
+        env_key=ENV_AUTO_HEAL_MAX_ATTEMPTS,
+        default=DEFAULT_AUTO_HEAL_MAX_ATTEMPTS,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_max_ejection_percent = resolve_numeric_setting(
+        cli_value=max_ejection_percent,
+        env_key=ENV_MAX_EJECTION_PERCENT,
+        default=DEFAULT_MAX_EJECTION_PERCENT,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
+    resolved_consecutive_error_threshold = resolve_numeric_setting(
+        cli_value=consecutive_error_threshold,
+        env_key=ENV_CONSECUTIVE_ERROR_THRESHOLD,
+        default=DEFAULT_CONSECUTIVE_ERROR_THRESHOLD,
+        env_parser=parse_positive_int,
+        min_cli_value=1,
+    )
+
     return Settings(
         auth_dir=resolved_auth_dir,
         host=resolved_host,
@@ -243,6 +360,14 @@ def build_settings(
         trace_max=resolved_trace_max,
         request_timeout=resolved_request_timeout,
         compact_timeout=resolved_compact_timeout,
+        auto_reset_on_single_key=resolved_auto_reset_on_single_key,
+        auto_reset_streak=resolved_auto_reset_streak,
+        auto_reset_cooldown=resolved_auto_reset_cooldown,
+        auto_heal_interval=resolved_auto_heal_interval,
+        auto_heal_success_target=resolved_auto_heal_success_target,
+        auto_heal_max_attempts=resolved_auto_heal_max_attempts,
+        max_ejection_percent=resolved_max_ejection_percent,
+        consecutive_error_threshold=resolved_consecutive_error_threshold,
     )
 
 

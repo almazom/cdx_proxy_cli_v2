@@ -16,6 +16,10 @@ from cdx_proxy_cli_v2.observability.event_log import tail_lines
 from cdx_proxy_cli_v2.proxy.http_client import fetch_json
 from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTH_DIR,
+    ENV_AUTO_RESET_COOLDOWN,
+    ENV_AUTO_RESET_ON_SINGLE_KEY,
+    ENV_AUTO_RESET_STREAK,
+    ENV_COMPACT_TIMEOUT,
     ENV_HOST,
     ENV_MANAGEMENT_KEY,
     ENV_PORT,
@@ -302,6 +306,10 @@ def _spawn_env(settings: Settings, *, port: int, management_key: str) -> Dict[st
             ENV_MANAGEMENT_KEY: management_key,
             ENV_TRACE_MAX: str(settings.trace_max),
             ENV_REQUEST_TIMEOUT: str(settings.request_timeout),
+            ENV_COMPACT_TIMEOUT: str(settings.compact_timeout),
+            ENV_AUTO_RESET_ON_SINGLE_KEY: "1" if settings.auto_reset_on_single_key else "0",
+            ENV_AUTO_RESET_STREAK: str(settings.auto_reset_streak),
+            ENV_AUTO_RESET_COOLDOWN: str(settings.auto_reset_cooldown),
         }
     )
     return env
@@ -435,6 +443,10 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 "base_url": runtime_settings.base_url,
                 "upstream": runtime_settings.upstream,
                 "request_timeout": runtime_settings.request_timeout,
+                "compact_timeout": runtime_settings.compact_timeout,
+                "auto_reset_on_single_key": runtime_settings.auto_reset_on_single_key,
+                "auto_reset_streak": runtime_settings.auto_reset_streak,
+                "auto_reset_cooldown": runtime_settings.auto_reset_cooldown,
             }
             _save_state(state_file, payload)
             upsert_env_values(
@@ -447,6 +459,10 @@ def start_service(settings: Settings) -> ServiceStartResult:
                     ENV_MANAGEMENT_KEY: key,
                     ENV_TRACE_MAX: str(runtime_settings.trace_max),
                     ENV_REQUEST_TIMEOUT: str(runtime_settings.request_timeout),
+                    ENV_COMPACT_TIMEOUT: str(runtime_settings.compact_timeout),
+                    ENV_AUTO_RESET_ON_SINGLE_KEY: "1" if runtime_settings.auto_reset_on_single_key else "0",
+                    ENV_AUTO_RESET_STREAK: str(runtime_settings.auto_reset_streak),
+                    ENV_AUTO_RESET_COOLDOWN: str(runtime_settings.auto_reset_cooldown),
                 },
             )
             

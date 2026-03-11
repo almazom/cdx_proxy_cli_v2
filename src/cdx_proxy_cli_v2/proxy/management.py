@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import parse_qs, urlsplit
 
 if TYPE_CHECKING:
