@@ -1,33 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+die() {
+  echo "$1" >&2
+  exit "${2:-1}"
+}
+
+resolve_bin() {
+  local candidate="$1"
+  local fallback_name="$2"
+
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  command -v "$fallback_name" || true
+}
+
 script_path="$(readlink -f "$0")"
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
-cdx_bin="${CDX_BIN:-$repo_root/.venv/bin/cdx}"
-if [[ ! -x "$cdx_bin" ]]; then
-  cdx_bin="$(command -v cdx || true)"
-fi
-if [[ -z "$cdx_bin" || ! -x "$cdx_bin" ]]; then
-  echo "codex_wp: cdx not found. Install it or set CDX_BIN." >&2
-  exit 127
-fi
+cdx_bin="$(resolve_bin "${CDX_BIN:-$repo_root/.venv/bin/cdx}" "cdx")"
+[[ -n "$cdx_bin" && -x "$cdx_bin" ]] || \
+  die "codex_wp: cdx not found. Install it or set CDX_BIN." 127
 
-codex_bin="${CODEX_BIN:-$(command -v codex || true)}"
-if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
-  echo "codex_wp: codex not found. Install it or set CODEX_BIN." >&2
-  exit 127
-fi
+codex_bin="$(resolve_bin "${CODEX_BIN:-}" "codex")"
+[[ -n "$codex_bin" && -x "$codex_bin" ]] || \
+  die "codex_wp: codex not found. Install it or set CODEX_BIN." 127
 
 proxy_setup="$("$cdx_bin" proxy --print-env-only)"
 eval "$proxy_setup"
 
 base_url="${CLIPROXY_BASE_URL:-}"
-if [[ -z "$base_url" ]]; then
-  echo "codex_wp: missing CLIPROXY_BASE_URL from proxy setup." >&2
-  exit 1
-fi
+[[ -n "$base_url" ]] || die "codex_wp: missing CLIPROXY_BASE_URL from proxy setup."
 
 config_arg="openai_base_url=\"$base_url\""
 exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
