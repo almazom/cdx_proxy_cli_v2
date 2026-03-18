@@ -186,12 +186,7 @@ def _proxy_eval_hint(settings: Settings) -> str:
 
 
 def _load_codex_auth_identity() -> tuple[Optional[str], Optional[str], Optional[str]]:
-    code_home = str(os.environ.get("CODEX_HOME") or "").strip()
-    if code_home:
-        codex_home = Path(os.path.expanduser(code_home))
-    else:
-        home_dir = Path(os.path.expanduser(str(os.environ.get("HOME") or "~")))
-        codex_home = home_dir / ".codex"
+    codex_home = _get_codex_home()
     for candidate in ("auth.json", ".auth.json"):
         auth_path = codex_home / candidate
         if not auth_path.exists():

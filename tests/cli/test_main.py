@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cdx_proxy_cli_v2.cli.main import (
+    _load_codex_auth_identity,
     _proxy_exports,
     _proxy_shell_setup,
     _state_bucket,
@@ -152,6 +153,31 @@ class TestProxyShellSetup:
         assert "export CLIPROXY_BASE_URL='http://127.0.0.1:43123'" in shell_setup
         assert "codex() {" in shell_setup
         assert '-c "openai_base_url=\\"http://127.0.0.1:43123\\""' in shell_setup
+
+
+class TestLoadCodexAuthIdentity:
+    def test_load_codex_auth_identity_reads_auth_from_codex_home(
+        self, tmp_path: Path, monkeypatch
+    ):
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            json.dumps(
+                {
+                    "access_token": "tok-123",
+                    "email": "test@example.com",
+                    "tokens": {"account_id": "acc-123"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+        token, email, account_id = _load_codex_auth_identity()
+
+        assert token == "tok-123"
+        assert email == "test@example.com"
+        assert account_id == "acc-123"
 
     def test_handle_status_not_running(self, capsys, temp_auth_dir, monkeypatch):
         """Test status when proxy is not running."""
