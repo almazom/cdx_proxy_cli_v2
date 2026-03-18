@@ -53,7 +53,7 @@ cdx stop
 
 - `cdx proxy`: start/reuse service
 - `cdx proxy --print-env`: print shell exports for current terminal (includes status line on stderr)
-- `cdx proxy --print-env-only`: print only `export ...` lines (safe for `eval`)
+- `cdx proxy --print-env-only`: print shell setup for `eval`; exports proxy vars and defines a `codex` wrapper that injects `-c openai_base_url=...`
 - `cdx status`: show running status and runtime details
 - `cdx doctor`: show key rotation state (`whitelist/probation/cooldown/blacklist`)
 - `cdx trace`: open live trace TUI

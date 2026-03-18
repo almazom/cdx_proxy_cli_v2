@@ -20,5 +20,15 @@ if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
   exit 127
 fi
 
-eval "$("$cdx_bin" proxy --print-env-only)"
-exec "$codex_bin" --dangerously-bypass-approvals-and-sandbox "$@"
+proxy_setup="$("$cdx_bin" proxy --print-env-only)"
+eval "$proxy_setup"
+
+base_url="${CLIPROXY_BASE_URL:-}"
+if [[ -z "$base_url" ]]; then
+  echo "codex_wp: missing CLIPROXY_BASE_URL from proxy setup." >&2
+  exit 1
+fi
+
+config_arg="openai_base_url=\"$base_url\""
+exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
+  "$codex_bin" -c "$config_arg" --dangerously-bypass-approvals-and-sandbox "$@"
