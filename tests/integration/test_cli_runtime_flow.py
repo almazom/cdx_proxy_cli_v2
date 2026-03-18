@@ -47,7 +47,7 @@ def _start_proxy(auth_dir: Path, upstream_base_url: str) -> str:
     )
     _assert_ok(start, label="cdx proxy")
     exports = parse_shell_exports(start.stdout)
-    base_url = exports["OPENAI_BASE_URL"]
+    base_url = exports["CLIPROXY_BASE_URL"]
     assert exports["OPENAI_API_BASE"] == base_url
     return base_url
 
@@ -60,11 +60,13 @@ def _stop_proxy(auth_dir: Path, env: dict[str, str]) -> None:
 def test_cli_runtime_flow_covers_status_doctor_all_reset_and_trace(
     tmp_path: Path,
     upstream_server: str,
+    monkeypatch,
 ) -> None:
     auth_dir = tmp_path / "auths"
     auth_dir.mkdir()
     write_auth(auth_dir / "a.json", "tok-a", "a@example.com", "acc-a")
     write_auth(auth_dir / "b.json", "tok-b", "b@example.com", "acc-b")
+    monkeypatch.setenv("CLIPROXY_ENV_FILE", str(tmp_path / "poison.env"))
 
     MockUpstreamHandler.reset()
     MockUpstreamHandler.set_usage_payload(
@@ -86,6 +88,7 @@ def test_cli_runtime_flow_covers_status_doctor_all_reset_and_trace(
     )
 
     base_url = _start_proxy(auth_dir, upstream_server)
+    assert (auth_dir / ".env").exists()
     env = _cli_env(auth_dir, upstream_server)
 
     try:

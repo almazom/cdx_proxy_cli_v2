@@ -6,7 +6,6 @@ import hmac
 import http.client
 import json
 import os
-import select
 import signal
 import threading
 import time
@@ -16,17 +15,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
-from cdx_proxy_cli_v2.auth.store import load_auth_records
 from cdx_proxy_cli_v2.auth.eligibility import (
     fetch_limit_health,
     merge_runtime_with_limits,
     merged_ok,
 )
+from cdx_proxy_cli_v2.auth.store import load_auth_records
 from cdx_proxy_cli_v2.observability.event_log import EventLogger
+from cdx_proxy_cli_v2.observability.limits_history import (
+    append_limits_history,
+    read_latest_limits_snapshot,
+    write_latest_limits_snapshot,
+)
+from cdx_proxy_cli_v2.proxy import models as proxy_models
 from cdx_proxy_cli_v2.proxy.rules import (
     CHATGPT_HOSTS,
     build_forward_headers,
-    get_request_timeout,
     is_loopback_host,
     is_primary_responses_path,
     management_route,
@@ -40,331 +44,41 @@ from cdx_proxy_cli_v2.auth.rotation import (
     is_auth_incompatible_error,
     is_retryable_auth_failure,
 )
+from cdx_proxy_cli_v2.proxy.upstream import (
+    UpstreamAttemptResult,
+    _is_websocket_upgrade_request as is_websocket_upgrade_request,
+    _run_upstream_attempt as run_upstream_attempt,
+    _tunnel_websocket as tunnel_websocket,
+)
 from cdx_proxy_cli_v2.config.settings import Settings, build_settings
 from cdx_proxy_cli_v2.observability.trace_store import TraceStore
 from cdx_proxy_cli_v2.proxy.overload import LocalOverloadGuard
 
 DEFAULT_MAX_REQUEST_BODY = 10 * 1024 * 1024
 DEFAULT_MAX_RESPONSE_BODY = 10 * 1024 * 1024
-CHATGPT_ACCOUNT_MODELS = (
-    "gpt-5.1-codex-max",
-    "gpt-5.1-codex",
-    "gpt-5.1-codex-mini",
-)
-CHATGPT_ACCOUNT_MODEL_FALLBACK = CHATGPT_ACCOUNT_MODELS[0]
-CHATGPT_ACCOUNT_MODEL_REWRITES = {
-    "gpt-5.4": CHATGPT_ACCOUNT_MODEL_FALLBACK,
-    "gpt-5.3-codex": CHATGPT_ACCOUNT_MODEL_FALLBACK,
-    "gpt-5.2-codex": CHATGPT_ACCOUNT_MODEL_FALLBACK,
-}
-CHATGPT_ACCOUNT_INCOMPATIBLE_MARKERS = (
-    "not supported when using codex with a chatgpt account",
-    "not supported for codex with a chatgpt account",
-)
-
-
-def _extract_error_strings(raw_body: bytes) -> list[str]:
-    if not raw_body:
-        return []
-    try:
-        parsed = json.loads(raw_body.decode("utf-8", errors="replace"))
-    except Exception:
-        return []
-    texts: list[str] = []
-    if isinstance(parsed, dict):
-        error = parsed.get("error")
-        if isinstance(error, dict):
-            for key in ("code", "message", "detail", "type"):
-                value = error.get(key)
-                if isinstance(value, str) and value.strip():
-                    texts.append(value.strip())
-        elif isinstance(error, str) and error.strip():
-            texts.append(error.strip())
-        for key in ("code", "message", "detail"):
-            value = parsed.get(key)
-            if isinstance(value, str) and value.strip():
-                texts.append(value.strip())
-    return texts
-
-
-def _extract_error_code(
-    raw_body: bytes, *, status: Optional[int] = None
-) -> Optional[str]:
-    texts = _extract_error_strings(raw_body)
-    if int(status or 0) == 400:
-        haystack = " ".join(texts).lower()
-        if any(marker in haystack for marker in CHATGPT_ACCOUNT_INCOMPATIBLE_MARKERS):
-            return CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE
-    for value in texts:
-        if value and " " not in value:
-            return value
-    return None
-
-
-def _header_value_case_insensitive(headers: Dict[str, str], key: str) -> str:
-    for existing_key, value in headers.items():
-        if existing_key.lower() == key.lower():
-            return str(value)
-    return ""
-
-
-def _normalize_chatgpt_request_body(body: bytes, headers: Dict[str, str]) -> bytes:
-    if not body:
-        return body
-    if "json" not in _header_value_case_insensitive(headers, "Content-Type").lower():
-        return body
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except Exception:
-        return body
-    if not isinstance(payload, dict):
-        return body
-    model = payload.get("model")
-    if not isinstance(model, str):
-        return body
-    rewritten_model = CHATGPT_ACCOUNT_MODEL_REWRITES.get(model.strip())
-    if not rewritten_model:
-        return body
-    payload["model"] = rewritten_model
-    return json.dumps(payload).encode("utf-8")
-
-
-def _is_models_request_path(path: str) -> bool:
-    path_only = urlsplit(path or "").path.rstrip("/")
-    return path_only in {"/models", "/backend-api/models"}
-
-
-def _normalize_model_shell_type(item: dict[str, Any]) -> str:
-    slug = str(item.get("slug") or item.get("id") or "").strip().lower()
-    title = str(item.get("title") or item.get("display_name") or "").strip().lower()
-    if slug == "gpt-5" or title == "gpt-5":
-        return "default"
-    return "shell_command"
-
-
-def _codex_cli_static_model_fields() -> dict[str, Any]:
-    return {
-        "visibility": "list",
-        "supported_in_api": True,
-        "priority": 0,
-        "availability_nux": None,
-        "upgrade": None,
-        "base_instructions": "",
-        "model_messages": {"instructions_template": ""},
-        "supports_reasoning_summaries": True,
-        "default_reasoning_summary": "none",
-        "support_verbosity": True,
-        "default_verbosity": "low",
-        "apply_patch_tool_type": "freeform",
-        "web_search_tool_type": "text_and_image",
-        "truncation_policy": {"mode": "tokens", "limit": 10000},
-        "supports_parallel_tool_calls": True,
-        "supports_image_detail_original": True,
-        "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
-        "prefer_websockets": True,
-    }
-
-
-def _normalize_model_input_modalities(item: dict[str, Any]) -> list[str]:
-    product_features = item.get("product_features")
-    if isinstance(product_features, dict):
-        attachments = product_features.get("attachments")
-        if isinstance(attachments, dict):
-            image_mime_types = attachments.get("image_mime_types")
-            if isinstance(image_mime_types, list) and image_mime_types:
-                return ["text", "image"]
-    return ["text"]
-
-
-def _normalize_model_context_window(item: dict[str, Any]) -> int:
-    for key in ("context_window", "max_tokens"):
-        raw = item.get(key)
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if value > 0:
-            return value
-    return 128000
-
-
-_VALID_REASONING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh"}
-_REASONING_LEVEL_ALIASES = {
-    "standard": "medium",
-    "extended": "high",
-}
-
-
-def _normalize_reasoning_level(value: Any) -> Optional[str]:
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return None
-    if raw in _VALID_REASONING_LEVELS:
-        return raw
-    return _REASONING_LEVEL_ALIASES.get(raw)
-
-
-def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
-    normalized_existing = _normalize_reasoning_level(item.get("default_reasoning_level"))
-    if normalized_existing:
-        return normalized_existing
-    supported = item.get("supported_reasoning_levels")
-    if isinstance(supported, list):
-        for candidate in supported:
-            if isinstance(candidate, str) and candidate.strip():
-                normalized = _normalize_reasoning_level(candidate)
-                if normalized:
-                    return normalized
-            if isinstance(candidate, dict):
-                effort = candidate.get("effort") or candidate.get("thinking_effort")
-                normalized = _normalize_reasoning_level(effort)
-                if normalized:
-                    return normalized
-    if str(item.get("reasoning_type") or "").strip().lower() == "reasoning":
-        return "medium"
-    return "low"
-
-
-def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[dict[str, str]]:
-    existing = item.get("supported_reasoning_levels")
-    normalized: list[dict[str, str]] = []
-    seen_efforts: set[str] = set()
-    if isinstance(existing, list):
-        for candidate in existing:
-            if isinstance(candidate, dict):
-                effort = candidate.get("effort") or candidate.get("thinking_effort")
-                description = candidate.get("description")
-                normalized_effort = _normalize_reasoning_level(effort)
-                if normalized_effort and normalized_effort not in seen_efforts:
-                    normalized.append(
-                        {
-                            "effort": normalized_effort,
-                            "description": str(description or "").strip(),
-                        }
-                    )
-                    seen_efforts.add(normalized_effort)
-            elif isinstance(candidate, str) and candidate.strip():
-                normalized_effort = _normalize_reasoning_level(candidate)
-                if normalized_effort and normalized_effort not in seen_efforts:
-                    normalized.append(
-                        {
-                            "effort": normalized_effort,
-                            "description": candidate.strip(),
-                        }
-                    )
-                    seen_efforts.add(normalized_effort)
-        if normalized:
-            return normalized
-
-    thinking_efforts = item.get("thinking_efforts")
-    if not isinstance(thinking_efforts, list):
-        return []
-    for effort in thinking_efforts:
-        if not isinstance(effort, dict):
-            continue
-        effort_name = effort.get("thinking_effort")
-        normalized_effort = _normalize_reasoning_level(effort_name)
-        if not normalized_effort or normalized_effort in seen_efforts:
-            continue
-        description = (
-            effort.get("description")
-            or effort.get("full_label")
-            or effort.get("mobile_full_label")
-            or effort.get("short_label")
-            or effort_name
-        )
-        normalized.append(
-            {
-                "effort": normalized_effort,
-                "description": str(description).strip(),
-            }
-        )
-        seen_efforts.add(normalized_effort)
-    return normalized
-
-
-def _normalize_codex_cli_model_fields(item: dict[str, Any]) -> bool:
-    changed = False
-
-    def ensure(key: str, value: Any) -> None:
-        nonlocal changed
-        if key in item:
-            return
-        item[key] = value
-        changed = True
-
-    for key, value in _codex_cli_static_model_fields().items():
-        ensure(key, value)
-
-    normalized_default_reasoning_level = _normalize_model_default_reasoning_level(item)
-    if item.get("default_reasoning_level") != normalized_default_reasoning_level:
-        item["default_reasoning_level"] = normalized_default_reasoning_level
-        changed = True
-    if "context_window" not in item:
-        item["context_window"] = _normalize_model_context_window(item)
-        changed = True
-    if "input_modalities" not in item:
-        item["input_modalities"] = _normalize_model_input_modalities(item)
-        changed = True
-
-    return changed
-
-
-def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
-    if not body or not _is_models_request_path(request_path):
-        return body
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except Exception:
-        return body
-    changed = False
-    if isinstance(payload, dict):
-        for key in ("models", "data"):
-            models = payload.get(key)
-            if not isinstance(models, list):
-                continue
-            for item in models:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("display_name"):
-                    pass
-                else:
-                    display_name = (
-                        item.get("title") or item.get("slug") or item.get("id")
-                    )
-                    if isinstance(display_name, str) and display_name.strip():
-                        item["display_name"] = display_name
-                        changed = True
-                normalized_reasoning_levels = (
-                    _normalize_model_supported_reasoning_levels(item)
-                )
-                if item.get("supported_reasoning_levels") != normalized_reasoning_levels:
-                    item["supported_reasoning_levels"] = normalized_reasoning_levels
-                    changed = True
-                if (
-                    not isinstance(item.get("shell_type"), str)
-                    or not str(item.get("shell_type") or "").strip()
-                ):
-                    item["shell_type"] = _normalize_model_shell_type(item)
-                    changed = True
-                if _normalize_codex_cli_model_fields(item):
-                    changed = True
-    if not changed:
-        return body
-    return json.dumps(payload).encode("utf-8")
-
+CHATGPT_ACCOUNT_MODEL_FALLBACK = proxy_models.CHATGPT_ACCOUNT_MODEL_FALLBACK
+CHATGPT_ACCOUNT_MODEL_REWRITES = proxy_models.CHATGPT_ACCOUNT_MODEL_REWRITES
+CHATGPT_ACCOUNT_MODELS = proxy_models.CHATGPT_ACCOUNT_MODELS
+_codex_cli_static_model_fields = proxy_models._codex_cli_static_model_fields
+_extract_error_code = proxy_models._extract_error_code
+_normalize_chatgpt_request_body = proxy_models._normalize_chatgpt_request_body
+_normalize_models_response_body = proxy_models._normalize_models_response_body
+LIMIT_TRACE_STALE_SECONDS = 5 * 60
+LIMIT_TRACE_ACTIVE_SECONDS = 90
+LIMIT_SAMPLER_ACTIVE_INTERVAL_SECONDS = 5 * 60
+LIMIT_SAMPLER_IDLE_INTERVAL_SECONDS = 15 * 60
 
 @dataclass
-class UpstreamAttemptResult:
-    status: int
-    headers: List[Tuple[str, str]]
+class ProxyRequestContext:
+    scheme: str
+    host: str
+    port: int
+    route: str
+    rewritten_path: str
+    full_path: str
     body: bytes
-    error_message: Optional[str] = None
-    error_code: Optional[str] = None
-    stream_response: Optional[http.client.HTTPResponse] = None
-    stream_connection: Optional[http.client.HTTPConnection] = None
-    websocket_upgrade: bool = False
+    base_headers: Dict[str, str]
+    client_ip: Optional[str]
 
 
 @dataclass
@@ -392,6 +106,24 @@ class ProxyRuntime:
         default_factory=dict, init=False, repr=False
     )
     _limit_health_cache_at: float = field(default=0.0, init=False, repr=False)
+    _limit_health_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    _limit_sampler_thread: Optional[threading.Thread] = field(
+        default=None, init=False, repr=False
+    )
+    _limit_sampler_stop: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    _limit_sampler_wakeup: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    _latest_limits_snapshot: Dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _latest_limits_fetched_at: float = field(default=0.0, init=False, repr=False)
+    _latest_limits_error: Optional[str] = field(default=None, init=False, repr=False)
+    _last_trace_poll_at: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.trace_store = TraceStore(max_size=self.settings.trace_max)
@@ -415,32 +147,191 @@ class ProxyRuntime:
             max_ejection_percent=self.settings.max_ejection_percent,
             consecutive_error_threshold=self.settings.consecutive_error_threshold,
         )
+        self._load_persisted_limits_snapshot()
         # Start background auto-heal checker
         self._start_auto_heal_checker()
+        self._start_limit_sampler()
+
+    def _load_persisted_limits_snapshot(self) -> None:
+        snapshot = read_latest_limits_snapshot(self.settings.auth_dir)
+        if not snapshot:
+            return
+        self._latest_limits_snapshot = snapshot
+        fetched_at = snapshot.get("fetched_at")
+        if isinstance(fetched_at, (int, float)):
+            self._latest_limits_fetched_at = float(fetched_at)
+        error = snapshot.get("error")
+        if isinstance(error, str) and error.strip():
+            self._latest_limits_error = error.strip()
+
+    def _trace_recently_polled(self, *, now: Optional[float] = None) -> bool:
+        now_ts = float(now if now is not None else time.time())
+        return (now_ts - self._last_trace_poll_at) < LIMIT_TRACE_ACTIVE_SECONDS
+
+    def _limit_sampler_interval_seconds(self, *, now: Optional[float] = None) -> int:
+        if self._trace_recently_polled(now=now):
+            return LIMIT_SAMPLER_ACTIVE_INTERVAL_SECONDS
+        return LIMIT_SAMPLER_IDLE_INTERVAL_SECONDS
+
+    def _limits_snapshot_stale(self, *, now: Optional[float] = None) -> bool:
+        now_ts = float(now if now is not None else time.time())
+        if self._latest_limits_fetched_at <= 0:
+            return True
+        return (now_ts - self._latest_limits_fetched_at) >= LIMIT_TRACE_STALE_SECONDS
+
+    @staticmethod
+    def _limits_snapshot_accounts_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        accounts = payload.get("accounts")
+        if not isinstance(accounts, list):
+            return []
+        return [dict(item) for item in accounts if isinstance(item, dict)]
+
+    def _build_limits_snapshot(
+        self,
+        *,
+        error: Optional[str] = None,
+        fetched_at: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        snapshot_fetched_at = (
+            float(fetched_at)
+            if isinstance(fetched_at, (int, float)) and float(fetched_at) > 0
+            else self._latest_limits_fetched_at
+        )
+        if self._limit_health_cache:
+            accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+        elif snapshot_fetched_at > 0 and self._latest_limits_snapshot:
+            accounts = self._limits_snapshot_accounts_from_payload(
+                self._latest_limits_snapshot
+            )
+        else:
+            accounts = self.auth_pool.health_snapshot()
+        stale = True
+        if snapshot_fetched_at > 0:
+            stale = (time.time() - snapshot_fetched_at) >= LIMIT_TRACE_STALE_SECONDS
+        next_pick = self.auth_pool.preview_next_pick() or {}
+        payload: Dict[str, Any] = {
+            "fetched_at": snapshot_fetched_at or None,
+            "stale": stale,
+            "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
+            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
+            "accounts": accounts,
+        }
+        return payload
+
+    def _store_limits_snapshot(
+        self,
+        *,
+        error: Optional[str] = None,
+        fetched_at: Optional[float] = None,
+        append_history: bool = False,
+    ) -> Dict[str, Any]:
+        payload = self._build_limits_snapshot(error=error, fetched_at=fetched_at)
+        self._latest_limits_snapshot = payload
+        if isinstance(payload.get("fetched_at"), (int, float)):
+            self._latest_limits_fetched_at = float(payload["fetched_at"])
+        self._latest_limits_error = payload.get("error")
+        write_latest_limits_snapshot(self.settings.auth_dir, payload)
+        if append_history and payload.get("fetched_at"):
+            append_limits_history(self.settings.auth_dir, payload)
+        return payload
 
     def _refresh_limit_health(
-        self, *, force: bool = False
+        self, *, force: bool = False, persist_snapshot: bool = True
     ) -> Dict[str, Dict[str, Any]]:
-        now = time.time()
-        before_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
-        if (
-            not force
-            and self._limit_health_cache
-            and (now - self._limit_health_cache_at) < 60.0
-        ):
+        with self._limit_health_lock:
+            now = time.time()
+            before_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+            if (
+                not force
+                and self._limit_health_cache
+                and (now - self._limit_health_cache_at) < 60.0
+            ):
+                if persist_snapshot and not self._latest_limits_snapshot:
+                    self._store_limits_snapshot(
+                        error=self._latest_limits_error,
+                        fetched_at=self._limit_health_cache_at,
+                    )
+                return self._limit_health_cache
+
+            fetch_error: Optional[str] = None
+            fetched = False
+            try:
+                usage_base_url = (
+                    str(os.environ.get("CLIPROXY_USAGE_BASE_URL") or "").strip()
+                    or self.settings.upstream
+                )
+                self._limit_health_cache = fetch_limit_health(
+                    self.settings.auth_dir,
+                    base_url=usage_base_url,
+                    min_remaining_percent=self.settings.limit_min_remaining_percent,
+                )
+                self._limit_health_cache_at = now
+                fetched = True
+            except Exception as exc:
+                fetch_error = str(exc)
+
+            self.auth_pool.apply_limit_health(
+                self._limit_health_cache,
+                min_remaining_percent=self.settings.limit_min_remaining_percent,
+            )
+            after_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+            self._emit_auth_transitions(
+                before_accounts=before_accounts, after_accounts=after_accounts
+            )
+            if persist_snapshot:
+                self._store_limits_snapshot(
+                    error=fetch_error,
+                    fetched_at=self._limit_health_cache_at if fetched else None,
+                    append_history=fetched,
+                )
             return self._limit_health_cache
-        try:
-            self._limit_health_cache = fetch_limit_health(self.settings.auth_dir)
-            self._limit_health_cache_at = now
-        except Exception:
-            # Keep last known limit view on fetch errors; runtime auth health still works.
-            pass
-        self.auth_pool.apply_limit_health(self._limit_health_cache)
-        after_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
-        self._emit_auth_transitions(
-            before_accounts=before_accounts, after_accounts=after_accounts
+
+    def _start_limit_sampler(self) -> None:
+        self._limit_sampler_stop.clear()
+        self._limit_sampler_wakeup.clear()
+        self._limit_sampler_thread = threading.Thread(
+            target=self._limit_sampler_loop,
+            daemon=True,
+            name="limit-sampler",
         )
-        return self._limit_health_cache
+        self._limit_sampler_thread.start()
+
+    def _limit_sampler_loop(self) -> None:
+        while not self._limit_sampler_stop.is_set():
+            wait_seconds = self._limit_sampler_interval_seconds()
+            woke = self._limit_sampler_wakeup.wait(timeout=max(1, wait_seconds))
+            if woke:
+                self._limit_sampler_wakeup.clear()
+            if self._limit_sampler_stop.is_set():
+                break
+            try:
+                self._refresh_limit_health(force=True, persist_snapshot=True)
+            except Exception:
+                pass
+
+    def _mark_trace_poll(self) -> None:
+        self._last_trace_poll_at = time.time()
+        self._limit_sampler_wakeup.set()
+
+    def limits_snapshot(self, *, force_refresh_stale: bool = False) -> Dict[str, Any]:
+        self._mark_trace_poll()
+        if force_refresh_stale and self._limits_snapshot_stale():
+            self._refresh_limit_health(force=True, persist_snapshot=True)
+        if not self._latest_limits_snapshot:
+            with self._limit_health_lock:
+                if not self._latest_limits_snapshot:
+                    return self._store_limits_snapshot(
+                        error=self._latest_limits_error,
+                        fetched_at=self._limit_health_cache_at,
+                    )
+        return dict(self._latest_limits_snapshot)
+
+    def trace_payload(self, *, limit: int) -> Dict[str, Any]:
+        return {
+            "events": self.trace_events(limit=limit),
+            "limits": self.limits_snapshot(force_refresh_stale=True),
+        }
 
     def _start_auto_heal_checker(self) -> None:
         """Start background thread for health checking blacklisted keys."""
@@ -770,8 +661,12 @@ class ProxyRuntime:
         active_limit_health = (
             self._limit_health_cache if limit_health is None else limit_health
         )
+        limit_snapshot_known = bool(active_limit_health)
         return merge_runtime_with_limits(
-            self.auth_pool.health_snapshot(), active_limit_health
+            self.auth_pool.health_snapshot(),
+            active_limit_health,
+            limit_snapshot_known=limit_snapshot_known,
+            min_remaining_percent=self.settings.limit_min_remaining_percent,
         )
 
     @staticmethod
@@ -826,8 +721,14 @@ class ProxyRuntime:
                 event = "auth.ejected"
                 level = "WARN"
                 self._increment_metric("auth_ejections_total")
-            elif after_status == "COOLDOWN" and after_reason_origin == "limit":
-                if before_status != "COOLDOWN" or before_reason_origin != "limit":
+            elif after_status == "COOLDOWN" and after_reason_origin in {
+                "limit",
+                "limit_guardrail",
+            }:
+                if before_status != "COOLDOWN" or before_reason_origin not in {
+                    "limit",
+                    "limit_guardrail",
+                }:
                     event = "auth.limit_blocked"
             elif after_status == "COOLDOWN" and before_status != "COOLDOWN":
                 event = "auth.cooldown"
@@ -886,6 +787,10 @@ class ProxyRuntime:
 
     def shutdown(self) -> None:
         """Shutdown runtime and stop background threads."""
+        self._limit_sampler_stop.set()
+        self._limit_sampler_wakeup.set()
+        if self._limit_sampler_thread:
+            self._limit_sampler_thread.join(timeout=2.0)
         self._auto_heal_stop.set()
         if self._auto_heal_thread:
             self._auto_heal_thread.join(timeout=2.0)
@@ -898,7 +803,7 @@ class ProxyRuntime:
     def health_snapshot(self, *, refresh: bool = False) -> Dict[str, Any]:
         if refresh:
             self.reload_auths()
-        self._refresh_limit_health(force=refresh)
+        self._refresh_limit_health(force=refresh, persist_snapshot=refresh)
         accounts = self._merged_accounts(limit_health=self._limit_health_cache)
         return {
             "ok": merged_ok(accounts),
@@ -922,11 +827,16 @@ class ProxyRuntime:
             "trace_max": self.trace_store.max_size,
             "request_timeout": self.settings.request_timeout,
             "compact_timeout": self.settings.compact_timeout,
+            "limit_min_remaining_percent": self.settings.limit_min_remaining_percent,
             "max_in_flight_requests": self.settings.max_in_flight_requests,
             "max_pending_requests": self.settings.max_pending_requests,
             "auto_reset_on_single_key": self.settings.auto_reset_on_single_key,
             "auto_reset_streak": self.settings.auto_reset_streak,
             "auto_reset_cooldown": self.settings.auto_reset_cooldown,
+            "limit_sampler_interval_seconds": self._limit_sampler_interval_seconds(),
+            "limit_sampler_trace_active": self._trace_recently_polled(),
+            "limits_fetched_at": self._latest_limits_fetched_at or None,
+            "limits_stale": self._limits_snapshot_stale(),
             "pid": os.getpid(),
             "event_log_file": str(self.logger.path),
             "metrics": self.metrics_snapshot(),
@@ -1053,16 +963,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_websocket_upgrade_request(headers: Dict[str, str]) -> bool:
-        upgrade = _header_value_case_insensitive(headers, "Upgrade").strip().lower()
-        connection = (
-            _header_value_case_insensitive(headers, "Connection").strip().lower()
-        )
-        if upgrade != "websocket":
-            return False
-        connection_tokens = {
-            token.strip() for token in connection.split(",") if token.strip()
-        }
-        return "upgrade" in connection_tokens
+        return is_websocket_upgrade_request(headers)
 
     def _tunnel_websocket(
         self,
@@ -1070,49 +971,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         upstream_connection: http.client.HTTPConnection,
         upstream_response: http.client.HTTPResponse,
     ) -> None:
-        upstream_socket = getattr(upstream_connection, "sock", None)
-        client_socket = self.connection
-        if upstream_socket is None:
-            raise RuntimeError("upstream websocket socket unavailable")
-
         self.close_connection = True
-        try:
-            self.wfile.flush()
-        except Exception:
-            pass
-
-        sockets = [client_socket, upstream_socket]
-        try:
-            for sock in sockets:
-                try:
-                    sock.settimeout(None)
-                except Exception:
-                    pass
-
-            while True:
-                readable, _, exceptional = select.select(sockets, [], sockets)
-                if exceptional:
-                    break
-                for source in readable:
-                    try:
-                        chunk = source.recv(65536)
-                    except OSError:
-                        chunk = b""
-                    if not chunk:
-                        return
-                    target = (
-                        upstream_socket if source is client_socket else client_socket
-                    )
-                    target.sendall(chunk)
-        finally:
-            try:
-                upstream_response.close()
-            except Exception:
-                pass
-            try:
-                upstream_connection.close()
-            except Exception:
-                pass
+        tunnel_websocket(
+            client_socket=self.connection,
+            client_writer=self.wfile,
+            upstream_connection=upstream_connection,
+            upstream_response=upstream_response,
+        )
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle_request()
@@ -1153,7 +1018,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "default_reasoning_level": "low",
                     "context_window": 128000,
                     "input_modalities": ["text"],
-                    **_codex_cli_static_model_fields(),
+                    **_codex_cli_static_model_fields(model_id),
                 }
                 for model_id in CHATGPT_ACCOUNT_MODELS
             ]
@@ -1242,7 +1107,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         if route == "trace":
             limit = self._int_query_value(params, "limit", default=0)
-            self._send_json(200, {"events": runtime.trace_events(limit=limit)})
+            self._send_json(200, runtime.trace_payload(limit=limit))
             return
         if route == "health":
             refresh = self._first_query_value(params, "refresh") == "1"
@@ -1307,6 +1172,67 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"error": "unknown management route"})
 
+    def _build_proxy_request_context(
+        self, runtime: ProxyRuntime
+    ) -> Optional[ProxyRequestContext]:
+        upstream = urlsplit(runtime.settings.upstream)
+        scheme = upstream.scheme or "https"
+        host = upstream.hostname
+        if not host:
+            self._send_json(500, {"error": "invalid upstream host"})
+            return None
+        port = upstream.port or (443 if scheme == "https" else 80)
+        base_path = upstream.path.rstrip("/")
+
+        incoming_path = self.path if self.path.startswith("/") else f"/{self.path}"
+        route = trace_route(incoming_path)
+        rewritten_path = rewrite_request_path(
+            req_path=incoming_path,
+            upstream_host=host,
+            upstream_base_path=base_path,
+        )
+        if base_path and rewritten_path.startswith(f"{base_path}/"):
+            full_path = rewritten_path
+        else:
+            full_path = f"{base_path}{rewritten_path}" if base_path else rewritten_path
+
+        chatgpt_backend = (
+            host.lower() in CHATGPT_HOSTS
+            and base_path.rstrip("/") == "/backend-api"
+        )
+        chatgpt_responses_mode = bool(
+            chatgpt_backend and is_primary_responses_path(rewritten_path)
+        )
+        websocket_upgrade_request = (
+            self.command.upper() == "GET"
+            and self._is_websocket_upgrade_request(dict(self.headers))
+        )
+
+        body = self._read_body()
+        if body is None:
+            return None
+        if chatgpt_responses_mode:
+            body = _normalize_chatgpt_request_body(body, dict(self.headers))
+
+        base_headers = build_forward_headers(
+            dict(self.headers),
+            chatgpt_backend=chatgpt_backend,
+            chatgpt_responses_mode=chatgpt_responses_mode,
+            websocket_upgrade=websocket_upgrade_request,
+        )
+        client_ip = self.client_address[0] if self.client_address else None
+        return ProxyRequestContext(
+            scheme=scheme,
+            host=host,
+            port=port,
+            route=route,
+            rewritten_path=rewritten_path,
+            full_path=full_path,
+            body=body,
+            base_headers=base_headers,
+            client_ip=client_ip,
+        )
+
     def _run_upstream_attempt(
         self,
         *,
@@ -1320,84 +1246,83 @@ class ProxyHandler(BaseHTTPRequestHandler):
         request_timeout: int,
         compact_timeout: int,
     ) -> UpstreamAttemptResult:
-        connection: Optional[http.client.HTTPConnection] = None
-        try:
-            conn_cls = (
-                http.client.HTTPSConnection
-                if scheme == "https"
-                else http.client.HTTPConnection
-            )
-            timeout = get_request_timeout(
-                rewritten_path,
-                default=request_timeout,
-                compact=compact_timeout,
-            )
-            connection = conn_cls(host, port, timeout=timeout)
-            # Force HTTP/1.1 for proper keep-alive and streaming behavior
-            connection._http_vsn = 11  # type: ignore[attr-defined]
-            connection._http_vsn_str = "HTTP/1.1"  # type: ignore[attr-defined]
-            connection.request(self.command, full_path, body=body, headers=headers)
-            response = connection.getresponse()
-            status = response.status
-            response_headers = response.getheaders()
-            upgrade_header = str(response.getheader("Upgrade") or "")
-            if status == 101 and upgrade_header.lower() == "websocket":
-                stream_connection = connection
-                connection = None
-                return UpstreamAttemptResult(
-                    status=status,
-                    headers=response_headers,
-                    body=b"",
-                    stream_response=response,
-                    stream_connection=stream_connection,
-                    websocket_upgrade=True,
-                )
-            content_type = str(response.getheader("Content-Type") or "")
-            if "text/event-stream" in content_type.lower():
-                stream_connection = connection
-                connection = None
-                return UpstreamAttemptResult(
-                    status=status,
-                    headers=response_headers,
-                    body=b"",
-                    stream_response=response,
-                    stream_connection=stream_connection,
-                )
+        return run_upstream_attempt(
+            command=self.command,
+            scheme=scheme,
+            host=host,
+            port=port,
+            rewritten_path=rewritten_path,
+            full_path=full_path,
+            body=body,
+            headers=headers,
+            request_timeout=request_timeout,
+            compact_timeout=compact_timeout,
+            max_response_body=DEFAULT_MAX_RESPONSE_BODY,
+        )
 
-            data = response.read(DEFAULT_MAX_RESPONSE_BODY + 1)
-            if len(data) > DEFAULT_MAX_RESPONSE_BODY:
-                return UpstreamAttemptResult(
-                    status=413,
-                    headers=[("Content-Type", "application/json")],
-                    body=json.dumps({"error": "response body too large"}).encode(
-                        "utf-8"
-                    ),
-                )
-            data = _normalize_models_response_body(data, request_path=rewritten_path)
+    def _send_upstream_result(
+        self,
+        *,
+        runtime: ProxyRuntime,
+        auth_state: Any,
+        result: UpstreamAttemptResult,
+    ) -> None:
+        self.send_response(result.status)
+        for key, value in result.headers:
+            normalized = key.lower()
+            if normalized in {"transfer-encoding", "content-length"}:
+                continue
+            if normalized == "connection" and not result.websocket_upgrade:
+                continue
+            self.send_header(key, value)
 
-            return UpstreamAttemptResult(
-                status=status,
-                headers=response_headers,
-                body=data,
-                error_code=_extract_error_code(data, status=status),
+        if (
+            result.websocket_upgrade
+            and result.stream_response is not None
+            and result.stream_connection is not None
+        ):
+            self.end_headers()
+            self._tunnel_websocket(
+                upstream_connection=result.stream_connection,
+                upstream_response=result.stream_response,
             )
-        except Exception as exc:  # noqa: BLE001
-            error_message = str(exc)
-            return UpstreamAttemptResult(
-                status=502,
-                headers=[("Content-Type", "application/json")],
-                body=json.dumps(
-                    {"error": "upstream request failed", "detail": error_message}
-                ).encode("utf-8"),
-                error_message=error_message,
-                error_code="upstream_request_failed",
-            )
-        finally:
-            if connection is not None:
+            return
+
+        if result.stream_response is not None:
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            try:
+                while True:
+                    chunk = result.stream_response.read(8192)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            finally:
                 try:
-                    connection.close()
+                    result.stream_response.close()
                 except Exception:
                     pass
+                if result.stream_connection is not None:
+                    try:
+                        result.stream_connection.close()
+                    except Exception:
+                        pass
+            return
+
+        if result.status == 503 and not auth_state:
+            stats = runtime.auth_pool.stats()
+            runtime._notify_user(
+                level="ERROR",
+                event="auth.pool_exhausted",
+                message=f"All auth keys unavailable (ok={stats['ok']}, cooldown={stats['cooldown']}, blacklist={stats['blacklist']})",
+                stats=stats,
+            )
+
+        self.send_header("Content-Length", str(len(result.body)))
+        self.end_headers()
+        if result.body:
+            self.wfile.write(result.body)
 
     def _proxy_request(self) -> None:
         runtime = self.server.runtime
@@ -1415,67 +1340,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
 
             runtime._refresh_limit_health()
-            upstream = urlsplit(runtime.settings.upstream)
-            scheme = upstream.scheme or "https"
-            host = upstream.hostname
-            if not host:
-                self._send_json(500, {"error": "invalid upstream host"})
+            context = self._build_proxy_request_context(runtime)
+            if context is None:
                 return
-            port = upstream.port or (443 if scheme == "https" else 80)
-            base_path = upstream.path.rstrip("/")
-
-            incoming_path = self.path if self.path.startswith("/") else f"/{self.path}"
-            route = trace_route(incoming_path)
-            rewritten_path = rewrite_request_path(
-                req_path=incoming_path,
-                upstream_host=host,
-                upstream_base_path=base_path,
-            )
-            if base_path and rewritten_path.startswith(f"{base_path}/"):
-                full_path = rewritten_path
-            else:
-                full_path = (
-                    f"{base_path}{rewritten_path}" if base_path else rewritten_path
-                )
-
-            chatgpt_backend = (
-                host.lower() in CHATGPT_HOSTS
-                and base_path.rstrip("/") == "/backend-api"
-            )
-            chatgpt_responses_mode = bool(
-                chatgpt_backend and is_primary_responses_path(rewritten_path)
-            )
-            websocket_upgrade_request = (
-                self.command.upper() == "GET"
-                and self._is_websocket_upgrade_request(dict(self.headers))
-            )
-
-            body = self._read_body()
-            if body is None:
-                return
-            if chatgpt_responses_mode:
-                body = _normalize_chatgpt_request_body(body, dict(self.headers))
-
-            base_headers = build_forward_headers(
-                dict(self.headers),
-                chatgpt_backend=chatgpt_backend,
-                chatgpt_responses_mode=chatgpt_responses_mode,
-                websocket_upgrade=websocket_upgrade_request,
-            )
 
             max_attempts = max(1, runtime.auth_pool.count())
             compact_timeout = runtime.settings.compact_timeout
             request_id = uuid.uuid4().hex[:12]
-            client_ip = self.client_address[0] if self.client_address else None
 
-            final_status = 503
-            final_headers: List[Tuple[str, str]] = [
-                ("Content-Type", "application/json")
-            ]
-            final_body = json.dumps({"error": "no auths available"}).encode("utf-8")
-            stream_response: Optional[http.client.HTTPResponse] = None
-            stream_connection: Optional[http.client.HTTPConnection] = None
-            final_websocket_upgrade = False
+            final_result = UpstreamAttemptResult(
+                status=503,
+                headers=[("Content-Type", "application/json")],
+                body=json.dumps({"error": "no auths available"}).encode("utf-8"),
+            )
             auth_state = None
 
             attempt = 0
@@ -1484,121 +1361,67 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if not auth_state:
                     break
 
-                headers = dict(base_headers)
+                headers = dict(context.base_headers)
                 set_header_case_insensitive(
                     headers, "Authorization", f"Bearer {auth_state.record.token}"
                 )
-                if chatgpt_backend and auth_state.record.account_id:
+                if context.host.lower() in CHATGPT_HOSTS and auth_state.record.account_id:
                     set_header_case_insensitive(
                         headers, "chatgpt-account-id", str(auth_state.record.account_id)
                     )
 
                 start = time.time()
                 attempt_result = self._run_upstream_attempt(
-                    scheme=scheme,
-                    host=host,
-                    port=port,
-                    rewritten_path=rewritten_path,
-                    full_path=full_path,
-                    body=body,
+                    scheme=context.scheme,
+                    host=context.host,
+                    port=context.port,
+                    rewritten_path=context.rewritten_path,
+                    full_path=context.full_path,
+                    body=context.body,
                     headers=headers,
                     request_timeout=runtime.settings.request_timeout,
                     compact_timeout=compact_timeout,
                 )
                 latency_ms = int((time.time() - start) * 1000)
 
-                final_status = attempt_result.status
-                final_headers = attempt_result.headers
-                final_body = attempt_result.body
-                stream_response = attempt_result.stream_response
-                stream_connection = attempt_result.stream_connection
-                final_websocket_upgrade = attempt_result.websocket_upgrade
+                final_result = attempt_result
 
                 runtime.record_attempt(
                     request_id=request_id,
                     method=self.command,
                     path=self.path,
-                    route=route,
-                    status=final_status,
+                    route=context.route,
+                    status=attempt_result.status,
                     latency_ms=latency_ms,
                     auth_name=auth_state.record.name,
                     auth_email=auth_state.record.email,
                     attempt=attempt + 1,
-                    client_ip=client_ip,
+                    client_ip=context.client_ip,
                     error=attempt_result.error_message,
                 )
                 runtime.apply_auth_result(
                     auth_state.record.name,
-                    status=final_status,
+                    status=attempt_result.status,
                     error_code=attempt_result.error_code,
                 )
                 runtime.maybe_auto_reset_single_key_stall()
 
-                if is_retryable_auth_failure(final_status, attempt_result.error_code):
+                if is_retryable_auth_failure(
+                    attempt_result.status, attempt_result.error_code
+                ):
                     attempt += 1
                     if attempt < max_attempts:
                         continue
                 break
 
-            if auth_state is not None and final_status >= 500:
+            if auth_state is not None and final_result.status >= 500:
                 runtime._increment_metric("upstream_errors_total")
 
-            self.send_response(final_status)
-            for key, value in final_headers:
-                normalized = key.lower()
-                if normalized in {"transfer-encoding", "content-length"}:
-                    continue
-                if normalized == "connection" and not final_websocket_upgrade:
-                    continue
-                self.send_header(key, value)
-
-            if (
-                final_websocket_upgrade
-                and stream_response is not None
-                and stream_connection is not None
-            ):
-                self.end_headers()
-                self._tunnel_websocket(
-                    upstream_connection=stream_connection,
-                    upstream_response=stream_response,
-                )
-                return
-
-            if stream_response is not None:
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                try:
-                    while True:
-                        chunk = stream_response.read(8192)
-                        if not chunk:
-                            break
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-                finally:
-                    try:
-                        stream_response.close()
-                    except Exception:
-                        pass
-                    if stream_connection is not None:
-                        try:
-                            stream_connection.close()
-                        except Exception:
-                            pass
-                return
-
-            if final_status == 503 and not auth_state:
-                stats = runtime.auth_pool.stats()
-                runtime._notify_user(
-                    level="ERROR",
-                    event="auth.pool_exhausted",
-                    message=f"All auth keys unavailable (ok={stats['ok']}, cooldown={stats['cooldown']}, blacklist={stats['blacklist']})",
-                    stats=stats,
-                )
-
-            self.send_header("Content-Length", str(len(final_body)))
-            self.end_headers()
-            if final_body:
-                self.wfile.write(final_body)
+            self._send_upstream_result(
+                runtime=runtime,
+                auth_state=auth_state,
+                result=final_result,
+            )
 
 
 def run_proxy_server(settings: Settings) -> None:

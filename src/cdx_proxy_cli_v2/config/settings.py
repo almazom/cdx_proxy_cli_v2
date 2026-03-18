@@ -15,6 +15,7 @@ DEFAULT_UPSTREAM = "https://chatgpt.com/backend-api"
 DEFAULT_TRACE_MAX = 500
 DEFAULT_REQUEST_TIMEOUT = 45
 DEFAULT_COMPACT_TIMEOUT = 120
+DEFAULT_LIMIT_MIN_REMAINING_PERCENT = 11.0
 DEFAULT_AUTO_RESET_STREAK = 12
 DEFAULT_AUTO_RESET_COOLDOWN = 5 * 60
 DEFAULT_MAX_IN_FLIGHT_REQUESTS = 0
@@ -37,6 +38,7 @@ ENV_ALLOW_NON_LOOPBACK = "CLIPROXY_ALLOW_NON_LOOPBACK"
 ENV_TRACE_MAX = "CLIPROXY_TRACE_MAX"
 ENV_REQUEST_TIMEOUT = "CLIPROXY_REQUEST_TIMEOUT"
 ENV_COMPACT_TIMEOUT = "CLIPROXY_COMPACT_TIMEOUT"
+ENV_LIMIT_MIN_REMAINING_PERCENT = "CLIPROXY_LIMIT_MIN_REMAINING_PERCENT"
 ENV_MAX_IN_FLIGHT_REQUESTS = "CLIPROXY_MAX_IN_FLIGHT_REQUESTS"
 ENV_MAX_PENDING_REQUESTS = "CLIPROXY_MAX_PENDING_REQUESTS"
 ENV_AUTO_RESET_ON_SINGLE_KEY = "CLIPROXY_AUTO_RESET_ON_SINGLE_KEY"
@@ -58,8 +60,8 @@ def resolve_path(path: str) -> Path:
     return Path(os.path.expanduser(path))
 
 
-def env_file_path(auth_dir: str) -> Path:
-    explicit = os.environ.get(ENV_ENV_FILE)
+def env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Path:
+    explicit = str(env_file or "").strip()
     if explicit:
         return resolve_path(explicit)
     return resolve_path(auth_dir) / DEFAULT_ENV_FILE
@@ -93,6 +95,18 @@ def parse_positive_int(value: Optional[str], default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def parse_percentage_float(value: Optional[str], default: float) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    if parsed < 0:
+        return default
+    return min(100.0, parsed)
 
 
 def normalize_upstream(value: Optional[str], default: str = DEFAULT_UPSTREAM) -> str:
@@ -175,6 +189,8 @@ class Settings:
     trace_max: int
     request_timeout: int
     compact_timeout: int
+    limit_min_remaining_percent: float = DEFAULT_LIMIT_MIN_REMAINING_PERCENT
+    env_file: Optional[str] = None
     max_in_flight_requests: int = DEFAULT_MAX_IN_FLIGHT_REQUESTS
     max_pending_requests: int = DEFAULT_MAX_PENDING_REQUESTS
     auto_reset_on_single_key: bool = False
@@ -193,7 +209,7 @@ class Settings:
 
     @property
     def env_path(self) -> Path:
-        return env_file_path(self.auth_dir)
+        return env_file_path(self.auth_dir, self.env_file)
 
     def with_port(self, port: int) -> "Settings":
         return replace(self, port=port)
@@ -213,6 +229,7 @@ def build_settings(
     trace_max: Optional[int] = None,
     request_timeout: Optional[int] = None,
     compact_timeout: Optional[int] = None,
+    limit_min_remaining_percent: Optional[float] = None,
     max_in_flight_requests: Optional[int] = None,
     max_pending_requests: Optional[int] = None,
     auto_reset_on_single_key: Optional[bool] = None,
@@ -226,13 +243,19 @@ def build_settings(
 ) -> Settings:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
-    env_path = env_file_path(str(auth_dir_path))
+    inherited_env_file = None if auth_dir is not None else os.environ.get(ENV_ENV_FILE)
+    env_path = env_file_path(str(auth_dir_path), inherited_env_file)
     file_env = load_env_file(env_path)
     merged = dict(file_env)
     merged.update(os.environ)
 
     resolved_auth_dir = str(
         resolve_path(auth_dir or merged.get(ENV_AUTH_DIR) or initial_auth_dir)
+    )
+    resolved_env_path = (
+        env_file_path(resolved_auth_dir)
+        if auth_dir is not None
+        else env_path
     )
     resolved_host = (
         host or merged.get(ENV_HOST) or DEFAULT_HOST
@@ -301,6 +324,16 @@ def build_settings(
         env_parser=parse_positive_int,
         min_cli_value=1,
     )
+
+    if limit_min_remaining_percent is None:
+        resolved_limit_min_remaining_percent = parse_percentage_float(
+            merged.get(ENV_LIMIT_MIN_REMAINING_PERCENT),
+            default=DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
+        )
+    else:
+        resolved_limit_min_remaining_percent = min(
+            100.0, max(0.0, float(limit_min_remaining_percent))
+        )
 
     resolved_max_in_flight_requests = (
         DEFAULT_MAX_IN_FLIGHT_REQUESTS
@@ -398,10 +431,12 @@ def build_settings(
         port=resolved_port,
         upstream=resolved_upstream,
         management_key=resolved_key,
+        env_file=str(resolved_env_path),
         allow_non_loopback=resolved_allow_non_loopback,
         trace_max=resolved_trace_max,
         request_timeout=resolved_request_timeout,
         compact_timeout=resolved_compact_timeout,
+        limit_min_remaining_percent=resolved_limit_min_remaining_percent,
         max_in_flight_requests=resolved_max_in_flight_requests,
         max_pending_requests=resolved_max_pending_requests,
         auto_reset_on_single_key=resolved_auto_reset_on_single_key,
@@ -415,13 +450,15 @@ def build_settings(
     )
 
 
-def ensure_management_key(auth_dir: str, current: Optional[str]) -> str:
+def ensure_management_key(
+    auth_dir: str, current: Optional[str], *, env_path: Optional[Path] = None
+) -> str:
     key = str(current or "").strip()
     # Reject empty string and literal "None" (from corrupted env files)
     if key and key.lower() != "none":
         return key
     generated = secrets.token_urlsafe(24)
-    path = env_file_path(auth_dir)
+    path = env_path or env_file_path(auth_dir)
     ensure_env_file(path)
     upsert_env_values(path, {ENV_MANAGEMENT_KEY: generated})
     os.environ.setdefault(ENV_MANAGEMENT_KEY, generated)

@@ -318,7 +318,8 @@ class TestAutoHealProbationCycle:
                             "reset_after_seconds": 86400,
                         }
                     }
-                }
+                },
+                min_remaining_percent=11.0,
             )
 
             now = now + float(DEFAULT_BLACKLIST_SECONDS) + 1.0

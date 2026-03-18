@@ -13,6 +13,10 @@ import pytest
 from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.auth.rotation import RoundRobinAuthPool
 from cdx_proxy_cli_v2.config.settings import Settings
+from cdx_proxy_cli_v2.observability.limits_history import (
+    latest_limits_path,
+    limits_history_path,
+)
 from cdx_proxy_cli_v2.proxy.server import (
     CHATGPT_ACCOUNT_MODEL_FALLBACK,
     CHATGPT_ACCOUNT_MODEL_REWRITES,
@@ -21,6 +25,7 @@ from cdx_proxy_cli_v2.proxy.server import (
     ProxyRuntime,
     UpstreamAttemptResult,
     _extract_error_code,
+    _normalize_chatgpt_request_body,
     _normalize_models_response_body,
 )
 
@@ -609,6 +614,32 @@ class TestModelsEndpoint:
         assert normalized["models"][0]["display_name"] == UPSTREAM_AUTO_MODEL_TITLE
         assert normalized["models"][1]["display_name"] == UPSTREAM_MINI_MODEL_SLUG
 
+    def test_sets_medium_default_verbosity_for_rewritten_models(self):
+        """Models rewritten to ChatGPT-account fallbacks should advertise compatible verbosity."""
+        body = json.dumps(
+            {
+                "models": [
+                    {
+                        "slug": REWRITE_SOURCE_MODEL,
+                        "title": "Rewritten model",
+                    },
+                    {
+                        "slug": UPSTREAM_MINI_MODEL_SLUG,
+                        "title": UPSTREAM_INSTANT_MODEL_TITLE,
+                    },
+                ]
+            }
+        ).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_models_response_body(
+                body, request_path=CLIENT_MODELS_PATH
+            ).decode("utf-8")
+        )
+
+        assert normalized["models"][0]["default_verbosity"] == "medium"
+        assert normalized["models"][1]["default_verbosity"] == "low"
+
     def test_normalizes_supported_reasoning_levels_for_codex_cli(self):
         """Upstream /models payloads should expose supported_reasoning_levels."""
         body = json.dumps(
@@ -710,6 +741,25 @@ class TestModelsEndpoint:
         }
         assert normalized["models"][1]["default_reasoning_level"] == "low"
 
+    def test_rewrites_incompatible_request_verbosity_for_fallback_model(self):
+        """Rewritten ChatGPT-account requests should not forward unsupported verbosity levels."""
+        body = json.dumps(
+            {
+                "model": REWRITE_SOURCE_MODEL,
+                "input": TEST_INPUT_TEXT,
+                "text": {"verbosity": "low"},
+            }
+        ).encode("utf-8")
+
+        normalized = json.loads(
+            _normalize_chatgpt_request_body(
+                body, {"Content-Type": "application/json"}
+            ).decode("utf-8")
+        )
+
+        assert normalized["model"] == CHATGPT_ACCOUNT_MODEL_FALLBACK
+        assert normalized["text"]["verbosity"] == "medium"
+
 
 class TestMergedHealth:
     """Tests for merged runtime + limit health output."""
@@ -738,6 +788,67 @@ class TestMergedHealth:
         assert snapshot["accounts"][0]["reason"] == "limit_weekly"
         assert snapshot["accounts"][0]["reason_origin"] == "limit"
         assert snapshot["accounts"][0]["eligible_now"] is False
+
+    def test_trace_payload_includes_limits_and_persists_snapshot(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        runtime.trace_store.add(
+            {
+                "ts": 100.0,
+                "event": "proxy.request",
+                "path": "/responses",
+                "auth_file": sample_auth_record.name,
+            }
+        )
+
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "email": sample_auth_record.email,
+                    "status": "WARN",
+                    "five_hour": {
+                        "status": "WARN",
+                        "used_percent": 89.5,
+                        "reset_after_seconds": 1800,
+                    },
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 41.0,
+                        "reset_after_seconds": 250000,
+                    },
+                }
+            }
+            payload = runtime.trace_payload(limit=10)
+
+        assert isinstance(payload["events"], list)
+        assert payload["events"][0]["path"] == "/responses"
+        assert payload["limits"]["accounts"][0]["file"] == sample_auth_record.name
+        assert payload["limits"]["accounts"][0]["five_hour"]["used_percent"] == 89.5
+        assert payload["limits"]["fetched_at"] is not None
+        assert latest_limits_path(test_settings.auth_dir).exists()
+
+        history_lines = limits_history_path(test_settings.auth_dir).read_text().splitlines()
+        assert len(history_lines) == 1
+        assert sample_auth_record.token not in latest_limits_path(
+            test_settings.auth_dir
+        ).read_text()
+
+    def test_trace_payload_reports_limit_fetch_error_with_runtime_accounts(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        with patch(
+            "cdx_proxy_cli_v2.proxy.server.fetch_limit_health",
+            side_effect=RuntimeError("boom"),
+        ):
+            payload = runtime.trace_payload(limit=5)
+
+        assert payload["limits"]["error"] == "boom"
+        assert payload["limits"]["stale"] is True
+        assert payload["limits"]["accounts"][0]["file"] == sample_auth_record.name
 
 
 class TestRuntimeTransitionsAndOverload:

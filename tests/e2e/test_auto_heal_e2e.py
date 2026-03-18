@@ -119,8 +119,29 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Handle GET requests (health checks)."""
+        if self.path.startswith("/api/codex/usage") or self.path.startswith("/wham/usage"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "plan_type": "plus",
+                        "rate_limit": {
+                            "limit_reached": False,
+                            "primary_window": {
+                                "limit_window_seconds": 5 * 60 * 60,
+                                "used_percent": 10.0,
+                                "reset_after_seconds": 3600,
+                            },
+                        },
+                    }
+                ).encode()
+            )
+            return
+
         # Health check endpoint
-        if self.path == "/backend-api/models":
+        if self.path in {"/models", "/backend-api/models"}:
             if self.health_check_always_success:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

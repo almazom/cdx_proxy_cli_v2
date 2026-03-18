@@ -174,6 +174,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
     responses: list[Dict[str, object]] = []
     call_count: int = 0
     received_headers: list[Dict[str, str]] = []
+    received_paths: list[str] = []
     usage_payloads: Dict[str, Dict[str, object]] = {}
     default_usage_payload: Dict[str, object] = make_usage_payload()
 
@@ -182,6 +183,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
         cls.responses = []
         cls.call_count = 0
         cls.received_headers = []
+        cls.received_paths = []
         cls.usage_payloads = {}
         cls.default_usage_payload = make_usage_payload()
 
@@ -196,6 +198,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
         MockUpstreamHandler.call_count += 1
         headers = {k: str(v) for k, v in self.headers.items()}
         MockUpstreamHandler.received_headers.append(headers)
+        MockUpstreamHandler.received_paths.append(self.path)
         return headers
 
     def _send_json(self, status: int, data: Dict[str, object]) -> None:

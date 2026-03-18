@@ -11,7 +11,9 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTO_RESET_ON_SINGLE_KEY,
     ENV_AUTO_RESET_STREAK,
     ENV_COMPACT_TIMEOUT,
+    ENV_ENV_FILE,
     ENV_HOST,
+    ENV_LIMIT_MIN_REMAINING_PERCENT,
     ENV_MAX_IN_FLIGHT_REQUESTS,
     ENV_MAX_PENDING_REQUESTS,
     ENV_PORT,
@@ -20,6 +22,7 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_UPSTREAM,
     DEFAULT_AUTO_RESET_COOLDOWN,
     DEFAULT_AUTO_RESET_STREAK,
+    DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
     DEFAULT_UPSTREAM,
     Settings,
     build_settings,
@@ -357,6 +360,28 @@ class TestBuildSettingsPrecedence:
 
         assert settings.upstream == "https://chat.openai.com/backend-api"
 
+    def test_explicit_auth_dir_ignores_inherited_env_file(self, tmp_path: Path, monkeypatch):
+        inherited_env = tmp_path / "inherited.env"
+        inherited_env.write_text("CLIPROXY_MANAGEMENT_KEY=inherited-key\n", encoding="utf-8")
+        monkeypatch.setenv(ENV_ENV_FILE, str(inherited_env))
+
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        settings = build_settings(auth_dir=str(auth_dir))
+
+        assert settings.env_path == auth_dir / ".env"
+
+    def test_inherited_env_file_is_used_without_explicit_auth_dir(
+        self, tmp_path: Path, monkeypatch
+    ):
+        inherited_env = tmp_path / "inherited.env"
+        inherited_env.write_text("CLIPROXY_MANAGEMENT_KEY=inherited-key\n", encoding="utf-8")
+        monkeypatch.setenv(ENV_ENV_FILE, str(inherited_env))
+
+        settings = build_settings()
+
+        assert settings.env_path == inherited_env
+
 
 class TestBuildSettingsNumericResolution:
     """Tests for numeric resolution precedence and clamping."""
@@ -377,6 +402,7 @@ class TestBuildSettingsNumericResolution:
         monkeypatch.setenv(ENV_TRACE_MAX, "700")
         monkeypatch.setenv(ENV_REQUEST_TIMEOUT, "60")
         monkeypatch.setenv(ENV_COMPACT_TIMEOUT, "180")
+        monkeypatch.setenv(ENV_LIMIT_MIN_REMAINING_PERCENT, "7.5")
         monkeypatch.setenv(ENV_MAX_IN_FLIGHT_REQUESTS, "21")
         monkeypatch.setenv(ENV_MAX_PENDING_REQUESTS, "4")
         monkeypatch.setenv(ENV_AUTO_RESET_STREAK, "9")
@@ -387,6 +413,7 @@ class TestBuildSettingsNumericResolution:
         assert settings.trace_max == 700
         assert settings.request_timeout == 60
         assert settings.compact_timeout == 180
+        assert settings.limit_min_remaining_percent == 7.5
         assert settings.max_in_flight_requests == 21
         assert settings.max_pending_requests == 4
         assert settings.auto_reset_streak == 9
@@ -398,6 +425,7 @@ class TestBuildSettingsNumericResolution:
             trace_max=0,
             request_timeout=-10,
             compact_timeout=0,
+            limit_min_remaining_percent=-1,
             max_in_flight_requests=-3,
             max_pending_requests=-1,
             auto_reset_streak=0,
@@ -407,10 +435,19 @@ class TestBuildSettingsNumericResolution:
         assert settings.trace_max == 1
         assert settings.request_timeout == 1
         assert settings.compact_timeout == 1
+        assert settings.limit_min_remaining_percent == 0.0
         assert settings.max_in_flight_requests == 0
         assert settings.max_pending_requests == 0
         assert settings.auto_reset_streak == 1
         assert settings.auto_reset_cooldown == 1
+
+    def test_limit_min_remaining_percent_defaults_safely(self, tmp_path: Path):
+        settings = build_settings(auth_dir=str(tmp_path))
+
+        assert (
+            settings.limit_min_remaining_percent
+            == DEFAULT_LIMIT_MIN_REMAINING_PERCENT
+        )
 
 
 class TestBuildSettingsAutoReset:

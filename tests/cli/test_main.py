@@ -10,8 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cdx_proxy_cli_v2.cli.main import (
+    _proxy_exports,
+    _proxy_shell_setup,
     _state_bucket,
+    handle_all,
     handle_doctor,
+    handle_limits,
     handle_migrate,
     handle_reset,
     handle_status,
@@ -20,6 +24,10 @@ from cdx_proxy_cli_v2.cli.main import (
     _settings_from_args,
     format_shell_exports,
     main,
+)
+from cdx_proxy_cli_v2.observability.limits_history import (
+    append_limits_history,
+    write_latest_limits_snapshot,
 )
 
 
@@ -124,6 +132,27 @@ class TestHandleStatus:
         output = json.loads(captured.out)
         assert "pid" in output
 
+
+class TestProxyShellSetup:
+    """Tests for shell bootstrap emitted by `cdx proxy --print-env-only`."""
+
+    def test_proxy_shell_setup_wraps_codex_with_config_override(self, temp_auth_dir):
+        exports = _proxy_exports(
+            argparse.Namespace(
+                auth_dir=temp_auth_dir,
+                env_path=Path(temp_auth_dir) / ".env",
+            ),
+            base_url="http://127.0.0.1:43123",
+            host="127.0.0.1",
+            port=43123,
+        )
+
+        shell_setup = _proxy_shell_setup(exports)
+
+        assert "export CLIPROXY_BASE_URL='http://127.0.0.1:43123'" in shell_setup
+        assert "codex() {" in shell_setup
+        assert '-c "openai_base_url=\\"http://127.0.0.1:43123\\""' in shell_setup
+
     def test_handle_status_not_running(self, capsys, temp_auth_dir, monkeypatch):
         """Test status when proxy is not running."""
         monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
@@ -168,6 +197,165 @@ class TestHandleStop:
             result = handle_stop(args)
 
         assert result == 0
+
+
+class TestHandleLimits:
+    """Tests for persisted limits CLI output."""
+
+    def test_handle_limits_json_reads_snapshot_and_history(
+        self, capsys, temp_auth_dir
+    ):
+        write_latest_limits_snapshot(
+            temp_auth_dir,
+            {
+                "fetched_at": 1000.0,
+                "stale": False,
+                "accounts": [
+                    {
+                        "file": "a.json",
+                        "email": "a@example.com",
+                        "status": "WARN",
+                        "reason": "limit_5h_guardrail",
+                        "reason_origin": "limit_guardrail",
+                        "five_hour": {
+                            "used_percent": 89.5,
+                            "reset_after_seconds": 1800,
+                        },
+                    }
+                ],
+            },
+        )
+        append_limits_history(
+            temp_auth_dir,
+            {
+                "fetched_at": 1000.0,
+                "accounts": [
+                    {
+                        "file": "a.json",
+                        "email": "a@example.com",
+                        "status": "WARN",
+                        "reason": "limit_5h_guardrail",
+                        "reason_origin": "limit_guardrail",
+                        "five_hour": {
+                            "used_percent": 89.5,
+                            "reset_after_seconds": 1800,
+                        },
+                    }
+                ],
+            },
+        )
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            limit_min_remaining_percent=None,
+            max_in_flight_requests=None,
+            max_pending_requests=None,
+            auto_reset_on_single_key=None,
+            auto_reset_streak=None,
+            auto_reset_cooldown=None,
+            json=True,
+            tail=5,
+        )
+
+        result = handle_limits(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        payload = json.loads(captured.out)
+        assert payload["snapshot"]["accounts"][0]["email"] == "a@example.com"
+        assert len(payload["history"]) == 1
+
+    def test_handle_limits_returns_error_when_no_persisted_data(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            limit_min_remaining_percent=None,
+            max_in_flight_requests=None,
+            max_pending_requests=None,
+            auto_reset_on_single_key=None,
+            auto_reset_streak=None,
+            auto_reset_cooldown=None,
+            json=False,
+            tail=0,
+        )
+
+        result = handle_limits(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No persisted limits snapshot found" in captured.err
+
+    def test_handle_limits_human_output_prints_history_when_requested(
+        self, capsys, temp_auth_dir
+    ):
+        write_latest_limits_snapshot(
+            temp_auth_dir,
+            {
+                "fetched_at": 1000.0,
+                "stale": True,
+                "accounts": [
+                    {
+                        "file": "a.json",
+                        "email": "a@example.com",
+                        "status": "OK",
+                    }
+                ],
+            },
+        )
+        append_limits_history(
+            temp_auth_dir,
+            {
+                "fetched_at": 1000.0,
+                "accounts": [
+                    {
+                        "file": "a.json",
+                        "email": "a@example.com",
+                        "status": "OK",
+                    }
+                ],
+            },
+        )
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            limit_min_remaining_percent=None,
+            max_in_flight_requests=None,
+            max_pending_requests=None,
+            auto_reset_on_single_key=None,
+            auto_reset_streak=None,
+            auto_reset_cooldown=None,
+            json=False,
+            tail=1,
+        )
+
+        result = handle_limits(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "cdx limits" in captured.out
+        assert "cdx limits history" in captured.out
 
 
 class TestDoctorResetPreflight:
@@ -340,6 +528,62 @@ class TestDoctorResetPreflight:
 
 def test_state_bucket_treats_warn_as_whitelist():
     assert _state_bucket("WARN") == "whitelist"
+
+
+class TestHandleAll:
+    """Tests for cdx all behavior."""
+
+    def test_handle_all_prefers_runtime_health_when_proxy_is_healthy(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key="mgmt-secret",
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            warn_at=70,
+            cooldown_at=90,
+            timeout=8,
+            only="both",
+            json=True,
+        )
+
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+            patch("cdx_proxy_cli_v2.cli.main.build_collective_payload") as mock_fallback,
+            patch("cdx_proxy_cli_v2.cli.main._load_codex_auth_identity") as mock_identity,
+        ):
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.return_value = {
+                "accounts": [
+                    {"file": "ok.json", "status": "OK", "eligible_now": True, "used": 1},
+                    {
+                        "file": "bad.json",
+                        "status": "BLACKLIST",
+                        "eligible_now": False,
+                        "used": 2,
+                    },
+                ]
+            }
+            mock_fallback.side_effect = AssertionError("offline fallback should not be used")
+            mock_identity.return_value = (None, None, None)
+
+            result = handle_all(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        payload = json.loads(captured.out)
+        assert payload["aggregate"]["counts"]["blacklist"] == 1
+        assert payload["availability"]["available_now"] == 1
+        assert any(item["status"] == "BLACKLIST" for item in payload["accounts"])
 
 
 class TestSettingsFromArgs:
@@ -726,3 +970,70 @@ class TestHandleRotate:
         assert result == 0
         # Should pick the one with lower used count
         assert "auth_new.json" in captured.out
+
+    def test_rotate_falls_back_to_persisted_snapshot_on_slow_health(
+        self, capsys, temp_auth_dir, tmp_path, monkeypatch
+    ):
+        auth_dir = Path(temp_auth_dir)
+        (auth_dir / "auth_cached.json").write_text(
+            json.dumps(
+                {
+                    "email": "cached@example.com",
+                    "tokens": {"access_token": "cached-token"},
+                }
+            )
+        )
+        write_latest_limits_snapshot(
+            temp_auth_dir,
+            {
+                "fetched_at": 1000.0,
+                "accounts": [
+                    {
+                        "file": "auth_cached.json",
+                        "email": "cached@example.com",
+                        "status": "WARN",
+                        "eligible_now": True,
+                        "used": 1,
+                    }
+                ],
+            },
+        )
+
+        codex_home = tmp_path / ".codex"
+        codex_home.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            limit_min_remaining_percent=None,
+            max_in_flight_requests=None,
+            max_pending_requests=None,
+            auto_reset_on_single_key=None,
+            auto_reset_streak=None,
+            auto_reset_cooldown=None,
+            dry_run=False,
+            json=False,
+        )
+
+        with (
+            patch("cdx_proxy_cli_v2.cli.main.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.main.fetch_json") as mock_fetch,
+        ):
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch.side_effect = TimeoutError("timed out")
+            result = handle_rotate(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Rotated to auth key: auth_cached.json" in captured.out

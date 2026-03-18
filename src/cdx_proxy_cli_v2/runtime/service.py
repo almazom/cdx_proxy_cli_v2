@@ -21,6 +21,7 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTO_RESET_STREAK,
     ENV_COMPACT_TIMEOUT,
     ENV_HOST,
+    ENV_LIMIT_MIN_REMAINING_PERCENT,
     ENV_MANAGEMENT_KEY,
     ENV_PORT,
     ENV_TRACE_MAX,
@@ -311,6 +312,9 @@ def _spawn_env(settings: Settings, *, port: int, management_key: str) -> Dict[st
             ENV_TRACE_MAX: str(settings.trace_max),
             ENV_REQUEST_TIMEOUT: str(settings.request_timeout),
             ENV_COMPACT_TIMEOUT: str(settings.compact_timeout),
+            ENV_LIMIT_MIN_REMAINING_PERCENT: str(
+                settings.limit_min_remaining_percent
+            ),
             ENV_AUTO_RESET_ON_SINGLE_KEY: "1"
             if settings.auto_reset_on_single_key
             else "0",
@@ -370,7 +374,11 @@ def start_service(settings: Settings) -> ServiceStartResult:
     4. Retry with a new port if the configured one is unavailable
     5. Provide clear error messages for troubleshooting
     """
-    key = ensure_management_key(settings.auth_dir, settings.management_key)
+    key = ensure_management_key(
+        settings.auth_dir,
+        settings.management_key,
+        env_path=settings.env_path,
+    )
     runtime_settings = settings.with_management_key(key)
 
     pid_file = pid_path(runtime_settings.auth_dir)
@@ -456,6 +464,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
                 "upstream": runtime_settings.upstream,
                 "request_timeout": runtime_settings.request_timeout,
                 "compact_timeout": runtime_settings.compact_timeout,
+                "limit_min_remaining_percent": runtime_settings.limit_min_remaining_percent,
                 "auto_reset_on_single_key": runtime_settings.auto_reset_on_single_key,
                 "auto_reset_streak": runtime_settings.auto_reset_streak,
                 "auto_reset_cooldown": runtime_settings.auto_reset_cooldown,
@@ -472,6 +481,9 @@ def start_service(settings: Settings) -> ServiceStartResult:
                     ENV_TRACE_MAX: str(runtime_settings.trace_max),
                     ENV_REQUEST_TIMEOUT: str(runtime_settings.request_timeout),
                     ENV_COMPACT_TIMEOUT: str(runtime_settings.compact_timeout),
+                    ENV_LIMIT_MIN_REMAINING_PERCENT: str(
+                        runtime_settings.limit_min_remaining_percent
+                    ),
                     ENV_AUTO_RESET_ON_SINGLE_KEY: "1"
                     if runtime_settings.auto_reset_on_single_key
                     else "0",

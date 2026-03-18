@@ -3,6 +3,7 @@ from __future__ import annotations
 from cdx_proxy_cli_v2.observability.collective_dashboard import (
     _window_text,
     build_collective_payload,
+    build_collective_payload_from_accounts,
     collective_sort_key,
     format_left_percent,
     status_rank,
@@ -29,12 +30,14 @@ def test_window_text_includes_left_only() -> None:
 
 
 def test_status_rank_order() -> None:
-    """OK should have lowest rank (best), UNKNOWN highest (worst)."""
+    """Healthy accounts should sort before degraded/unavailable ones."""
     assert status_rank("OK") == 0
     assert status_rank("WARN") == 1
-    assert status_rank("COOLDOWN") == 2
-    assert status_rank("UNKNOWN") == 3
-    assert status_rank("invalid") == 4
+    assert status_rank("PROBATION") == 2
+    assert status_rank("COOLDOWN") == 3
+    assert status_rank("BLACKLIST") == 4
+    assert status_rank("UNKNOWN") == 5
+    assert status_rank("invalid") == 6
 
 
 def test_account_has_data() -> None:
@@ -221,3 +224,34 @@ def test_build_collective_payload_account_id_collision_marks_single_current(
     )
     accounts = payload["accounts"]
     assert sum(1 for item in accounts if item["current"]) == 1
+
+
+def test_build_collective_payload_from_accounts_preserves_runtime_blacklist() -> None:
+    payload = build_collective_payload_from_accounts(
+        accounts=[
+            {
+                "file": "healthy.json",
+                "email": "healthy@example.com",
+                "status": "OK",
+                "eligible_now": True,
+                "five_hour": {"status": "OK", "used_percent": 20, "reset_after_seconds": 300},
+            },
+            {
+                "file": "blocked.json",
+                "email": "blocked@example.com",
+                "status": "BLACKLIST",
+                "eligible_now": False,
+                "blacklist_reason": "token_invalid",
+                "until": 32503680000,
+            },
+        ],
+        warn_at=70,
+        cooldown_at=90,
+        only="both",
+    )
+
+    assert payload["aggregate"]["counts"]["ok"] == 1
+    assert payload["aggregate"]["counts"]["blacklist"] == 1
+    assert payload["availability"]["available_now"] == 1
+    blocked = next(item for item in payload["accounts"] if item["file"] == "blocked.json")
+    assert blocked["status"] == "BLACKLIST"

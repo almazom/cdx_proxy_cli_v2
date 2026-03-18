@@ -75,7 +75,7 @@ class ManagementHandler:
 
         if route == "trace":
             limit = self._parse_limit(path)
-            send_json_callback(200, {"events": self._runtime.trace_events(limit=limit)})
+            send_json_callback(200, self._runtime.trace_payload(limit=limit))
             return True
 
         if route == "health":

@@ -137,6 +137,29 @@ class RoundRobinAuthPool:
         with self._lock:
             return len(self._states)
 
+    def preview_next_pick(self) -> Optional[dict]:
+        """Return the next auth that would be picked without mutating pool state."""
+        with self._lock:
+            now = time.time()
+            self._restore_stable_state_after_cooldown(now, self._states)
+            available = [state for state in self._states if state.available(now)]
+            if not available:
+                return None
+
+            preferred = [state for state in available if self._is_stable(state)]
+            pool = preferred or available
+            pool_ids = {id(candidate) for candidate in pool}
+            for offset in range(len(self._states)):
+                idx = (self._index + offset) % len(self._states)
+                candidate = self._states[idx]
+                if id(candidate) not in pool_ids:
+                    continue
+                return {
+                    "file": candidate.record.name,
+                    "email": candidate.record.email,
+                }
+            return None
+
     def mark_cooldown(
         self, auth_name: str, seconds: int = DEFAULT_COOLDOWN_SECONDS
     ) -> None:
@@ -341,11 +364,19 @@ class RoundRobinAuthPool:
                     self._mark_auto_heal_failure(state, now)
                     return
 
-    def apply_limit_health(self, limit_health_by_file: dict[str, dict]) -> None:
+    def apply_limit_health(
+        self,
+        limit_health_by_file: dict[str, dict],
+        *,
+        min_remaining_percent: float,
+    ) -> None:
         with self._lock:
             for state in self._states:
                 limit_health = limit_health_by_file.get(state.record.name) or {}
-                block = limit_block_details(limit_health)
+                block = limit_block_details(
+                    limit_health,
+                    min_remaining_percent=min_remaining_percent,
+                )
                 if not block:
                     state.limit_until = 0.0
                     state.limit_reason = None

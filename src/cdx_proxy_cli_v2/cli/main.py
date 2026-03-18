@@ -13,9 +13,29 @@ from rich.console import Console
 from rich.table import Table
 
 from cdx_proxy_cli_v2 import __version__
+from cdx_proxy_cli_v2.cli import doctor_view as _doctor_view
+from cdx_proxy_cli_v2.cli.doctor_view import (
+    _doctor_payload,
+    _extract_accounts,
+    _render_doctor_table,
+    _render_probe_results,
+)
+from cdx_proxy_cli_v2.cli.fs import _atomic_write_json, _get_codex_home
+from cdx_proxy_cli_v2.cli.limits_view import (
+    NO_LIMITS_SNAPSHOT_MESSAGE,
+    _load_limits_history,
+    _render_limits_history,
+    _render_limits_snapshot,
+)
 from cdx_proxy_cli_v2.observability.collective_dashboard import (
     build_collective_payload,
+    build_collective_payload_from_accounts,
     render_collective_dashboard,
+)
+from cdx_proxy_cli_v2.observability.limits_history import (
+    latest_limits_path,
+    limits_history_path,
+    read_latest_limits_snapshot,
 )
 from cdx_proxy_cli_v2.proxy.server import run_proxy_server
 from cdx_proxy_cli_v2.runtime.service import (
@@ -33,7 +53,15 @@ from cdx_proxy_cli_v2.proxy.http_client import fetch_json
 from cdx_proxy_cli_v2.observability.tui import run_trace_tui
 from cdx_proxy_cli_v2.auth.store import extract_auth_fields, read_auth_json
 
+_state_bucket = _doctor_view._state_bucket
+
 DOCTOR_HEALTH_TIMEOUT_SECONDS = 8.0
+ROTATE_HEALTH_TIMEOUT_SECONDS = 2.5
+DOCTOR_POLICY = {
+    "hard_fail_blacklist": [401, 403],
+    "rate_limit_cooldown": 429,
+    "probation_success_target": 2,
+}
 
 
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
@@ -48,6 +76,12 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="timeout seconds for /responses endpoints",
+    )
+    parser.add_argument(
+        "--limit-min-remaining-percent",
+        type=float,
+        default=None,
+        help="preemptive limit guardrail; quarantine keys when a limit window has less remaining percent than this",
     )
     parser.add_argument(
         "--max-in-flight-requests",
@@ -106,6 +140,7 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         allow_non_loopback=getattr(args, "allow_non_loopback", None),
         trace_max=getattr(args, "trace_max", None),
         request_timeout=getattr(args, "request_timeout", None),
+        limit_min_remaining_percent=getattr(args, "limit_min_remaining_percent", None),
         max_in_flight_requests=getattr(args, "max_in_flight_requests", None),
         max_pending_requests=getattr(args, "max_pending_requests", None),
         auto_reset_on_single_key=getattr(args, "auto_reset_on_single_key", None),
@@ -118,13 +153,24 @@ def _proxy_exports(
     settings: Settings, *, base_url: str, host: str, port: int
 ) -> Dict[str, str]:
     return {
-        "OPENAI_BASE_URL": base_url,
+        "CLIPROXY_BASE_URL": base_url,
         "OPENAI_API_BASE": base_url,
         "CLIPROXY_AUTH_DIR": settings.auth_dir,
         "CLIPROXY_ENV_FILE": str(settings.env_path),
         "CLIPROXY_HOST": host,
         "CLIPROXY_PORT": str(port),
     }
+
+
+def _proxy_shell_setup(exports: Dict[str, str]) -> str:
+    base_url = exports["CLIPROXY_BASE_URL"]
+    return (
+        f"{format_shell_exports(exports)}\n"
+        "codex() {\n"
+        '  env -u OPENAI_BASE_URL -u OPENAI_API_BASE command codex \\\n'
+        f'    -c "openai_base_url=\\"{base_url}\\"" "$@"\n'
+        "}\n"
+    )
 
 
 def _management_headers(settings: Settings) -> Dict[str, str]:
@@ -179,14 +225,14 @@ def handle_proxy(args: argparse.Namespace) -> int:
     quiet = bool(getattr(args, "quiet", False))
 
     if bool(getattr(args, "print_env_only", False)):
-        print(format_shell_exports(exports))
+        print(_proxy_shell_setup(exports))
         return 0
 
     if args.print_env:
         if not quiet:
             step = "started" if result.started else "already running"
             print(f"# proxy {step} on {result.base_url}", file=sys.stderr)
-        print(format_shell_exports(exports))
+        print(_proxy_shell_setup(exports))
         return 0
 
     # Interactive output - status messages to stderr
@@ -229,19 +275,6 @@ def handle_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _state_bucket(status: object) -> str:
-    normalized = str(status or "UNKNOWN").upper()
-    if normalized in {"OK", "WARN"}:
-        return "whitelist"
-    if normalized == "PROBATION":
-        return "probation"
-    if normalized == "COOLDOWN":
-        return "cooldown"
-    if normalized == "BLACKLIST":
-        return "blacklist"
-    return "unknown"
-
-
 def _healthy_base_url_or_none(settings: Settings) -> Optional[str]:
     status_payload = service_status(settings)
     base_url = str(status_payload.get("base_url") or settings.base_url)
@@ -253,6 +286,53 @@ def _healthy_base_url_or_none(settings: Settings) -> Optional[str]:
         )
         return None
     return base_url
+
+
+def _fetch_health_accounts(
+    *, base_url: str, headers: Dict[str, str], timeout: float
+) -> List[Dict[str, Any]]:
+    payload = fetch_json(
+        base_url=base_url,
+        path="/health?refresh=1",
+        headers=headers,
+        timeout=timeout,
+    )
+    return _extract_accounts(payload)
+
+
+def _rotation_accounts(
+    *, settings: Settings, base_url: str, headers: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    last_error: Optional[Exception] = None
+    for path in ("/health", "/trace?limit=1"):
+        try:
+            payload = fetch_json(
+                base_url=base_url,
+                path=path,
+                headers=headers,
+                timeout=ROTATE_HEALTH_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            last_error = exc
+            continue
+        if path.startswith("/trace"):
+            limits = payload.get("limits")
+            if isinstance(limits, dict):
+                accounts = _extract_accounts(limits)
+                if accounts:
+                    return accounts
+            continue
+        accounts = _extract_accounts(payload)
+        if accounts:
+            return accounts
+
+    snapshot = read_latest_limits_snapshot(settings.auth_dir)
+    accounts = _extract_accounts(snapshot)
+    if accounts:
+        return accounts
+    if last_error is not None:
+        raise RuntimeError(str(last_error))
+    raise RuntimeError("no auth state available")
 
 
 def handle_doctor(args: argparse.Namespace) -> int:
@@ -280,69 +360,13 @@ def handle_doctor(args: argparse.Namespace) -> int:
             print(f"Probe failed: {exc}", file=sys.stderr)
             return 1
 
-        # Display probe results if not in JSON mode
-        if not bool(args.json):
-            results = probe_payload.get("results", [])
-            probed = probe_payload.get("probed", 0)
-
-            # Count actions
-            action_counts: Dict[str, int] = {}
-            for r in results:
-                action = r.get("action", "none")
-                action_counts[action] = action_counts.get(action, 0) + 1
-
-            print(f"Probed {probed} auth key(s) with timeout={timeout}s")
-            print()
-
-            # Show probe outcome summary
-            if action_counts:
-                print("Probe outcomes:")
-                for action, count in sorted(action_counts.items()):
-                    action_desc = {
-                        "healthy": "Probe succeeded; runtime state unchanged",
-                        "would_cooldown": "Probe hit 429; key would enter cooldown if used live",
-                        "auth_failed": "Probe hit 401/403; auth looks unhealthy",
-                        "compat_failed": "Probe saw account/provider incompatibility",
-                        "error": "Probe got a non-auth HTTP error",
-                        "network_error": "Probe failed before getting an HTTP response",
-                    }.get(action, action)
-                    print(f"  {action}: {count} ({action_desc})")
-                print()
-
-            # Show details for non-healthy outcomes
-            notable_results = [r for r in results if r.get("action") != "healthy"]
-            if notable_results:
-                table = Table(title="cdx doctor | probe findings")
-                table.add_column("File")
-                table.add_column("Previous")
-                table.add_column("Current")
-                table.add_column("Action")
-                table.add_column("HTTP")
-                table.add_column("Latency")
-
-                for r in sorted(notable_results, key=lambda x: str(x.get("file", ""))):
-                    latency_ms = r.get("latency_ms", 0)
-                    http_status = r.get("http_status")
-                    http_str = str(http_status) if http_status is not None else "-"
-
-                    table.add_row(
-                        str(r.get("file") or "-"),
-                        str(r.get("previous_status") or "-"),
-                        str(r.get("status") or "-"),
-                        str(r.get("action") or "-"),
-                        http_str,
-                        f"{latency_ms}ms",
-                    )
-                Console().print(table)
-                print()
+        _render_probe_results(probe_payload, json_mode=bool(args.json))
 
         # Include probe results in JSON output
         if bool(args.json):
-            # Fetch fresh health after probe
             try:
-                health_payload = fetch_json(
+                accounts = _fetch_health_accounts(
                     base_url=base_url,
-                    path="/health?refresh=1",
                     headers=headers,
                     timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
                 )
@@ -352,44 +376,19 @@ def handle_doctor(args: argparse.Namespace) -> int:
                 )
                 return 1
 
-            accounts_raw = health_payload.get("accounts", [])
-            accounts: List[Dict[str, Any]] = (
-                [item for item in accounts_raw if isinstance(item, dict)]
-                if isinstance(accounts_raw, list)
-                else []
+            output = _doctor_payload(
+                base_url=base_url,
+                accounts=accounts,
+                policy=DOCTOR_POLICY,
+                probe=probe_payload,
             )
-            summary = {
-                "whitelist": 0,
-                "probation": 0,
-                "cooldown": 0,
-                "blacklist": 0,
-                "unknown": 0,
-                "total": len(accounts),
-            }
-            for item in accounts:
-                bucket = _state_bucket(item.get("status"))
-                summary[bucket] += 1
-
-            output: Dict[str, Any] = {
-                "ok": True,
-                "base_url": base_url,
-                "probe": probe_payload,
-                "policy": {
-                    "hard_fail_blacklist": [401, 403],
-                    "rate_limit_cooldown": 429,
-                    "probation_success_target": 2,
-                },
-                "summary": summary,
-                "accounts": accounts,
-            }
             print(json.dumps(output, ensure_ascii=False, indent=2))
             return 0
 
     # Regular doctor flow (always fetch health)
     try:
-        health_payload = fetch_json(
+        accounts = _fetch_health_accounts(
             base_url=base_url,
-            path="/health?refresh=1",
             headers=headers,
             timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
         )
@@ -397,70 +396,14 @@ def handle_doctor(args: argparse.Namespace) -> int:
         print(f"Doctor failed to read /health: {exc}", file=sys.stderr)
         return 1
 
-    accounts_raw = health_payload.get("accounts", [])
-    accounts: List[Dict[str, Any]] = (
-        [item for item in accounts_raw if isinstance(item, dict)]
-        if isinstance(accounts_raw, list)
-        else []
+    payload = _doctor_payload(
+        base_url=base_url, accounts=accounts, policy=DOCTOR_POLICY
     )
-    summary = {
-        "whitelist": 0,
-        "probation": 0,
-        "cooldown": 0,
-        "blacklist": 0,
-        "unknown": 0,
-        "total": len(accounts),
-    }
-    for item in accounts:
-        bucket = _state_bucket(item.get("status"))
-        summary[bucket] += 1
-
-    payload: Dict[str, Any] = {
-        "ok": True,
-        "base_url": base_url,
-        "policy": {
-            "hard_fail_blacklist": [401, 403],
-            "rate_limit_cooldown": 429,
-            "probation_success_target": 2,
-        },
-        "summary": summary,
-        "accounts": accounts,
-    }
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
-    table = Table(title="cdx doctor | auth rotation state")
-    table.add_column("File")
-    table.add_column("Status")
-    table.add_column("Cooldown")
-    table.add_column("Blacklist")
-    table.add_column("Probation")
-    table.add_column("Used")
-    table.add_column("Errors")
-    table.add_column("Reason")
-    for item in sorted(accounts, key=lambda row: str(row.get("file") or "")):
-        table.add_row(
-            str(item.get("file") or "-"),
-            str(item.get("status") or "UNKNOWN"),
-            str(item.get("cooldown_seconds") or "-"),
-            str(item.get("blacklist_seconds") or "-"),
-            f"{item.get('probation_successes')}/{item.get('probation_target')}"
-            if item.get("probation")
-            else "-",
-            str(item.get("used") or 0),
-            str(item.get("errors") or 0),
-            str(item.get("blacklist_reason") or "-"),
-        )
-    Console().print(table)
-    print(
-        "Summary: "
-        f"white={summary['whitelist']} probation={summary['probation']} "
-        f"cooldown={summary['cooldown']} black={summary['blacklist']} unknown={summary['unknown']}"
-    )
-    print(
-        "Policy: 401/403 -> blacklist, 429 -> exponential cooldown, re-entry via probation"
-    )
+    _render_doctor_table(accounts, payload["summary"])
     return 0
 
 
@@ -527,9 +470,45 @@ def handle_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_limits(args: argparse.Namespace) -> int:
+    settings = _settings_from_args(args)
+    snapshot = read_latest_limits_snapshot(settings.auth_dir)
+    history = _load_limits_history(
+        settings.auth_dir, tail=max(0, int(getattr(args, "tail", 0)))
+    )
+
+    if bool(getattr(args, "json", False)):
+        payload: Dict[str, Any] = {
+            "snapshot": snapshot or None,
+            "history": history,
+            "files": {
+                "latest": str(latest_limits_path(settings.auth_dir)),
+                "history": str(limits_history_path(settings.auth_dir)),
+            },
+        }
+        if not snapshot and not history:
+            payload["error"] = NO_LIMITS_SNAPSHOT_MESSAGE
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if not snapshot and not history:
+        print(NO_LIMITS_SNAPSHOT_MESSAGE, file=sys.stderr)
+        return 1
+
+    if snapshot:
+        _render_limits_snapshot(snapshot)
+        print(f"Latest file: {latest_limits_path(settings.auth_dir)}")
+    if history:
+        _render_limits_history(history)
+        print(f"History file: {limits_history_path(settings.auth_dir)}")
+    return 0
+
+
 def handle_all(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    _status_payload = service_status(settings)
+    status_payload = service_status(settings)
     usage_base_url = (
         os.environ.get("CLIPROXY_USAGE_BASE_URL") or "https://chatgpt.com/backend-api"
     )
@@ -539,18 +518,41 @@ def handle_all(args: argparse.Namespace) -> int:
     if not current_access_token:
         current_access_token = codex_access_token
 
-    payload = build_collective_payload(
-        auths_dir=settings.auth_dir,
-        base_url=usage_base_url,
-        warn_at=int(args.warn_at),
-        cooldown_at=int(args.cooldown_at),
-        timeout=int(args.timeout),
-        only=str(args.only),
-        current_access_token=current_access_token,
-        current_file=current_file,
-        current_email=codex_email,
-        current_account_id=codex_account_id,
-    )
+    payload = None
+    if bool(status_payload.get("healthy")):
+        base_url = str(status_payload.get("base_url") or settings.base_url)
+        try:
+            accounts = _fetch_health_accounts(
+                base_url=base_url,
+                headers=_management_headers(settings),
+                timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
+            )
+            payload = build_collective_payload_from_accounts(
+                accounts=accounts,
+                warn_at=int(args.warn_at),
+                cooldown_at=int(args.cooldown_at),
+                only=str(args.only),
+                current_access_token=current_access_token,
+                current_file=current_file,
+                current_email=codex_email,
+                current_account_id=codex_account_id,
+            )
+        except Exception:
+            payload = None
+
+    if payload is None:
+        payload = build_collective_payload(
+            auths_dir=settings.auth_dir,
+            base_url=usage_base_url,
+            warn_at=int(args.warn_at),
+            cooldown_at=int(args.cooldown_at),
+            timeout=int(args.timeout),
+            only=str(args.only),
+            current_access_token=current_access_token,
+            current_file=current_file,
+            current_email=codex_email,
+            current_account_id=codex_account_id,
+        )
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -620,39 +622,6 @@ def handle_reset(args: argparse.Namespace) -> int:
     return 0
 
 
-def _get_codex_home() -> Path:
-    """Get the codex home directory (e.g., ~/.codex)."""
-    code_home = str(os.environ.get("CODEX_HOME") or "").strip()
-    if code_home:
-        return Path(os.path.expanduser(code_home))
-    home_dir = Path(os.path.expanduser(str(os.environ.get("HOME") or "~")))
-    return home_dir / ".codex"
-
-
-def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
-    """Atomically write JSON data to a file to prevent corruption."""
-    import tempfile
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".json",
-        prefix=".",
-        dir=str(path.parent),
-        delete=False,
-        encoding="utf-8",
-    ) as f:
-        temp_path = Path(f.name)
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    # Set restrictive permissions before moving into place
-    try:
-        temp_path.chmod(0o600)
-    except OSError:
-        pass
-    temp_path.rename(path)
-
-
 def handle_rotate(args: argparse.Namespace) -> int:
     """Rotate active auth key for codex CLI.
 
@@ -666,26 +635,19 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
     headers = _management_headers(settings)
     try:
-        health_payload = fetch_json(
-            base_url=base_url,
-            path="/health?refresh=1",
-            headers=headers,
-            timeout=5.0,
-        )
+        accounts = _rotation_accounts(settings=settings, base_url=base_url, headers=headers)
     except Exception as exc:
         print(f"Failed to fetch health status: {exc}", file=sys.stderr)
         return 1
 
-    accounts_raw = health_payload.get("accounts", [])
-    accounts: List[Dict[str, Any]] = (
-        [item for item in accounts_raw if isinstance(item, dict)]
-        if isinstance(accounts_raw, list)
-        else []
-    )
-
-    # Filter for healthy auths (status == "OK")
+    # Filter for currently usable auths from cached runtime/limits state.
     healthy_auths = [
-        acc for acc in accounts if str(acc.get("status", "")).upper() == "OK"
+        acc
+        for acc in accounts
+        if (
+            bool(acc.get("eligible_now"))
+            or str(acc.get("status", "")).upper() in {"OK", "WARN"}
+        )
     ]
 
     if not healthy_auths:
@@ -945,6 +907,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(logs_parser)
     logs_parser.add_argument("--lines", type=int, default=120)
     logs_parser.set_defaults(handler=handle_logs)
+
+    limits_parser = sub.add_parser(
+        "limits", help="show persisted limits snapshot and recent history"
+    )
+    _add_runtime_options(limits_parser)
+    limits_parser.add_argument(
+        "--tail",
+        type=int,
+        default=0,
+        help="show the latest N persisted history entries from rr_proxy_v2.limits.jsonl",
+    )
+    limits_parser.add_argument(
+        "--json", action="store_true", help="JSON output for scripting"
+    )
+    limits_parser.set_defaults(handler=handle_limits)
 
     migrate_parser = sub.add_parser(
         "migrate", help="migrate from cdx_proxy_cli v1 to v2"

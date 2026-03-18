@@ -22,6 +22,14 @@ from tests.integration.support import (
 )
 
 
+def _upstream_path_count(path_prefix: str) -> int:
+    return sum(
+        1
+        for path in MockUpstreamHandler.received_paths
+        if path.split("?", 1)[0] == path_prefix
+    )
+
+
 def test_responses_request_succeeds(proxy_server: dict[str, Any]) -> None:
     status, body = request_json(
         base_url=str(proxy_server["base_url"]),
@@ -81,7 +89,7 @@ def test_rotates_after_401(proxy_server: dict[str, Any]) -> None:
 
     assert status == 200
     assert body["id"] == "resp_retry"
-    assert MockUpstreamHandler.call_count == 2
+    assert _upstream_path_count(RESPONSES_PATH) == 2
 
 
 def test_rotates_after_known_account_incompatible_400(
@@ -106,7 +114,7 @@ def test_rotates_after_known_account_incompatible_400(
 
     assert status == 200
     assert body["id"] == "resp_retry_400"
-    assert MockUpstreamHandler.call_count == 2
+    assert _upstream_path_count(RESPONSES_PATH) == 2
 
 
 def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) -> None:
@@ -123,7 +131,7 @@ def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) ->
     )
 
     assert status == 401
-    assert MockUpstreamHandler.call_count == 2
+    assert _upstream_path_count(RESPONSES_PATH) == 2
 
 
 def test_management_endpoints_require_key(proxy_server: dict[str, Any]) -> None:

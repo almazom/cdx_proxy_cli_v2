@@ -335,6 +335,43 @@ def test_reset_ignores_limit_only_cooldown(monkeypatch) -> None:
     assert snapshot["reason"] == "limit_5h"
 
 
+def test_nearly_exhausted_limit_window_temporarily_leaves_rotation(monkeypatch) -> None:
+    now = 6100.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            )
+        ]
+    )
+
+    pool.apply_limit_health(
+        {
+            "a.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 89.5,
+                    "reset_after_seconds": 120,
+                }
+            }
+        },
+        min_remaining_percent=11.0,
+    )
+
+    assert pool.pick() is None
+    snapshot = pool.health_snapshot()[0]
+    assert snapshot["status"] == "COOLDOWN"
+    assert snapshot["reason"] == "limit_5h_guardrail"
+
+    now = now + 121.0
+    recovered = pool.pick()
+    assert recovered is not None
+    assert recovered.record.name == "a.json"
+
+
 def test_non_auth_4xx_does_not_penalize_key(monkeypatch) -> None:
     now = 5000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)

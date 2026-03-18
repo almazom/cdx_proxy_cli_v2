@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Any, Dict, Optional, Tuple
 
 from rich import box
@@ -11,7 +12,6 @@ from rich.table import Table
 from rich.text import Text
 
 from cdx_proxy_cli_v2.health_snapshot import collective_health_snapshot
-from cdx_proxy_cli_v2.limits_domain import overall_status
 
 OPEN_RIGHT_ROUNDED = box.Box("    \n│ │ \n├─┼ \n│ │ \n├─┼ \n├─┼ \n│ │ \n╰─┴ \n")
 
@@ -75,7 +75,9 @@ def status_level_emoji(status: str) -> str:
     return {
         "OK": "🟢",
         "WARN": "🟡",
+        "PROBATION": "🟠",
         "COOLDOWN": "🔴",
+        "BLACKLIST": "⛔",
         "UNKNOWN": "⚪",
     }.get(status, "⚪")
 
@@ -83,10 +85,17 @@ def status_level_emoji(status: str) -> str:
 def status_rank(status: str) -> int:
     """Rank status for sorting. Lower rank = better = appears first.
 
-    Order: OK (green) > WARN (yellow) > COOLDOWN (red) > UNKNOWN (white)
+    Order: OK > WARN > PROBATION > COOLDOWN > BLACKLIST > UNKNOWN
     """
-    order = {"OK": 0, "WARN": 1, "COOLDOWN": 2, "UNKNOWN": 3}
-    return order.get(status, 4)
+    order = {
+        "OK": 0,
+        "WARN": 1,
+        "PROBATION": 2,
+        "COOLDOWN": 3,
+        "BLACKLIST": 4,
+        "UNKNOWN": 5,
+    }
+    return order.get(status, 6)
 
 
 def account_best_left(entry: Dict[str, Any]) -> Optional[float]:
@@ -136,6 +145,41 @@ def account_min_reset(entry: Dict[str, Any]) -> Optional[int]:
     return min_reset
 
 
+def account_next_available_seconds(entry: Dict[str, Any]) -> Optional[int]:
+    candidates: list[int] = []
+    min_reset = account_min_reset(entry)
+    if isinstance(min_reset, int):
+        candidates.append(min_reset)
+
+    until = entry.get("until")
+    if isinstance(until, (int, float)):
+        remaining = int(float(until) - time.time())
+        if remaining > 0:
+            candidates.append(remaining)
+
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def account_is_available(entry: Dict[str, Any]) -> bool:
+    eligible_now = entry.get("eligible_now")
+    if isinstance(eligible_now, bool):
+        return eligible_now
+    return str(entry.get("status") or "UNKNOWN").upper() in {"OK", "WARN"}
+
+
+def aggregate_status(statuses: list[str]) -> str:
+    normalized = [str(status or "UNKNOWN").upper() for status in statuses]
+    if any(status in {"COOLDOWN", "BLACKLIST", "PROBATION"} for status in normalized):
+        return "COOLDOWN"
+    if any(status == "WARN" for status in normalized):
+        return "WARN"
+    if any(status == "OK" for status in normalized):
+        return "OK"
+    return "UNKNOWN"
+
+
 def collective_sort_key(entry: Dict[str, Any]) -> Tuple[int, float, float, str]:
     """Sort key for accounts. Lower tuple = appears first (top of list).
 
@@ -176,24 +220,63 @@ def build_collective_payload(
         timeout=timeout,
         only=only,
     )
-    accounts = snapshot.get("accounts", [])
-    counts = {"ok": 0, "warn": 0, "cooldown": 0, "unknown": 0}
+    return build_collective_payload_from_accounts(
+        accounts=snapshot.get("accounts", []),
+        warn_at=warn_at,
+        cooldown_at=cooldown_at,
+        only=only,
+        current_access_token=current_access_token,
+        current_file=current_file,
+        current_email=current_email,
+        current_account_id=current_account_id,
+    )
+
+
+def build_collective_payload_from_accounts(
+    *,
+    accounts: Any,
+    warn_at: int,
+    cooldown_at: int,
+    only: str,
+    current_access_token: Optional[str] = None,
+    current_file: Optional[str] = None,
+    current_email: Optional[str] = None,
+    current_account_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_accounts = [
+        dict(entry) for entry in accounts if isinstance(entry, dict)
+    ]
+    counts = {
+        "ok": 0,
+        "warn": 0,
+        "probation": 0,
+        "cooldown": 0,
+        "blacklist": 0,
+        "unknown": 0,
+    }
     max_used = None
     total_used_percent = 0.0
     total_used_samples = 0
     min_reset = None
     next_available_in = None
     next_available_file = None
-    for entry in accounts:
-        status = entry.get("status", "UNKNOWN")
+    available_now = 0
+    for entry in normalized_accounts:
+        status = str(entry.get("status") or "UNKNOWN").upper()
         if status == "OK":
             counts["ok"] += 1
         elif status == "WARN":
             counts["warn"] += 1
+        elif status == "PROBATION":
+            counts["probation"] += 1
         elif status == "COOLDOWN":
             counts["cooldown"] += 1
+        elif status == "BLACKLIST":
+            counts["blacklist"] += 1
         else:
             counts["unknown"] += 1
+        if account_is_available(entry):
+            available_now += 1
         worst_used = account_worst_used(entry)
         if isinstance(worst_used, (int, float)):
             max_used = worst_used if max_used is None else max(max_used, worst_used)
@@ -205,20 +288,20 @@ def build_collective_payload(
             if isinstance(used, (int, float)):
                 total_used_percent += float(used)
                 total_used_samples += 1
-        min_reset_entry = account_min_reset(entry)
+        min_reset_entry = account_next_available_seconds(entry)
         if isinstance(min_reset_entry, int):
             min_reset = (
                 min_reset_entry
                 if min_reset is None
                 else min(min_reset, min_reset_entry)
             )
-            if status == "COOLDOWN":
+            if not account_is_available(entry):
                 if next_available_in is None or min_reset_entry < next_available_in:
                     next_available_in = min_reset_entry
                     next_available_file = entry.get("file")
 
-    aggregate_status = overall_status(
-        [entry.get("status", "UNKNOWN") for entry in accounts]
+    aggregate_status_value = aggregate_status(
+        [str(entry.get("status") or "UNKNOWN") for entry in normalized_accounts]
     )
     global_exhaustion = (
         (total_used_percent / float(total_used_samples))
@@ -226,16 +309,18 @@ def build_collective_payload(
         else None
     )
     aggregate = {
-        "status": aggregate_status,
+        "status": aggregate_status_value,
         "counts": counts,
         "global_exhaustion": global_exhaustion,
         "max_used": max_used,
         "min_reset_seconds": min_reset,
-        "total": len(accounts),
+        "total": len(normalized_accounts),
     }
     availability = {
-        "available_now": counts["ok"] + counts["warn"],
+        "available_now": available_now,
+        "probation_now": counts["probation"],
         "cooldown_now": counts["cooldown"],
+        "blacklist_now": counts["blacklist"],
         "unknown_now": counts["unknown"],
         "next_available_in_seconds": next_available_in,
         "next_available_file": next_available_file,
@@ -243,13 +328,15 @@ def build_collective_payload(
 
     def _pick_current_candidates() -> list[Dict[str, Any]]:
         if current_file:
-            matched = [entry for entry in accounts if entry.get("file") == current_file]
+            matched = [
+                entry for entry in normalized_accounts if entry.get("file") == current_file
+            ]
             if matched:
                 return matched
         if current_access_token:
             matched = [
                 entry
-                for entry in accounts
+                for entry in normalized_accounts
                 if entry.get("access_token") == current_access_token
             ]
             if matched:
@@ -258,7 +345,7 @@ def build_collective_payload(
             needle = current_email.strip().lower()
             matched = [
                 entry
-                for entry in accounts
+                for entry in normalized_accounts
                 if isinstance(entry.get("email"), str)
                 and entry.get("email", "").strip().lower() == needle
             ]
@@ -267,25 +354,25 @@ def build_collective_payload(
         if current_account_id:
             matched = [
                 entry
-                for entry in accounts
+                for entry in normalized_accounts
                 if entry.get("account_id") == current_account_id
             ]
             if matched:
                 return matched
         return []
 
-    for entry in accounts:
+    for entry in normalized_accounts:
         entry["current"] = False
 
     matched_entries = _pick_current_candidates()
     if matched_entries:
         selected = sorted(matched_entries, key=collective_sort_key)[0]
         selected["current"] = True
-    elif accounts:
-        selected = sorted(accounts, key=collective_sort_key)[0]
+    elif normalized_accounts:
+        selected = sorted(normalized_accounts, key=collective_sort_key)[0]
         selected["current"] = True
 
-    for entry in accounts:
+    for entry in normalized_accounts:
         entry.pop("access_token", None)
         entry.pop("account_id", None)
 
@@ -293,7 +380,7 @@ def build_collective_payload(
         "ok": True,
         "aggregate": aggregate,
         "availability": availability,
-        "accounts": accounts,
+        "accounts": normalized_accounts,
         "thresholds": {"warn_at": warn_at, "cooldown_at": cooldown_at, "only": only},
         "retrieved_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
     }
