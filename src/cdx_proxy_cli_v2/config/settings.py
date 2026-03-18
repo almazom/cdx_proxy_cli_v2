@@ -178,6 +178,19 @@ def upsert_env_values(path: Path, updates: Dict[str, str]) -> bool:
     return changed
 
 
+def remove_env_keys(path: Path, keys: set[str]) -> bool:
+    ensure_env_file(path)
+    values = load_env_file(path)
+    changed = False
+    for key in keys:
+        if key in values:
+            del values[key]
+            changed = True
+    if changed:
+        _write_env_file(path, values)
+    return changed
+
+
 @dataclass(frozen=True)
 class Settings:
     auth_dir: str
@@ -249,9 +262,9 @@ def build_settings(
     merged = dict(file_env)
     merged.update(os.environ)
 
-    resolved_auth_dir = str(
-        resolve_path(auth_dir or merged.get(ENV_AUTH_DIR) or initial_auth_dir)
-    )
+    # The auth-dir-scoped .env can supply runtime defaults, but it must not
+    # redirect startup to a different auth dir.
+    resolved_auth_dir = str(auth_dir_path)
     resolved_env_path = (
         env_file_path(resolved_auth_dir)
         if auth_dir is not None

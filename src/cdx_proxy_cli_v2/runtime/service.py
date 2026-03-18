@@ -27,6 +27,7 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_TRACE_MAX,
     ENV_REQUEST_TIMEOUT,
     ENV_UPSTREAM,
+    remove_env_keys,
     Settings,
     ensure_management_key,
     resolve_path,
@@ -473,7 +474,6 @@ def start_service(settings: Settings) -> ServiceStartResult:
             upsert_env_values(
                 runtime_settings.env_path,
                 {
-                    ENV_AUTH_DIR: runtime_settings.auth_dir,
                     ENV_HOST: runtime_settings.host,
                     ENV_PORT: str(runtime_settings.port),
                     ENV_UPSTREAM: runtime_settings.upstream,
@@ -491,6 +491,7 @@ def start_service(settings: Settings) -> ServiceStartResult:
                     ENV_AUTO_RESET_COOLDOWN: str(runtime_settings.auto_reset_cooldown),
                 },
             )
+            remove_env_keys(runtime_settings.env_path, {ENV_AUTH_DIR})
 
             # Warn user if we had to use a different port than requested
             if requested_port > 0 and port != requested_port:

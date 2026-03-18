@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from cdx_proxy_cli_v2.config.settings import (
+    ENV_AUTH_DIR,
     ENV_AUTO_RESET_COOLDOWN,
     ENV_AUTO_RESET_ON_SINGLE_KEY,
     ENV_AUTO_RESET_STREAK,
@@ -31,6 +32,7 @@ from cdx_proxy_cli_v2.config.settings import (
     parse_port,
     parse_positive_int,
     format_shell_exports,
+    remove_env_keys,
     resolve_path,
     upsert_env_values,
 )
@@ -249,6 +251,27 @@ class TestUpsertEnvValues:
         assert loaded["KEY2"] == "value2"
 
 
+class TestRemoveEnvKeys:
+    """Tests for remove_env_keys function."""
+
+    def test_removes_existing_keys(self, tmp_path: Path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEEP=value\nDROP=stale\n", encoding="utf-8")
+
+        result = remove_env_keys(env_file, {"DROP"})
+
+        assert result is True
+        assert load_env_file(env_file) == {"KEEP": "value"}
+
+    def test_returns_false_when_keys_are_absent(self, tmp_path: Path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEEP=value\n", encoding="utf-8")
+
+        result = remove_env_keys(env_file, {"DROP"})
+
+        assert result is False
+
+
 # ============================================================================
 # Test: Settings dataclass
 # ============================================================================
@@ -381,6 +404,22 @@ class TestBuildSettingsPrecedence:
         settings = build_settings()
 
         assert settings.env_path == inherited_env
+
+    def test_auth_dir_scoped_env_file_does_not_redirect_auth_dir(
+        self, tmp_path: Path, monkeypatch
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        default_auth_dir = tmp_path / ".codex" / "_auths"
+        default_auth_dir.mkdir(parents=True)
+        (default_auth_dir / ".env").write_text(
+            "CLIPROXY_AUTH_DIR=/tmp/stale-auths\nCLIPROXY_HOST=127.0.0.1\n",
+            encoding="utf-8",
+        )
+
+        settings = build_settings()
+
+        assert settings.auth_dir == str(default_auth_dir)
+        assert settings.env_path == default_auth_dir / ".env"
 
 
 class TestBuildSettingsNumericResolution:

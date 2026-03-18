@@ -12,7 +12,7 @@ UNIT_TEST_PATHS = \
 	tests/taad \
 	tests/test_health_snapshot.py
 
-.PHONY: test-unit test-integration test-e2e test-all
+.PHONY: test-unit test-integration test-integration-codex-wp test-e2e test-e2e-codex-wp test-all
 
 test-unit:
 	$(PYTEST) -q $(UNIT_TEST_PATHS)
@@ -20,8 +20,14 @@ test-unit:
 test-integration:
 	$(PYTEST) -q tests/integration
 
+test-integration-codex-wp:
+	$(PYTEST) -q tests/integration/test_codex_wp_green_path.py
+
 test-e2e:
 	$(PYTEST) -q tests/e2e
+
+test-e2e-codex-wp:
+	$(PYTEST) -q tests/integration/test_codex_wp_green_path.py
 
 test-all:
 	$(PYTEST) -q

@@ -10,9 +10,11 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from cdx_proxy_cli_v2.config.settings import (
+    ENV_AUTH_DIR,
     ENV_AUTO_RESET_COOLDOWN,
     ENV_AUTO_RESET_ON_SINGLE_KEY,
     ENV_AUTO_RESET_STREAK,
+    load_env_file,
 )
 from cdx_proxy_cli_v2.runtime import service as service_module
 from cdx_proxy_cli_v2.runtime.service import (
@@ -207,6 +209,37 @@ class TestStartService:
 
         assert result.started is True
         mock_terminate.assert_not_called()
+
+    def test_start_service_removes_stale_auth_dir_from_env_file(
+        self, temp_auth_dir, monkeypatch
+    ):
+        monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
+        monkeypatch.setenv("CLIPROXY_HOST", "127.0.0.1")
+        monkeypatch.setenv("CLIPROXY_PORT", "0")
+        monkeypatch.setenv("CLIPROXY_UPSTREAM", "https://chatgpt.com")
+        monkeypatch.setenv("CLIPROXY_MANAGEMENT_KEY", "test-key")
+
+        env_file = Path(temp_auth_dir) / ".env"
+        env_file.write_text(
+            f"{ENV_AUTH_DIR}=/tmp/stale-auths\nCLIPROXY_HOST=127.0.0.1\n",
+            encoding="utf-8",
+        )
+
+        with patch("cdx_proxy_cli_v2.runtime.service._spawn") as mock_spawn:
+            mock_process = MagicMock()
+            mock_process.pid = 99999
+            mock_spawn.return_value = mock_process
+
+            with patch(
+                "cdx_proxy_cli_v2.runtime.service._wait_for_ready",
+                return_value={"status": "running"},
+            ):
+                from cdx_proxy_cli_v2.config.settings import build_settings
+
+                result = start_service(build_settings())
+
+        assert result.started is True
+        assert ENV_AUTH_DIR not in load_env_file(env_file)
 
 
 class TestStopService:
