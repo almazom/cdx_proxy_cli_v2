@@ -19,6 +19,16 @@ except ImportError:
     KEYRING_AVAILABLE = False
 
 SERVICE_NAME = "cdx_proxy_cli_v2"
+_TOP_LEVEL_AUTH_KEYS = (
+    "email",
+    "access_token",
+    "OPENAI_API_KEY",
+    "api_key",
+    "openai_api_key",
+    "token",
+)
+_TOP_LEVEL_TOKEN_KEYS = _TOP_LEVEL_AUTH_KEYS[1:]
+_NESTED_AUTH_KEYS = ("access_token", "account_id", "email", "id_token")
 
 
 def iter_auth_json_files(auth_dir: str) -> List[Path]:
@@ -57,60 +67,48 @@ def _clean_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _first_clean_text(raw: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[str]:
+    for key in keys:
+        value = _clean_text(raw.get(key))
+        if value:
+            return value
+    return None
+
+
 def extract_auth_fields(
     raw: Dict[str, Any],
 ) -> Tuple[str, Optional[str], Optional[str]]:
     token = ""
-    email = _clean_text(raw.get("email"))
+    email = _first_clean_text(raw, ("email",))
     account_id: Optional[str] = None
 
     tokens = raw.get("tokens")
     if isinstance(tokens, dict):
-        token = str(tokens.get("access_token") or "")
-        account_id = _clean_text(tokens.get("account_id"))
-        if not email:
-            email = _clean_text(tokens.get("email"))
-        id_token = _clean_text(tokens.get("id_token"))
+        token = _first_clean_text(tokens, ("access_token",)) or ""
+        account_id = _first_clean_text(tokens, ("account_id",))
+        email = email or _first_clean_text(tokens, ("email",))
+        id_token = _first_clean_text(tokens, ("id_token",))
         if id_token:
             id_payload = decode_jwt_payload(id_token)
-            jwt_email = _clean_text(id_payload.get("email"))
+            jwt_email = _first_clean_text(id_payload, ("email",))
             if jwt_email:
                 email = jwt_email
 
     if not token:
-        token = str(raw.get("access_token") or "")
-    if not token:
-        token = str(raw.get("OPENAI_API_KEY") or "")
-    if not token:
-        token = str(
-            raw.get("api_key") or raw.get("openai_api_key") or raw.get("token") or ""
-        )
-    return token.strip(), email, account_id
+        token = _first_clean_text(raw, _TOP_LEVEL_TOKEN_KEYS) or ""
+    return token, email, account_id
 
 
 def _looks_like_auth_record(raw: Dict[str, Any]) -> bool:
     """Return True only for JSON payloads that resemble auth records."""
-    if any(
-        _clean_text(raw.get(key))
-        for key in (
-            "email",
-            "access_token",
-            "OPENAI_API_KEY",
-            "api_key",
-            "openai_api_key",
-            "token",
-        )
-    ):
+    if _first_clean_text(raw, _TOP_LEVEL_AUTH_KEYS):
         return True
 
     tokens = raw.get("tokens")
     if not isinstance(tokens, dict):
         return False
 
-    return any(
-        _clean_text(tokens.get(key))
-        for key in ("access_token", "account_id", "email", "id_token")
-    )
+    return _first_clean_text(tokens, _NESTED_AUTH_KEYS) is not None
 
 
 def load_auth_records(
