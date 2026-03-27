@@ -20,6 +20,24 @@ DEFAULT_AUTO_RESET_STREAK = 12
 DEFAULT_AUTO_RESET_COOLDOWN = 5 * 60
 DEFAULT_MAX_IN_FLIGHT_REQUESTS = 0
 DEFAULT_MAX_PENDING_REQUESTS = 0
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TOP = "12%"
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_RIGHT = "2%"
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_WIDTH = "40%"
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_HEIGHT = "35%"
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT = False
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_PINNED = True
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_NAME = ""
+DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX = "cdx:"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_LAYOUT = "top-right-double"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_TOP = "12%"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_RIGHT = "2%"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_WIDTH = "40%"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_HEIGHT = "72%"
+DEFAULT_CODEX_WP_ZELLIJ_PAIR_GAP = "1"
+DEFAULT_CODEX_WP_ZELLIJ_AUTO_NAME = True
+DEFAULT_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS = 3
+DEFAULT_CODEX_WP_ZELLIJ_TITLE_CASE = "title"
+DEFAULT_CODEX_WP_ZELLIJ_TITLE_FALLBACK = "Codex Task"
 
 # Auto-heal blacklist configuration defaults (Envoy-inspired)
 DEFAULT_AUTO_HEAL_INTERVAL = 60  # seconds between health checks
@@ -50,6 +68,24 @@ ENV_AUTO_HEAL_SUCCESS_TARGET = "CLIPROXY_AUTO_HEAL_SUCCESS_TARGET"
 ENV_AUTO_HEAL_MAX_ATTEMPTS = "CLIPROXY_AUTO_HEAL_MAX_ATTEMPTS"
 ENV_MAX_EJECTION_PERCENT = "CLIPROXY_MAX_EJECTION_PERCENT"
 ENV_CONSECUTIVE_ERROR_THRESHOLD = "CLIPROXY_CONSECUTIVE_ERROR_THRESHOLD"
+ENV_CODEX_WP_ZELLIJ_FLOAT_TOP = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_TOP"
+ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_RIGHT"
+ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_WIDTH"
+ENV_CODEX_WP_ZELLIJ_FLOAT_HEIGHT = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_HEIGHT"
+ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT"
+ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_PINNED"
+ENV_CODEX_WP_ZELLIJ_FLOAT_NAME = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_NAME"
+ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX = "CLIPROXY_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX"
+ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_LAYOUT"
+ENV_CODEX_WP_ZELLIJ_PAIR_TOP = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_TOP"
+ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_RIGHT"
+ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_WIDTH"
+ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_HEIGHT"
+ENV_CODEX_WP_ZELLIJ_PAIR_GAP = "CLIPROXY_CODEX_WP_ZELLIJ_PAIR_GAP"
+ENV_CODEX_WP_ZELLIJ_AUTO_NAME = "CLIPROXY_CODEX_WP_ZELLIJ_AUTO_NAME"
+ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS = "CLIPROXY_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS"
+ENV_CODEX_WP_ZELLIJ_TITLE_CASE = "CLIPROXY_CODEX_WP_ZELLIJ_TITLE_CASE"
+ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK = "CLIPROXY_CODEX_WP_ZELLIJ_TITLE_FALLBACK"
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _CHATGPT_BACKEND_HOSTS = {"chatgpt.com", "chat.openai.com"}
@@ -157,6 +193,102 @@ def load_env_file(path: Path) -> Dict[str, str]:
         if key:
             data[key] = value
     return data
+
+
+def load_codex_wp_defaults(
+    *,
+    auth_dir: Optional[str] = None,
+    env_file: Optional[str] = None,
+) -> Dict[str, object]:
+    initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
+    auth_dir_path = resolve_path(initial_auth_dir)
+    inherited_env_file = (
+        env_file
+        if env_file is not None
+        else (None if auth_dir is not None else os.environ.get(ENV_ENV_FILE))
+    )
+    path = env_file_path(str(auth_dir_path), inherited_env_file)
+    merged = load_env_file(path)
+    merged.update(os.environ)
+
+    def resolve_text(env_key: str, default: str) -> str:
+        value = str(merged.get(env_key) or "").strip()
+        return value or default
+
+    return {
+        "zellij_float_top": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_TOP,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TOP,
+        ),
+        "zellij_float_right": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
+        ),
+        "zellij_float_width": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
+        ),
+        "zellij_float_height": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_HEIGHT,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_HEIGHT,
+        ),
+        "zellij_float_close_on_exit": parse_bool(
+            merged.get(ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT),
+            default=DEFAULT_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT,
+        ),
+        "zellij_float_pinned": parse_bool(
+            merged.get(ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED),
+            default=DEFAULT_CODEX_WP_ZELLIJ_FLOAT_PINNED,
+        ),
+        "zellij_float_name": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_NAME,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_NAME,
+        ),
+        "zellij_float_title_prefix": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX,
+            DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX,
+        ),
+        "zellij_pair_layout": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
+        ),
+        "zellij_pair_top": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_TOP,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_TOP,
+        ),
+        "zellij_pair_right": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_RIGHT,
+        ),
+        "zellij_pair_width": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_WIDTH,
+        ),
+        "zellij_pair_height": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
+        ),
+        "zellij_pair_gap": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_PAIR_GAP,
+            DEFAULT_CODEX_WP_ZELLIJ_PAIR_GAP,
+        ),
+        "zellij_auto_name": parse_bool(
+            merged.get(ENV_CODEX_WP_ZELLIJ_AUTO_NAME),
+            default=DEFAULT_CODEX_WP_ZELLIJ_AUTO_NAME,
+        ),
+        "zellij_title_max_words": parse_positive_int(
+            merged.get(ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS),
+            default=DEFAULT_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS,
+        ),
+        "zellij_title_case": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_TITLE_CASE,
+            DEFAULT_CODEX_WP_ZELLIJ_TITLE_CASE,
+        ),
+        "zellij_title_fallback": resolve_text(
+            ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
+            DEFAULT_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
+        ),
+    }
 
 
 def _write_env_file(path: Path, values: Dict[str, str]) -> None:

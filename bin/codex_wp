@@ -6,6 +6,270 @@ die() {
   exit "${2:-1}"
 }
 
+print_shell_command() {
+  print_shell_command_with_prefix 'command' "$@"
+}
+
+print_shell_command_with_prefix() {
+  local prefix="$1"
+  shift
+  local arg
+  local first=1
+
+  printf '%s=' "$prefix"
+  for arg in "$@"; do
+    if (( first )); then
+      first=0
+    else
+      printf ' '
+    fi
+    printf '%q' "$arg"
+  done
+  printf '\n'
+}
+
+build_shell_command_string() {
+  local arg
+  local first=1
+  local rendered=""
+  local quoted_arg
+
+  for arg in "$@"; do
+    if (( first )); then
+      first=0
+    else
+      rendered+=" "
+    fi
+    printf -v quoted_arg '%q' "$arg"
+    rendered+="$quoted_arg"
+  done
+  printf '%s\n' "$rendered"
+}
+
+# Build file references string from array of file paths
+# Outputs: "@/abs/path1 @/abs/path2 "
+build_file_refs() {
+  local files=("$@")
+  local file_refs=""
+  local abs_path=""
+  for f in "${files[@]}"; do
+    # Convert to absolute path if relative
+    if [[ "$f" = /* ]]; then
+      abs_path="$f"
+    else
+      abs_path="$PWD/$f"
+    fi
+    file_refs="${file_refs}@${abs_path} "
+  done
+  printf '%s' "$file_refs"
+}
+
+script_path="$(readlink -f "$0")"
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+codex_wp_python_bin=""
+
+zellij_mode=0
+zellij_new_tab_requested=0
+zellij_pair_mode=0
+zellij_pair_options_seen=0
+zellij_tab_name=""
+zellij_template="three-vertical"
+zellij_cwd=""
+zellij_dry_run=0
+zellij_floating=0
+zellij_pair_layout=""
+zellij_pair_json=0
+zellij_top=""
+zellij_right=""
+zellij_float_width=""
+zellij_float_height=""
+zellij_close_on_exit=""
+zellij_pinned=""
+zellij_float_name=""
+zellij_float_title_prefix=""
+zellij_auto_name=""
+zellij_title_max_words=""
+zellij_title_case=""
+zellij_title_fallback=""
+zellij_pair_top=""
+zellij_pair_right=""
+zellij_pair_width=""
+zellij_pair_height=""
+zellij_pair_gap=""
+pair_a_prompt=""
+pair_a_file=""
+pair_b_prompt=""
+pair_b_file=""
+files_to_include=()
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --)
+      args+=("$@")
+      break
+      ;;
+    --zellij-new-tab)
+      zellij_new_tab_requested=1
+      zellij_mode=1
+      shift
+      if [[ $# -gt 0 ]]; then
+        case "$1" in
+          --*|exec) ;;
+          *)
+            zellij_tab_name="$1"
+            shift
+            ;;
+        esac
+      fi
+      ;;
+    --zellij-template)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-template requires a template key." 2
+      zellij_mode=1
+      zellij_template="$2"
+      shift 2
+      ;;
+    --zellij-cwd)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-cwd requires a path." 2
+      zellij_mode=1
+      zellij_cwd="$2"
+      shift 2
+      ;;
+    --zellij-dry-run)
+      zellij_mode=1
+      zellij_dry_run=1
+      shift
+      ;;
+    --zellij-floating)
+      zellij_mode=1
+      zellij_floating=1
+      shift
+      ;;
+    --zellij-floating-pair)
+      zellij_mode=1
+      zellij_pair_mode=1
+      shift
+      ;;
+    --pair-layout)
+      [[ $# -ge 2 ]] || die "codex_wp: --pair-layout requires a layout key." 2
+      zellij_pair_options_seen=1
+      zellij_pair_layout="$2"
+      shift 2
+      ;;
+    --a-prompt)
+      [[ $# -ge 2 ]] || die "codex_wp: --a-prompt requires prompt text." 2
+      zellij_pair_options_seen=1
+      pair_a_prompt="$2"
+      shift 2
+      ;;
+    --a-file)
+      [[ $# -ge 2 ]] || die "codex_wp: --a-file requires a file path." 2
+      zellij_pair_options_seen=1
+      pair_a_file="$2"
+      shift 2
+      ;;
+    --b-prompt)
+      [[ $# -ge 2 ]] || die "codex_wp: --b-prompt requires prompt text." 2
+      zellij_pair_options_seen=1
+      pair_b_prompt="$2"
+      shift 2
+      ;;
+    --b-file)
+      [[ $# -ge 2 ]] || die "codex_wp: --b-file requires a file path." 2
+      zellij_pair_options_seen=1
+      pair_b_file="$2"
+      shift 2
+      ;;
+    --zellij-pair-json)
+      zellij_pair_options_seen=1
+      zellij_pair_json=1
+      shift
+      ;;
+    --zellij-top)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-top requires a value." 2
+      zellij_mode=1
+      zellij_floating=1
+      zellij_top="$2"
+      shift 2
+      ;;
+    --zellij-right)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-right requires a value." 2
+      zellij_mode=1
+      zellij_floating=1
+      zellij_right="$2"
+      shift 2
+      ;;
+    --zellij-width)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-width requires a value." 2
+      zellij_mode=1
+      zellij_floating=1
+      zellij_float_width="$2"
+      shift 2
+      ;;
+    --zellij-height)
+      [[ $# -ge 2 ]] || die "codex_wp: --zellij-height requires a value." 2
+      zellij_mode=1
+      zellij_floating=1
+      zellij_float_height="$2"
+      shift 2
+      ;;
+    --zellij-close-on-exit)
+      zellij_mode=1
+      zellij_floating=1
+      zellij_close_on_exit=1
+      shift
+      ;;
+    --zellij-replace-existing)
+      die "codex_wp: --zellij-replace-existing is not supported yet." 2
+      ;;
+    -f|--file)
+      [[ $# -ge 2 ]] || die "codex_wp: $1 requires a file path." 2
+      files_to_include+=("$2")
+      shift 2
+      ;;
+    -p)
+      prompt_arg="$2"
+      shift 2 || die "codex_wp: -p requires a prompt argument"
+      args+=("exec" "$prompt_arg")
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if (( zellij_pair_options_seen )) && (( ! zellij_pair_mode )); then
+  die "codex_wp: --zellij-floating-pair is required when using pair flags." 2
+fi
+
+pair_shared_args=()
+if (( zellij_pair_mode )); then
+  if (( ${#files_to_include[@]} > 0 )); then
+    die "codex_wp: pair mode does not accept --file before '--'. Pass shared inner flags after '--' instead." 2
+  fi
+  if (( ${#args[@]} > 0 )); then
+    [[ "${args[0]}" == "--" ]] || \
+      die "codex_wp: pair mode requires shared inner args after an explicit '--' delimiter." 2
+    pair_shared_args=("${args[@]:1}")
+  fi
+  if (( ${#pair_shared_args[@]} > 0 )) && [[ "${pair_shared_args[0]}" == "exec" ]]; then
+    die "codex_wp: pair mode adds 'exec' automatically. Remove it from the shared args." 2
+  fi
+  set --
+else
+  set -- "${args[@]}"
+fi
+
+# Prepend file references to exec prompt if files were specified
+if (( ! zellij_pair_mode )) && [[ ${#files_to_include[@]} -gt 0 && $# -ge 2 && "$1" == "exec" ]]; then
+  shift
+  original_prompt="$1"
+  shift
+  file_refs="$(build_file_refs "${files_to_include[@]}")"
+  set -- "exec" "${file_refs}${original_prompt}" "$@"
+fi
+
 resolve_bin() {
   local candidate="$1"
   local fallback_name="$2"
@@ -18,9 +282,1008 @@ resolve_bin() {
   command -v "$fallback_name" || true
 }
 
-script_path="$(readlink -f "$0")"
-script_dir="$(cd "$(dirname "$script_path")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
+resolve_python_bin() {
+  resolve_bin "${PYTHON_BIN:-$repo_root/.venv/bin/python3}" "python3"
+}
+
+load_codex_wp_config_defaults() {
+  local pythonpath
+  local -a config_lines
+
+  codex_wp_python_bin="$(resolve_python_bin)"
+  [[ -n "$codex_wp_python_bin" && -x "$codex_wp_python_bin" ]] || \
+    die "codex_wp: python3 not found. Install it or set PYTHON_BIN." 127
+
+  pythonpath="$repo_root/src"
+  if [[ -n "${PYTHONPATH:-}" ]]; then
+    pythonpath="$pythonpath:$PYTHONPATH"
+  fi
+
+  mapfile -t config_lines < <(
+    PYTHONPATH="$pythonpath" "$codex_wp_python_bin" - <<'PY'
+from cdx_proxy_cli_v2.config.settings import load_codex_wp_defaults
+
+defaults = load_codex_wp_defaults()
+print(defaults["zellij_float_top"])
+print(defaults["zellij_float_right"])
+print(defaults["zellij_float_width"])
+print(defaults["zellij_float_height"])
+print("true" if defaults["zellij_float_close_on_exit"] else "false")
+print("true" if defaults["zellij_float_pinned"] else "false")
+print(defaults["zellij_float_name"])
+print(defaults["zellij_float_title_prefix"])
+print(defaults["zellij_pair_layout"])
+print(defaults["zellij_pair_top"])
+print(defaults["zellij_pair_right"])
+print(defaults["zellij_pair_width"])
+print(defaults["zellij_pair_height"])
+print(defaults["zellij_pair_gap"])
+print("true" if defaults["zellij_auto_name"] else "false")
+print(defaults["zellij_title_max_words"])
+print(defaults["zellij_title_case"])
+print(defaults["zellij_title_fallback"])
+PY
+  )
+
+  [[ ${#config_lines[@]} -eq 18 ]] || die "codex_wp: failed to load codex_wp config defaults."
+
+  [[ -n "$zellij_top" ]] || zellij_top="${config_lines[0]}"
+  [[ -n "$zellij_right" ]] || zellij_right="${config_lines[1]}"
+  [[ -n "$zellij_float_width" ]] || zellij_float_width="${config_lines[2]}"
+  [[ -n "$zellij_float_height" ]] || zellij_float_height="${config_lines[3]}"
+  if [[ -z "$zellij_close_on_exit" ]]; then
+    if [[ "${config_lines[4]}" == "true" ]]; then
+      zellij_close_on_exit=1
+    else
+      zellij_close_on_exit=0
+    fi
+  fi
+  zellij_pinned="${config_lines[5]}"
+  [[ -n "$zellij_float_name" ]] || zellij_float_name="${config_lines[6]}"
+  zellij_float_title_prefix="${config_lines[7]}"
+  [[ -n "$zellij_pair_layout" ]] || zellij_pair_layout="${config_lines[8]}"
+  [[ -n "$zellij_pair_top" ]] || zellij_pair_top="${config_lines[9]}"
+  [[ -n "$zellij_pair_right" ]] || zellij_pair_right="${config_lines[10]}"
+  [[ -n "$zellij_pair_width" ]] || zellij_pair_width="${config_lines[11]}"
+  [[ -n "$zellij_pair_height" ]] || zellij_pair_height="${config_lines[12]}"
+  [[ -n "$zellij_pair_gap" ]] || zellij_pair_gap="${config_lines[13]}"
+  zellij_auto_name="${config_lines[14]}"
+  zellij_title_max_words="${config_lines[15]}"
+  zellij_title_case="${config_lines[16]}"
+  zellij_title_fallback="${config_lines[17]}"
+}
+
+derive_zellij_cwd() {
+  local inner_args=("$@")
+  local derived_cwd=""
+  local index
+
+  if [[ -n "$zellij_cwd" ]]; then
+    printf '%s\n' "$zellij_cwd"
+    return 0
+  fi
+
+  for ((index = 0; index < ${#inner_args[@]}; index++)); do
+    if [[ "${inner_args[$index]}" == "-C" ]] && (( index + 1 < ${#inner_args[@]} )); then
+      derived_cwd="${inner_args[$((index + 1))]}"
+      ((index++))
+    fi
+  done
+
+  if [[ -n "$derived_cwd" ]]; then
+    printf '%s\n' "$derived_cwd"
+    return 0
+  fi
+
+  printf '%s\n' "$PWD"
+}
+
+read_zellij_tabs_json() {
+  local include_dimensions="${1:-0}"
+  local stderr_path
+  local tabs_output
+  local -a command_args
+
+  stderr_path="$(mktemp)"
+  command_args=("$zellij_bin" action list-tabs --json)
+  if (( include_dimensions )); then
+    command_args+=(--state --dimensions)
+  fi
+
+  if ! tabs_output="$("${command_args[@]}" 2>"$stderr_path")"; then
+    zellij_error="$(tr '\n' ' ' <"$stderr_path" | sed 's/[[:space:]]*$//')"
+    rm -f "$stderr_path"
+    if [[ -n "$zellij_error" ]]; then
+      die "codex_wp: no active zellij session found. $zellij_error"
+    fi
+    die "codex_wp: no active zellij session found."
+  fi
+  rm -f "$stderr_path"
+  printf '%s\n' "$tabs_output"
+}
+
+resolve_floating_geometry() {
+  LIST_TABS_OUTPUT="$1" "$codex_wp_python_bin" - \
+    "$zellij_top" \
+    "$zellij_right" \
+    "$zellij_float_width" \
+    "$zellij_float_height" <<'PY'
+import json
+import os
+import sys
+
+
+def parse_measure(raw, total, *, allow_zero):
+    text = str(raw).strip()
+    if not text:
+        raise ValueError("empty measure")
+    if text.endswith("%"):
+        percent = float(text[:-1])
+        value = int(round((total * percent) / 100.0))
+    else:
+        value = int(text)
+    minimum = 0 if allow_zero else 1
+    return max(minimum, value)
+
+
+tabs = json.loads(os.environ["LIST_TABS_OUTPUT"])
+if not isinstance(tabs, list) or not tabs:
+    raise SystemExit(2)
+
+active = next((item for item in tabs if isinstance(item, dict) and item.get("active")), None)
+if active is None:
+    active = next((item for item in tabs if isinstance(item, dict)), None)
+if active is None:
+    raise SystemExit(2)
+
+columns = int(active.get("viewport_columns") or active.get("display_area_columns") or 0)
+rows = int(active.get("viewport_rows") or active.get("display_area_rows") or 0)
+if columns <= 0 or rows <= 0:
+    raise SystemExit(2)
+
+top = parse_measure(sys.argv[1], rows, allow_zero=True)
+right = parse_measure(sys.argv[2], columns, allow_zero=True)
+width = parse_measure(sys.argv[3], columns, allow_zero=False)
+height = parse_measure(sys.argv[4], rows, allow_zero=False)
+x = max(0, columns - width - right)
+y = max(0, top)
+
+print(x, y, width, height)
+PY
+}
+
+extract_prompt_text() {
+  local inner_args=("$@")
+  local last_index
+
+  if [[ ${#inner_args[@]} -eq 0 ]]; then
+    return 1
+  fi
+
+  last_index=$((${#inner_args[@]} - 1))
+  printf '%s\n' "${inner_args[$last_index]}"
+}
+
+resolve_zellij_name() {
+  local explicit_name="$1"
+  shift
+  local prompt_text=""
+
+  if [[ -n "$explicit_name" ]]; then
+    printf '%s\n' "$explicit_name"
+    return 0
+  fi
+
+  if [[ "$zellij_auto_name" != "true" ]]; then
+    printf '%s\n' "$zellij_title_fallback"
+    return 0
+  fi
+
+  if prompt_text="$(extract_prompt_text "$@")"; then
+    CODEX_WP_PROMPT="$prompt_text" "$codex_wp_python_bin" - \
+      "$zellij_title_max_words" \
+      "$zellij_title_case" \
+      "$zellij_title_fallback" <<'PY'
+import os
+import re
+import sys
+import unicodedata
+from pathlib import Path
+
+
+STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "analyze",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "create",
+    "debug",
+    "do",
+    "document",
+    "does",
+    "exactly",
+    "explain",
+    "for",
+    "from",
+    "fix",
+    "give",
+    "implement",
+    "in",
+    "into",
+    "investigate",
+    "is",
+    "it",
+    "make",
+    "of",
+    "on",
+    "only",
+    "or",
+    "output",
+    "plan",
+    "please",
+    "print",
+    "reply",
+    "respond",
+    "return",
+    "run",
+    "show",
+    "start",
+    "stop",
+    "summarize",
+    "tell",
+    "test",
+    "the",
+    "this",
+    "to",
+    "use",
+    "using",
+    "validate",
+    "with",
+    "write",
+}
+
+ACTION_LABELS = {
+    "add": "Build",
+    "analyze": "Analysis",
+    "audit": "Review",
+    "build": "Build",
+    "check": "Check",
+    "create": "Build",
+    "debug": "Debug",
+    "design": "Plan",
+    "document": "Docs",
+    "explain": "Explain",
+    "fix": "Fix",
+    "implement": "Build",
+    "investigate": "Debug",
+    "plan": "Plan",
+    "refactor": "Refactor",
+    "repair": "Fix",
+    "review": "Review",
+    "summarize": "Summary",
+    "test": "Check",
+    "validate": "Check",
+    "verify": "Check",
+}
+
+GENERIC_SUBJECTS = {
+    "bug",
+    "check",
+    "command",
+    "flow",
+    "issue",
+    "output",
+    "problem",
+    "prompt",
+    "script",
+    "task",
+}
+
+IGNORE_MARKER_TOKENS = {"DONE", "OK", "PASS", "STOP"}
+
+
+def unique_words(words: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for word in words:
+        key = word.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(word)
+    return result
+
+
+def detect_math_title(line: str) -> list[str] | None:
+    if re.search(r"[A-Za-z]", line):
+        return None
+    if re.search(r"\d", line) and re.search(r"[+\-*/%=^]", line):
+        return ["Math", "Check"]
+    return None
+
+
+def detect_exact_reply_title(line: str) -> list[str] | None:
+    match = re.search(
+        r"\b(?:reply|respond|print|return)\b.*?\bexactly\b\s+([A-Z][A-Z0-9_-]{1,})\b",
+        line,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    marker = match.group(1).upper()
+    if marker in IGNORE_MARKER_TOKENS:
+        return None
+    return [marker, "Check"]
+
+
+def extract_path_tokens(line: str) -> list[str]:
+    tokens: list[str] = []
+    for raw_path in re.findall(r"@(\S+)", line):
+        stem = Path(raw_path).stem
+        tokens.extend(re.findall(r"[A-Za-z0-9]+", stem))
+    return tokens
+
+
+def select_action_label(line: str) -> str | None:
+    lowered_tokens = re.findall(r"[A-Za-z]+", line.lower())
+    for token in lowered_tokens:
+        label = ACTION_LABELS.get(token)
+        if label:
+            return label
+    return None
+
+
+def collect_subject_tokens(line: str, path_tokens: list[str], action_label: str | None) -> list[str]:
+    combined = path_tokens + re.findall(r"[A-Za-z0-9]+", line)
+    filtered: list[str] = []
+    for token in combined:
+        lowered = token.lower()
+        if lowered in STOP_WORDS or lowered in ACTION_LABELS:
+            continue
+        if len(token) == 1 and not token.isdigit():
+            continue
+        if token.isdigit():
+            continue
+        filtered.append(token)
+
+    subjects = unique_words(filtered)
+    if action_label:
+        tightened = [token for token in subjects if token.lower() not in GENERIC_SUBJECTS]
+        if tightened:
+            subjects = tightened
+    return subjects
+
+
+def normalize_token(token: str, mode: str) -> str:
+    if not token:
+        return token
+    if mode == "upper":
+        return token.upper()
+    if mode == "lower":
+        return token.lower()
+    if token.isupper() or any(char.isdigit() for char in token):
+        return token.upper()
+    return token[:1].upper() + token[1:].lower()
+
+
+def apply_case(words: list[str], mode: str) -> list[str]:
+    lowered = mode.strip().lower()
+    if lowered == "sentence":
+        sentence_words = [word.lower() for word in words]
+        sentence_words[0] = normalize_token(sentence_words[0], "title")
+        return sentence_words
+    return [normalize_token(word, lowered) for word in words]
+
+
+fallback = str(sys.argv[3] or "").strip() or "Codex Task"
+raw_prompt = unicodedata.normalize("NFKC", os.environ.get("CODEX_WP_PROMPT", ""))
+first_line = raw_prompt.splitlines()[0] if raw_prompt else ""
+without_refs = re.sub(r"@\S+", " ", first_line)
+max_words = max(1, int(sys.argv[1] or "1"))
+path_tokens = extract_path_tokens(first_line)
+selected = detect_math_title(without_refs) or detect_exact_reply_title(without_refs)
+if selected is None:
+    action_label = select_action_label(without_refs)
+    subjects = collect_subject_tokens(without_refs, path_tokens, action_label)
+    if len(subjects) >= max_words:
+        selected = subjects[:max_words]
+    elif action_label and subjects:
+        selected = (subjects + [action_label])[:max_words]
+    elif subjects:
+        selected = subjects[:max_words]
+    elif action_label:
+        selected = [action_label, "Task"][:max_words]
+    else:
+        selected = []
+
+if not selected:
+    print(fallback)
+    raise SystemExit(0)
+
+print(" ".join(apply_case(selected, sys.argv[2])))
+PY
+    return 0
+  fi
+
+  printf '%s\n' "$zellij_title_fallback"
+}
+
+apply_floating_title_prefix() {
+  local name="$1"
+  local prefix="$zellij_float_title_prefix"
+  local separator=" "
+
+  if [[ -z "$name" || -z "$prefix" ]]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+
+  if [[ "$name" == "$prefix" || "$name" == "$prefix "* || "$name" == "$prefix"* ]]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+
+  if [[ "$prefix" == *[[:space:]] ]]; then
+    separator=""
+  fi
+
+  printf '%s%s%s\n' "$prefix" "$separator" "$name"
+}
+
+resolve_initial_floating_name() {
+  local final_name="$1"
+
+  if [[ -n "$zellij_float_name" ]]; then
+    printf '%s\n' "$final_name"
+    return 0
+  fi
+
+  if [[ -n "$zellij_float_title_prefix" ]]; then
+    printf '%s\n' "$zellij_float_title_prefix"
+    return 0
+  fi
+
+  printf '%s\n' "$final_name"
+}
+
+init_zellij_floating_run_command() {
+  local output_var="$1"
+  local executable="$2"
+  local -n command_ref="$output_var"
+
+  command_ref=(
+    "$executable"
+    run
+    --floating
+  )
+  if (( zellij_close_on_exit )); then
+    command_ref+=(--close-on-exit)
+  fi
+  if [[ "$zellij_pinned" == "true" ]]; then
+    command_ref+=(--pinned true)
+  fi
+}
+
+load_prompt_text_from_file() {
+  local output_var="$1"
+  local slot="$2"
+  local prompt_file="$3"
+  local prompt_text=""
+
+  [[ -f "$prompt_file" ]] || die "codex_wp: $slot prompt file not found: $prompt_file" 2
+  [[ -r "$prompt_file" ]] || die "codex_wp: $slot prompt file is not readable: $prompt_file" 2
+
+  if ! IFS= read -r -d '' prompt_text < <(
+    "$codex_wp_python_bin" - "$prompt_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+sys.stdout.write(path.read_text(encoding="utf-8"))
+sys.stdout.write("\0")
+PY
+  ); then
+    die "codex_wp: failed to read $slot prompt file '$prompt_file' as UTF-8 text." 2
+  fi
+
+  printf -v "$output_var" '%s' "$prompt_text"
+}
+
+resolve_pair_prompt_text() {
+  local output_var="$1"
+  local slot="$2"
+  local inline_prompt="$3"
+  local prompt_file="$4"
+
+  if [[ -n "$inline_prompt" && -n "$prompt_file" ]]; then
+    die "codex_wp: $slot requires exactly one of inline prompt or prompt file." 2
+  fi
+  if [[ -z "$inline_prompt" && -z "$prompt_file" ]]; then
+    die "codex_wp: $slot prompt source is required." 2
+  fi
+
+  if [[ -n "$prompt_file" ]]; then
+    load_prompt_text_from_file "$output_var" "$slot" "$prompt_file"
+    return 0
+  fi
+
+  printf -v "$output_var" '%s' "$inline_prompt"
+}
+
+resolve_pair_geometry() {
+  LIST_TABS_OUTPUT="$1" "$codex_wp_python_bin" - \
+    "$zellij_pair_layout" \
+    "$zellij_pair_top" \
+    "$zellij_pair_right" \
+    "$zellij_pair_width" \
+    "$zellij_pair_height" \
+    "$zellij_pair_gap" <<'PY'
+import json
+import os
+import sys
+
+
+def parse_measure(raw, total, *, allow_zero):
+    text = str(raw).strip()
+    if not text:
+        raise ValueError("empty measure")
+    if text.endswith("%"):
+        percent = float(text[:-1])
+        value = int(round((total * percent) / 100.0))
+    else:
+        value = int(text)
+    minimum = 0 if allow_zero else 1
+    return max(minimum, value)
+
+
+def parse_gap(raw):
+    gap = int(str(raw).strip())
+    if gap < 0:
+        raise ValueError("negative gap")
+    return gap
+
+
+layout = sys.argv[1]
+if layout != "top-right-double":
+    raise SystemExit(3)
+
+tabs = json.loads(os.environ["LIST_TABS_OUTPUT"])
+if not isinstance(tabs, list) or not tabs:
+    raise SystemExit(2)
+
+active = next((item for item in tabs if isinstance(item, dict) and item.get("active")), None)
+if active is None:
+    active = next((item for item in tabs if isinstance(item, dict)), None)
+if active is None:
+    raise SystemExit(2)
+
+columns = int(active.get("viewport_columns") or active.get("display_area_columns") or 0)
+rows = int(active.get("viewport_rows") or active.get("display_area_rows") or 0)
+if columns <= 0 or rows <= 0:
+    raise SystemExit(2)
+
+top = parse_measure(sys.argv[2], rows, allow_zero=True)
+right = parse_measure(sys.argv[3], columns, allow_zero=True)
+width = parse_measure(sys.argv[4], columns, allow_zero=False)
+total_height = parse_measure(sys.argv[5], rows, allow_zero=False)
+gap = parse_gap(sys.argv[6])
+available_height = total_height - gap
+if available_height < 2:
+    raise SystemExit(4)
+
+height_a = available_height // 2
+height_b = available_height - height_a
+if height_a <= 0 or height_b <= 0:
+    raise SystemExit(4)
+
+x = max(0, columns - width - right)
+y_a = max(0, top)
+y_b = y_a + height_a + gap
+
+print(x, y_a, width, height_a, x, y_b, width, height_b)
+PY
+}
+
+resolve_pair_initial_name() {
+  local slot="$1"
+
+  if [[ -n "$zellij_float_title_prefix" ]]; then
+    printf '%s%s\n' "$zellij_float_title_prefix" "$slot"
+    return 0
+  fi
+
+  printf '%s\n' "$slot"
+}
+
+emit_pair_result() {
+  local pane_a_id="$1"
+  local pane_a_initial_title="$2"
+  local pane_a_final_title="$3"
+  local pane_a_state="$4"
+  local pane_a_command="$5"
+  local pane_b_id="$6"
+  local pane_b_initial_title="$7"
+  local pane_b_final_title="$8"
+  local pane_b_state="$9"
+  local pane_b_command="${10}"
+
+  if (( zellij_pair_json )); then
+    PAIR_LAYOUT="$zellij_pair_layout" \
+    PAIR_DRY_RUN="$zellij_dry_run" \
+    PANE_A_ID="$pane_a_id" \
+    PANE_A_INITIAL_TITLE="$pane_a_initial_title" \
+    PANE_A_FINAL_TITLE="$pane_a_final_title" \
+    PANE_A_STATE="$pane_a_state" \
+    PANE_A_COMMAND="$pane_a_command" \
+    PANE_B_ID="$pane_b_id" \
+    PANE_B_INITIAL_TITLE="$pane_b_initial_title" \
+    PANE_B_FINAL_TITLE="$pane_b_final_title" \
+    PANE_B_STATE="$pane_b_state" \
+    PANE_B_COMMAND="$pane_b_command" \
+      "$codex_wp_python_bin" - <<'PY'
+import json
+import os
+
+
+def pane(slot: str):
+    upper = slot.upper()
+    payload = {
+        "slot": slot,
+        "pane_id": os.environ.get(f"PANE_{upper}_ID") or None,
+        "initial_title": os.environ.get(f"PANE_{upper}_INITIAL_TITLE") or None,
+        "final_title": os.environ.get(f"PANE_{upper}_FINAL_TITLE") or None,
+        "state": os.environ.get(f"PANE_{upper}_STATE") or None,
+    }
+    command = os.environ.get(f"PANE_{upper}_COMMAND") or ""
+    if command:
+        payload["launch_command"] = command
+    return payload
+
+
+print(
+    json.dumps(
+        {
+            "mode": "zellij-floating-pair",
+            "layout": os.environ["PAIR_LAYOUT"],
+            "dry_run": os.environ.get("PAIR_DRY_RUN") == "1",
+            "panes": [pane("a"), pane("b")],
+        }
+    )
+)
+PY
+    return 0
+  fi
+
+  printf 'mode=zellij-floating-pair layout=%s\n' "$zellij_pair_layout"
+  printf \
+    'pane[a]=%s title="%s" state=%s\n' \
+    "${pane_a_id:-none}" \
+    "$pane_a_final_title" \
+    "$pane_a_state"
+  if [[ -n "$pane_a_command" ]]; then
+    printf 'pane[a].command=%s\n' "$pane_a_command"
+  fi
+  printf \
+    'pane[b]=%s title="%s" state=%s\n' \
+    "${pane_b_id:-none}" \
+    "$pane_b_final_title" \
+    "$pane_b_state"
+  if [[ -n "$pane_b_command" ]]; then
+    printf 'pane[b].command=%s\n' "$pane_b_command"
+  fi
+}
+
+if (( zellij_mode )); then
+  layout_path="$repo_root/layouts/zellij/$zellij_template.kdl"
+  zellij_bin="$(command -v zellij || true)"
+
+  [[ -n "$zellij_bin" && -x "$zellij_bin" ]] || \
+    die "codex_wp: zellij not found. Install it or set PATH." 127
+
+  load_codex_wp_config_defaults
+
+  if (( zellij_pair_mode )) && ((( zellij_floating )) || (( zellij_new_tab_requested ))); then
+    die "codex_wp: --zellij-floating-pair cannot be combined with other zellij launch modes." 2
+  fi
+
+  if (( zellij_floating )) && (( zellij_new_tab_requested )); then
+    die "codex_wp: --zellij-floating cannot be combined with --zellij-new-tab." 2
+  fi
+
+  if (( zellij_pair_mode )); then
+    case "$zellij_pair_layout" in
+      top-right-double) ;;
+      *)
+        die \
+          "codex_wp: unknown pair layout '$zellij_pair_layout'. Valid layouts: top-right-double." \
+          2
+        ;;
+    esac
+
+    resolve_pair_prompt_text prompt_a_text "pane A" "$pair_a_prompt" "$pair_a_file"
+    resolve_pair_prompt_text prompt_b_text "pane B" "$pair_b_prompt" "$pair_b_file"
+
+    list_tabs_output="$(read_zellij_tabs_json 1)"
+    pair_geometry_output="$(resolve_pair_geometry "$list_tabs_output")" || \
+      die "codex_wp: failed to resolve pair zellij geometry."
+    read -r \
+      pair_a_x \
+      pair_a_y \
+      pair_a_width \
+      pair_a_height \
+      pair_b_x \
+      pair_b_y \
+      pair_b_width \
+      pair_b_height <<<"$pair_geometry_output"
+
+    resolved_zellij_cwd="$(derive_zellij_cwd "${pair_shared_args[@]}")"
+    final_title_a="$(resolve_zellij_name "" exec "${pair_shared_args[@]}" "$prompt_a_text")"
+    final_title_b="$(resolve_zellij_name "" exec "${pair_shared_args[@]}" "$prompt_b_text")"
+    final_title_a="$(apply_floating_title_prefix "$final_title_a")"
+    final_title_b="$(apply_floating_title_prefix "$final_title_b")"
+    initial_title_a="$(resolve_pair_initial_name "a")"
+    initial_title_b="$(resolve_pair_initial_name "b")"
+
+    inner_command_a=("$script_path" exec "${pair_shared_args[@]}" "$prompt_a_text")
+    inner_command_b=("$script_path" exec "${pair_shared_args[@]}" "$prompt_b_text")
+    init_zellij_floating_run_command zellij_command_a "$zellij_bin"
+    init_zellij_floating_run_command zellij_command_b "$zellij_bin"
+    init_zellij_floating_run_command zellij_display_command_a zellij
+    init_zellij_floating_run_command zellij_display_command_b zellij
+    zellij_command_a+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$initial_title_a"
+      --x "$pair_a_x"
+      --y "$pair_a_y"
+      --width "$pair_a_width"
+      --height "$pair_a_height"
+      --
+      "${inner_command_a[@]}"
+    )
+    zellij_command_b+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$initial_title_b"
+      --x "$pair_b_x"
+      --y "$pair_b_y"
+      --width "$pair_b_width"
+      --height "$pair_b_height"
+      --
+      "${inner_command_b[@]}"
+    )
+    zellij_display_command_a+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$final_title_a"
+      --x "$pair_a_x"
+      --y "$pair_a_y"
+      --width "$pair_a_width"
+      --height "$pair_a_height"
+      --
+      "${inner_command_a[@]}"
+    )
+    zellij_display_command_b+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$final_title_b"
+      --x "$pair_b_x"
+      --y "$pair_b_y"
+      --width "$pair_b_width"
+      --height "$pair_b_height"
+      --
+      "${inner_command_b[@]}"
+    )
+
+    pane_a_command_string="$(build_shell_command_string "${zellij_display_command_a[@]}")"
+    pane_b_command_string="$(build_shell_command_string "${zellij_display_command_b[@]}")"
+
+    if (( zellij_dry_run )); then
+      emit_pair_result \
+        "" \
+        "$initial_title_a" \
+        "$final_title_a" \
+        "planned" \
+        "$pane_a_command_string" \
+        "" \
+        "$initial_title_b" \
+        "$final_title_b" \
+        "planned" \
+        "$pane_b_command_string"
+      exit 0
+    fi
+
+    pane_a_id=""
+    pane_b_id=""
+    pane_a_state="failed"
+    pane_b_state="failed"
+
+    if ! pane_a_id="$("${zellij_command_a[@]}")"; then
+      die "codex_wp: failed to create pane A for pair mode."
+    fi
+    pane_a_state="created"
+    if [[ -n "$pane_a_id" && "$initial_title_a" != "$final_title_a" ]]; then
+      if "$zellij_bin" action rename-pane --pane-id "$pane_a_id" "$final_title_a" >/dev/null; then
+        pane_a_state="renamed"
+      else
+        pane_a_state="rename_failed"
+      fi
+    else
+      pane_a_state="renamed"
+    fi
+
+    if ! pane_b_id="$("${zellij_command_b[@]}")"; then
+      emit_pair_result \
+        "$pane_a_id" \
+        "$initial_title_a" \
+        "$final_title_a" \
+        "$pane_a_state" \
+        "" \
+        "" \
+        "$initial_title_b" \
+        "$final_title_b" \
+        "failed" \
+        ""
+      exit 3
+    fi
+    pane_b_state="created"
+    if [[ -n "$pane_b_id" && "$initial_title_b" != "$final_title_b" ]]; then
+      if "$zellij_bin" action rename-pane --pane-id "$pane_b_id" "$final_title_b" >/dev/null; then
+        pane_b_state="renamed"
+      else
+        pane_b_state="rename_failed"
+      fi
+    else
+      pane_b_state="renamed"
+    fi
+
+    emit_pair_result \
+      "$pane_a_id" \
+      "$initial_title_a" \
+      "$final_title_a" \
+      "$pane_a_state" \
+      "" \
+      "$pane_b_id" \
+      "$initial_title_b" \
+      "$final_title_b" \
+      "$pane_b_state" \
+      ""
+    exit 0
+  fi
+
+  if (( zellij_floating )); then
+    list_tabs_output="$(read_zellij_tabs_json 1)"
+    geometry_output="$(resolve_floating_geometry "$list_tabs_output")" || \
+      die "codex_wp: failed to resolve floating zellij geometry."
+    read -r float_x float_y float_width float_height <<<"$geometry_output"
+
+    resolved_zellij_cwd="$(derive_zellij_cwd "$@")"
+    resolved_zellij_name="$(resolve_zellij_name "$zellij_float_name" "$@")"
+    resolved_zellij_name="$(apply_floating_title_prefix "$resolved_zellij_name")"
+    initial_zellij_name="$(resolve_initial_floating_name "$resolved_zellij_name")"
+    inner_command=("$script_path" "$@")
+    init_zellij_floating_run_command zellij_command "$zellij_bin"
+    init_zellij_floating_run_command zellij_display_command zellij
+    zellij_command+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$initial_zellij_name"
+      --x "$float_x"
+      --y "$float_y"
+      --width "$float_width"
+      --height "$float_height"
+      --
+      "${inner_command[@]}"
+    )
+    zellij_display_command+=(
+      --cwd "$resolved_zellij_cwd"
+      --name "$resolved_zellij_name"
+      --x "$float_x"
+      --y "$float_y"
+      --width "$float_width"
+      --height "$float_height"
+      --
+      "${inner_command[@]}"
+    )
+
+    if (( zellij_dry_run )); then
+      printf \
+        'floating=top=%s right=%s width=%s height=%s close_on_exit=%s\n' \
+        "$zellij_top" \
+        "$zellij_right" \
+        "$zellij_float_width" \
+        "$zellij_float_height" \
+        "$([[ $zellij_close_on_exit -eq 1 ]] && printf 'true' || printf 'false')"
+      print_shell_command "${zellij_display_command[@]}"
+      exit 0
+    fi
+
+    created_pane_id="$("${zellij_command[@]}")"
+    if [[ -n "$created_pane_id" && "$initial_zellij_name" != "$resolved_zellij_name" ]]; then
+      "$zellij_bin" action rename-pane --pane-id "$created_pane_id" "$resolved_zellij_name" >/dev/null
+    fi
+    printf '%s\n' "$created_pane_id"
+    exit 0
+  fi
+
+  (( zellij_new_tab_requested )) || \
+    die "codex_wp: --zellij-new-tab is required when using zellij mode." 2
+
+  case "$zellij_template" in
+    single|three-horizontal|three-vertical) ;;
+    *)
+      die \
+        "codex_wp: unknown zellij template '$zellij_template'. Valid templates: single, three-horizontal, three-vertical." \
+        2
+      ;;
+  esac
+
+  [[ -f "$layout_path" ]] || die "codex_wp: zellij template file not found: $layout_path"
+
+  zellij_tab_name="$(resolve_zellij_name "$zellij_tab_name" "$@")"
+  list_tabs_output="$(read_zellij_tabs_json 0)"
+
+  if LIST_TABS_OUTPUT="$list_tabs_output" "$codex_wp_python_bin" - "$zellij_tab_name" <<'PY'
+import json
+import os
+import sys
+
+target = sys.argv[1]
+
+try:
+    payload = json.loads(os.environ["LIST_TABS_OUTPUT"])
+except Exception:
+    raise SystemExit(2)
+
+if not isinstance(payload, list):
+    raise SystemExit(2)
+
+for item in payload:
+    if isinstance(item, dict) and str(item.get("name") or "") == target:
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  then
+    die "codex_wp: zellij tab '$zellij_tab_name' already exists."
+  else
+    parse_status=$?
+    if [[ $parse_status -ne 1 ]]; then
+      die "codex_wp: failed to parse zellij tab list."
+    fi
+  fi
+
+  resolved_zellij_cwd="$(derive_zellij_cwd "$@")"
+  inner_command=("$script_path" "$@")
+  zellij_command=(
+    "$zellij_bin"
+    action
+    new-tab
+    --name "$zellij_tab_name"
+    --cwd "$resolved_zellij_cwd"
+    --layout "$layout_path"
+    --
+    "${inner_command[@]}"
+  )
+  zellij_display_command=(
+    zellij
+    action
+    new-tab
+    --name "$zellij_tab_name"
+    --cwd "$resolved_zellij_cwd"
+    --layout "$layout_path"
+    --
+    "${inner_command[@]}"
+  )
+
+  if (( zellij_dry_run )); then
+    printf 'layout=%s\n' "$layout_path"
+    print_shell_command "${zellij_display_command[@]}"
+    exit 0
+  fi
+
+  exec "${zellij_command[@]}"
+fi
 
 cdx_bin="$(resolve_bin "${CDX_BIN:-$repo_root/.venv/bin/cdx}" "cdx")"
 [[ -n "$cdx_bin" && -x "$cdx_bin" ]] || \
@@ -37,5 +1300,6 @@ base_url="${CLIPROXY_BASE_URL:-}"
 [[ -n "$base_url" ]] || die "codex_wp: missing CLIPROXY_BASE_URL from proxy setup."
 
 config_arg="openai_base_url=\"$base_url\""
+
 exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
   "$codex_bin" -c "$config_arg" --dangerously-bypass-approvals-and-sandbox "$@"

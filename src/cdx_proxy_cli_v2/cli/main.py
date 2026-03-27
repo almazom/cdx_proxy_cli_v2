@@ -415,41 +415,58 @@ def handle_stop(args: argparse.Namespace) -> int:
 
 
 def handle_trace(args: argparse.Namespace) -> int:
+    from cdx_proxy_cli_v2.runtime.singleton import (
+        singleton_lock,
+        trace_pid_path,
+    )
+
     settings = _settings_from_args(args)
-    # Get actual running proxy endpoint from state file, not default settings
-    status_payload = service_status(settings)
-    if not status_payload.get("healthy"):
-        print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
-        return 1
-    base_url = str(status_payload.get("base_url") or settings.base_url)
-    headers = _management_headers(settings)
-    upstream_base_url = None
-    log_request_preview = None
-    try:
-        debug = fetch_json(
-            base_url=base_url,
-            path="/debug",
-            headers=headers,
-            timeout=2.0,
-        )
-        upstream_base_url = debug.get("upstream_base_url")
-        if "log_request_preview" in debug:
-            log_request_preview = bool(debug.get("log_request_preview"))
-    except Exception:
-        print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
-        return 1
-    try:
-        run_trace_tui(
-            base_url=base_url,
-            upstream_base_url=str(upstream_base_url) if upstream_base_url else None,
-            log_request_preview=log_request_preview,
-            window=max(1, int(args.limit)),
-            interval=max(0.1, float(args.interval)),
-            limit=max(0, int(args.limit)),
-            extra_headers=headers,
-        )
-    except KeyboardInterrupt:
-        return 0
+
+    # Singleton enforcement: only one cdx trace at a time
+    pid_path = trace_pid_path(settings.auth_dir)
+    replace_existing = bool(getattr(args, "replace", False))
+
+    with singleton_lock(pid_path, name="cdx trace", kill_existing=replace_existing) as (
+        killed_existing,
+        previous_pid,
+    ):
+        if killed_existing and previous_pid:
+            print(f"Replaced existing cdx trace (PID {previous_pid})", file=sys.stderr)
+
+        # Get actual running proxy endpoint from state file, not default settings
+        status_payload = service_status(settings)
+        if not status_payload.get("healthy"):
+            print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
+            return 1
+        base_url = str(status_payload.get("base_url") or settings.base_url)
+        headers = _management_headers(settings)
+        upstream_base_url = None
+        log_request_preview = None
+        try:
+            debug = fetch_json(
+                base_url=base_url,
+                path="/debug",
+                headers=headers,
+                timeout=2.0,
+            )
+            upstream_base_url = debug.get("upstream_base_url")
+            if "log_request_preview" in debug:
+                log_request_preview = bool(debug.get("log_request_preview"))
+        except Exception:
+            print("Proxy not running. Run `cdx proxy` first.", file=sys.stderr)
+            return 1
+        try:
+            run_trace_tui(
+                base_url=base_url,
+                upstream_base_url=str(upstream_base_url) if upstream_base_url else None,
+                log_request_preview=log_request_preview,
+                window=max(1, int(args.limit)),
+                interval=max(0.1, float(args.interval)),
+                limit=max(0, int(args.limit)),
+                extra_headers=headers,
+            )
+        except KeyboardInterrupt:
+            return 0
     return 0
 
 
@@ -896,6 +913,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(trace_parser)
     trace_parser.add_argument("--interval", type=float, default=1.0)
     trace_parser.add_argument("--limit", type=int, default=0)
+    trace_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace any existing cdx trace process",
+    )
     trace_parser.set_defaults(handler=handle_trace)
 
     logs_parser = sub.add_parser("logs", help="tail service logs")

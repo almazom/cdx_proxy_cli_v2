@@ -11,6 +11,24 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_AUTO_RESET_COOLDOWN,
     ENV_AUTO_RESET_ON_SINGLE_KEY,
     ENV_AUTO_RESET_STREAK,
+    ENV_CODEX_WP_ZELLIJ_AUTO_NAME,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_HEIGHT,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_NAME,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_TOP,
+    ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
+    ENV_CODEX_WP_ZELLIJ_PAIR_GAP,
+    ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
+    ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
+    ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT,
+    ENV_CODEX_WP_ZELLIJ_PAIR_TOP,
+    ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH,
+    ENV_CODEX_WP_ZELLIJ_TITLE_CASE,
+    ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
+    ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS,
     ENV_COMPACT_TIMEOUT,
     ENV_ENV_FILE,
     ENV_HOST,
@@ -23,11 +41,30 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_UPSTREAM,
     DEFAULT_AUTO_RESET_COOLDOWN,
     DEFAULT_AUTO_RESET_STREAK,
+    DEFAULT_CODEX_WP_ZELLIJ_AUTO_NAME,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_HEIGHT,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_NAME,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_PINNED,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TOP,
+    DEFAULT_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_GAP,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_RIGHT,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_TOP,
+    DEFAULT_CODEX_WP_ZELLIJ_PAIR_WIDTH,
+    DEFAULT_CODEX_WP_ZELLIJ_TITLE_CASE,
+    DEFAULT_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
+    DEFAULT_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS,
     DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
     DEFAULT_UPSTREAM,
     Settings,
     build_settings,
     load_env_file,
+    load_codex_wp_defaults,
     parse_bool,
     parse_port,
     parse_positive_int,
@@ -199,6 +236,130 @@ class TestLoadEnvFile:
         """Should return empty dict for missing file."""
         result = load_env_file(tmp_path / "nonexistent.env")
         assert result == {}
+
+
+class TestLoadCodexWpDefaults:
+    """Tests for codex_wp zellij floating defaults sourced from config."""
+
+    def test_returns_module_defaults_when_unset(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv(ENV_AUTH_DIR, raising=False)
+        monkeypatch.delenv(ENV_ENV_FILE, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_TOP, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_HEIGHT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_NAME, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_TOP, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_PAIR_GAP, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_AUTO_NAME, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_TITLE_CASE, raising=False)
+        monkeypatch.delenv(ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK, raising=False)
+
+        defaults = load_codex_wp_defaults()
+
+        assert defaults == {
+            "zellij_float_top": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TOP,
+            "zellij_float_right": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
+            "zellij_float_width": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
+            "zellij_float_height": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_HEIGHT,
+            "zellij_float_close_on_exit": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT,
+            "zellij_float_pinned": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_PINNED,
+            "zellij_float_name": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_NAME,
+            "zellij_float_title_prefix": DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX,
+            "zellij_pair_layout": DEFAULT_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
+            "zellij_pair_top": DEFAULT_CODEX_WP_ZELLIJ_PAIR_TOP,
+            "zellij_pair_right": DEFAULT_CODEX_WP_ZELLIJ_PAIR_RIGHT,
+            "zellij_pair_width": DEFAULT_CODEX_WP_ZELLIJ_PAIR_WIDTH,
+            "zellij_pair_height": DEFAULT_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
+            "zellij_pair_gap": DEFAULT_CODEX_WP_ZELLIJ_PAIR_GAP,
+            "zellij_auto_name": DEFAULT_CODEX_WP_ZELLIJ_AUTO_NAME,
+            "zellij_title_max_words": DEFAULT_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS,
+            "zellij_title_case": DEFAULT_CODEX_WP_ZELLIJ_TITLE_CASE,
+            "zellij_title_fallback": DEFAULT_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
+        }
+
+    def test_merges_auth_env_file_and_process_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        env_file = auth_dir / ".env"
+        env_file.write_text(
+            "\n".join(
+                [
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_TOP}=10%",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT}=4%",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH}=50%",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_HEIGHT}=30%",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT}=true",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED}=false",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_NAME}=env-pane",
+                    f"{ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX}=env:",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT}=env-layout",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_TOP}=8%",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT}=3%",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH}=45%",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT}=70%",
+                    f"{ENV_CODEX_WP_ZELLIJ_PAIR_GAP}=2",
+                    f"{ENV_CODEX_WP_ZELLIJ_AUTO_NAME}=false",
+                    f"{ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS}=2",
+                    f"{ENV_CODEX_WP_ZELLIJ_TITLE_CASE}=upper",
+                    f"{ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK}=Env Fallback",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(ENV_AUTH_DIR, str(auth_dir))
+        monkeypatch.delenv(ENV_ENV_FILE, raising=False)
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT, "2")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_FLOAT_CLOSE_ON_EXIT, "false")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_FLOAT_PINNED, "true")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_FLOAT_NAME, "process-pane")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_FLOAT_TITLE_PREFIX, "proc:")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT, "process-layout")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_TOP, "9%")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT, "1")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH, "48%")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT, "74%")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_PAIR_GAP, "3")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_AUTO_NAME, "true")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS, "5")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_TITLE_CASE, "lower")
+        monkeypatch.setenv(ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK, "Process Fallback")
+
+        defaults = load_codex_wp_defaults()
+
+        assert defaults == {
+            "zellij_float_top": "10%",
+            "zellij_float_right": "2",
+            "zellij_float_width": "50%",
+            "zellij_float_height": "30%",
+            "zellij_float_close_on_exit": False,
+            "zellij_float_pinned": True,
+            "zellij_float_name": "process-pane",
+            "zellij_float_title_prefix": "proc:",
+            "zellij_pair_layout": "process-layout",
+            "zellij_pair_top": "9%",
+            "zellij_pair_right": "1",
+            "zellij_pair_width": "48%",
+            "zellij_pair_height": "74%",
+            "zellij_pair_gap": "3",
+            "zellij_auto_name": True,
+            "zellij_title_max_words": 5,
+            "zellij_title_case": "lower",
+            "zellij_title_fallback": "Process Fallback",
+        }
 
 
 # ============================================================================
