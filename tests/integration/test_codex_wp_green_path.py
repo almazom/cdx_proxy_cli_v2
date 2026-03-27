@@ -19,12 +19,6 @@ from cdx_proxy_cli_v2.config.settings import (
     ENV_CODEX_WP_ZELLIJ_FLOAT_RIGHT,
     ENV_CODEX_WP_ZELLIJ_FLOAT_TOP,
     ENV_CODEX_WP_ZELLIJ_FLOAT_WIDTH,
-    ENV_CODEX_WP_ZELLIJ_PAIR_GAP,
-    ENV_CODEX_WP_ZELLIJ_PAIR_HEIGHT,
-    ENV_CODEX_WP_ZELLIJ_PAIR_LAYOUT,
-    ENV_CODEX_WP_ZELLIJ_PAIR_RIGHT,
-    ENV_CODEX_WP_ZELLIJ_PAIR_TOP,
-    ENV_CODEX_WP_ZELLIJ_PAIR_WIDTH,
     ENV_CODEX_WP_ZELLIJ_TITLE_CASE,
     ENV_CODEX_WP_ZELLIJ_TITLE_FALLBACK,
     ENV_CODEX_WP_ZELLIJ_TITLE_MAX_WORDS,
@@ -87,6 +81,20 @@ os.execv(sys.executable, [sys.executable, "-m", "cdx_proxy_cli_v2", *sys.argv[1:
     return _write_executable(tmp_path / "fake_cdx", body)
 
 
+def _write_fake_proxy_env_cdx(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+import sys
+
+if sys.argv[1:] == ["proxy", "--print-env-only"]:
+    print('export CLIPROXY_BASE_URL="http://127.0.0.1:43123"')
+    raise SystemExit(0)
+
+print(f"unexpected fake cdx argv: {{sys.argv[1:]!r}}", file=sys.stderr)
+raise SystemExit(97)
+"""
+    return _write_executable(tmp_path / "fake_cdx_proxy_env", body)
+
+
 def _write_fake_codex(tmp_path: Path) -> Path:
     body = f"""#!{sys.executable}
 from __future__ import annotations
@@ -123,6 +131,10 @@ def parse_workdir(argv: list[str]) -> str | None:
 
 
 def final_text(prompt: str) -> str:
+    if "Use $auto-commit." in prompt:
+        return "Auto-commit shortcut OK"
+    if "Use $code-simplifier." in prompt:
+        return "Code-simplifier shortcut OK"
     if "REQ1 OK" in prompt:
         return "REQ1 OK"
     if "alpha-beta" in prompt:
@@ -138,6 +150,7 @@ def final_text(prompt: str) -> str:
 
 def main() -> int:
     argv = sys.argv[1:]
+    json_mode = "--json" in argv
     if "--help" in argv or (argv and argv[0] == "help"):
         if "review" in argv:
             print("Fake Codex Review Help")
@@ -153,7 +166,11 @@ def main() -> int:
 
     if "exec" not in argv:
         fail("expected exec subcommand")
-    if "--json" not in argv:
+    prompt = argv[-1]
+    is_fixed_shortcut_prompt = (
+        "Use $auto-commit." in prompt or "Use $code-simplifier." in prompt
+    )
+    if not is_fixed_shortcut_prompt and not json_mode:
         fail("expected --json")
     if "--dangerously-bypass-approvals-and-sandbox" not in argv:
         fail("missing bypass flag")
@@ -166,42 +183,48 @@ def main() -> int:
     if workdir:
         os.chdir(workdir)
 
-    prompt = argv[-1]
-    base_url = parse_base_url(argv).rstrip("/")
+    fail_match = os.environ.get("FAKE_CODEX_FAIL_MATCH", "")
+    if fail_match and fail_match in prompt:
+        fail(f"forced failure for prompt containing {{fail_match!r}}", code=1)
 
-    req = Request(
-        f"{{base_url}}/v1/responses",
-        data=json.dumps({{"input": prompt}}).encode("utf-8"),
-        method="POST",
-        headers={{"Content-Type": "application/json"}},
-    )
-    with urlopen(req, timeout=10.0) as response:
-        if response.status != 200:
-            fail(f"unexpected proxy status: {{response.status}}")
-        raw = response.read().decode("utf-8")
-        payload = json.loads(raw) if raw else {{}}
-        if payload.get("status") != "completed":
-            fail(f"unexpected proxy payload: {{payload}}")
+    if not is_fixed_shortcut_prompt:
+        base_url = parse_base_url(argv).rstrip("/")
+        req = Request(
+            f"{{base_url}}/v1/responses",
+            data=json.dumps({{"input": prompt}}).encode("utf-8"),
+            method="POST",
+            headers={{"Content-Type": "application/json"}},
+        )
+        with urlopen(req, timeout=10.0) as response:
+            if response.status != 200:
+                fail(f"unexpected proxy status: {{response.status}}")
+            raw = response.read().decode("utf-8")
+            payload = json.loads(raw) if raw else {{}}
+            if payload.get("status") != "completed":
+                fail(f"unexpected proxy payload: {{payload}}")
 
     text = final_text(prompt)
-    print(json.dumps({{"type": "thread.started", "thread_id": "fake-thread"}}))
-    print(json.dumps({{"type": "turn.started"}}))
-    print(
-        json.dumps(
-            {{
-                "type": "item.completed",
-                "item": {{"id": "item_0", "type": "agent_message", "text": text}},
-            }}
+    if json_mode:
+        print(json.dumps({{"type": "thread.started", "thread_id": "fake-thread"}}))
+        print(json.dumps({{"type": "turn.started"}}))
+        print(
+            json.dumps(
+                {{
+                    "type": "item.completed",
+                    "item": {{"id": "item_0", "type": "agent_message", "text": text}},
+                }}
+            )
         )
-    )
-    print(
-        json.dumps(
-            {{
-                "type": "turn.completed",
-                "usage": {{"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
-            }}
+        print(
+            json.dumps(
+                {{
+                    "type": "turn.completed",
+                    "usage": {{"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+                }}
+            )
         )
-    )
+    else:
+        print(text)
     return 0
 
 
@@ -218,6 +241,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -250,14 +274,31 @@ if argv[:1] == ["run"]:
         if list(json.loads(line)["argv"])[:1] == ["run"]:
             run_count += 1
     suffix = str(run_count)
-    sys.stdout.write(
+    run_stdout = (
         os.environ.get(f"FAKE_ZELLIJ_RUN_STDOUT_{{suffix}}")
         or os.environ.get("FAKE_ZELLIJ_RUN_STDOUT", "terminal_11")
     )
-    sys.stderr.write(
+    run_stderr = (
         os.environ.get(f"FAKE_ZELLIJ_RUN_STDERR_{{suffix}}")
         or os.environ.get("FAKE_ZELLIJ_RUN_STDERR", "")
     )
+    if (
+        os.environ.get(f"FAKE_ZELLIJ_RUN_EXECUTE_{{suffix}}")
+        or os.environ.get("FAKE_ZELLIJ_RUN_EXECUTE")
+    ):
+        separator_index = argv.index("--")
+        inner_argv = argv[separator_index + 1 :]
+        inner_env = os.environ.copy()
+        inner_env["ZELLIJ_PANE_ID"] = run_stdout
+        subprocess.run(
+            inner_argv,
+            env=inner_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    sys.stdout.write(run_stdout)
+    sys.stderr.write(run_stderr)
     raise SystemExit(
         int(
             os.environ.get(f"FAKE_ZELLIJ_RUN_EXIT_{{suffix}}")
@@ -330,6 +371,10 @@ def _run_codex_wp(prompt: str, env: dict[str, str]) -> subprocess.CompletedProce
     )
 
 
+def _init_git_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
 def _parse_json_stream(stdout: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in stdout.splitlines() if line.strip()]
 
@@ -399,7 +444,15 @@ def _extract_rename_pane_payload(path: Path) -> list[str]:
     return next(call for call in calls if call[:2] == ["action", "rename-pane"])
 
 
-def _extract_pair_run_payloads(path: Path) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+def _extract_close_pane_payload(path: Path) -> list[str]:
+    calls = _read_fake_zellij_calls(path)
+    assert any(call[:2] == ["action", "close-pane"] for call in calls)
+    return next(call for call in calls if call[:2] == ["action", "close-pane"])
+
+
+def _extract_pair_run_payloads(
+    path: Path,
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     calls = _read_fake_zellij_calls(path)
     assert calls[0][:2] == ["action", "list-tabs"]
     assert "--json" in calls[0]
@@ -413,6 +466,7 @@ def _extract_pair_run_payloads(path: Path) -> tuple[list[str], list[str], list[s
 @pytest.mark.parametrize(
     ("args", "expected_usage"),
     [
+        (["-F", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
         (["--zellij-floating", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
         (["--zellij-new-tab", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
         (["--zellij-floating-pair", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
@@ -440,6 +494,10 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert result.returncode == 0, result.stderr
     assert "codex_wp wrapper flags" in result.stdout
     assert "Help is side-effect free." in result.stdout
+    assert "  -A                           run built-in auto-commit" in result.stdout
+    assert (
+        "  -S                           run built-in code-simplifier" in result.stdout
+    )
     assert expected_usage in result.stdout
     assert _read_fake_zellij_calls(capture_path) == []
 
@@ -479,6 +537,196 @@ def test_codex_wp_preserves_upstream_profile_flag_in_help_mode(
     assert "-p, --profile <CONFIG_PROFILE>" in result.stdout
     assert "unexpected argument" not in result.stderr
     assert _read_fake_zellij_calls(capture_path) == []
+
+
+@pytest.mark.parametrize("shortcut_flag", ["-A", "-S"])
+def test_codex_wp_fixed_shortcuts_reject_additional_arguments(
+    tmp_path: Path,
+    shortcut_flag: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    env = _zellij_env(tmp_path, capture_path)
+
+    result = _run_codex_wp_args([shortcut_flag, "extra"], env)
+
+    assert result.returncode == 2
+    assert (
+        f"codex_wp: {shortcut_flag} does not accept additional arguments."
+        in result.stderr
+    )
+    assert _read_fake_zellij_calls(capture_path) == []
+
+
+@pytest.mark.parametrize(
+    ("shortcut_flag", "expected_message"),
+    [
+        ("-A", "codex_wp: -A requires a git repository."),
+        ("-S", "codex_wp: -S requires a git repository."),
+    ],
+)
+def test_codex_wp_fixed_shortcuts_require_git_repo(
+    tmp_path: Path,
+    shortcut_flag: str,
+    expected_message: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    repo = tmp_path / "not-a-repo"
+    repo.mkdir()
+    env = _zellij_env(tmp_path, capture_path)
+
+    result = _run_codex_wp_args([shortcut_flag], env, cwd=repo)
+
+    assert result.returncode == 2
+    assert expected_message in result.stderr
+    assert _read_fake_zellij_calls(capture_path) == []
+
+
+def test_codex_wp_auto_commit_shortcut_skips_clean_repo(
+    tmp_path: Path,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    env = _zellij_env(tmp_path, capture_path)
+
+    result = _run_codex_wp_args(["-A"], env, cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        result.stdout.strip()
+        == "codex_wp: nothing to commit in the current repository."
+    )
+    assert _read_fake_zellij_calls(capture_path) == []
+
+
+@pytest.mark.parametrize(
+    ("shortcut_flag", "dirty_repo", "prompt_fragment", "expected_name"),
+    [
+        ("-A", True, "Use $auto-commit.", "cdx: Auto Commit"),
+        ("-S", False, "Use $code-simplifier.", "cdx: Code Simplifier"),
+    ],
+)
+def test_codex_wp_fixed_shortcuts_close_pane_on_success(
+    tmp_path: Path,
+    shortcut_flag: str,
+    dirty_repo: bool,
+    prompt_fragment: str,
+    expected_name: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    fake_codex = _write_fake_codex(tmp_path)
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    if dirty_repo:
+        (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "CODEX_BIN": str(fake_codex),
+            "CDX_BIN": str(fake_cdx),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
+                [
+                    {
+                        "name": "Tab #1",
+                        "active": True,
+                        "viewport_columns": 140,
+                        "viewport_rows": 42,
+                    }
+                ]
+            ),
+            "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
+        },
+    )
+
+    result = _run_codex_wp_args([shortcut_flag], env, cwd=repo)
+
+    _list_tabs_call, run_call = _extract_run_payload(capture_path)
+    close_pane_call = _extract_close_pane_payload(capture_path)
+    separator_index = run_call.index("--")
+    inner_command = run_call[separator_index + 1 :]
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "terminal_11"
+    assert "--close-on-exit" not in run_call
+    assert run_call[:9] == [
+        "run",
+        "--floating",
+        "--pinned",
+        "true",
+        "--cwd",
+        str(repo),
+        "--name",
+        expected_name,
+        "--x",
+    ]
+    assert inner_command[:2] == ["bash", "-lc"]
+    assert prompt_fragment in inner_command[2]
+    assert 'zellij action close-pane --pane-id "$ZELLIJ_PANE_ID"' in inner_command[2]
+    assert close_pane_call == ["action", "close-pane", "--pane-id", "terminal_11"]
+
+
+@pytest.mark.parametrize(
+    ("shortcut_flag", "dirty_repo", "prompt_fragment"),
+    [
+        ("-A", True, "Use $auto-commit."),
+        ("-S", False, "Use $code-simplifier."),
+    ],
+)
+def test_codex_wp_fixed_shortcuts_keep_pane_open_on_failure(
+    tmp_path: Path,
+    shortcut_flag: str,
+    dirty_repo: bool,
+    prompt_fragment: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    fake_codex = _write_fake_codex(tmp_path)
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    if dirty_repo:
+        (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "CODEX_BIN": str(fake_codex),
+            "CDX_BIN": str(fake_cdx),
+            "FAKE_CODEX_FAIL_MATCH": prompt_fragment,
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
+                [
+                    {
+                        "name": "Tab #1",
+                        "active": True,
+                        "viewport_columns": 140,
+                        "viewport_rows": 42,
+                    }
+                ]
+            ),
+            "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
+        },
+    )
+
+    result = _run_codex_wp_args([shortcut_flag], env, cwd=repo)
+
+    calls = _read_fake_zellij_calls(capture_path)
+    run_call = next(call for call in calls if call[:1] == ["run"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "terminal_11"
+    assert prompt_fragment in run_call[run_call.index("--") + 3]
+    assert not any(call[:2] == ["action", "close-pane"] for call in calls)
 
 
 def test_codex_wp_zellij_dry_run_prints_resolved_layout_and_command(
@@ -686,8 +934,7 @@ def test_codex_wp_zellij_unknown_template_lists_available_keys(
     assert result.returncode == 2
     assert (
         "codex_wp: unknown zellij template 'does-not-exist'. "
-        "Valid templates: single, three-horizontal, three-vertical."
-        in result.stderr
+        "Valid templates: single, three-horizontal, three-vertical." in result.stderr
     )
     assert _read_fake_zellij_calls(capture_path) == []
 
@@ -711,7 +958,10 @@ def test_codex_wp_zellij_requires_tab_name_when_mode_is_requested(
     )
 
     assert result.returncode == 2
-    assert "codex_wp: --zellij-new-tab is required when using zellij mode." in result.stderr
+    assert (
+        "codex_wp: --zellij-new-tab is required when using zellij mode."
+        in result.stderr
+    )
     assert _read_fake_zellij_calls(capture_path) == []
 
 
@@ -867,6 +1117,57 @@ def test_codex_wp_file_refs_follow_exec_options_in_floating_dry_run(
         "--name cdx:\\ REQ1\\ Check --x 81 --y 5 --width 56 --height 15 -- "
         f"{ROOT / 'bin/codex_wp'} exec --ephemeral -C /tmp/pilot "
         f"@{context_file}\\ Reply\\ with\\ exactly\\ REQ1\\ OK\\ and\\ stop."
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "floating=top=12% right=2% width=40% height=35% close_on_exit=false",
+        expected_command,
+    ]
+    assert _read_fake_zellij_calls(capture_path) == [
+        ["action", "list-tabs", "--json", "--state", "--dimensions"]
+    ]
+
+
+def test_codex_wp_short_floating_flag_matches_long_flag_in_dry_run(
+    tmp_path: Path,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
+                [
+                    {
+                        "name": "Tab #1",
+                        "active": True,
+                        "viewport_columns": 140,
+                        "viewport_rows": 42,
+                    }
+                ]
+            ),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "-F",
+            "--zellij-dry-run",
+            "exec",
+            "--json",
+            "Reply with exactly REQ1 OK and stop.",
+        ],
+        env,
+    )
+
+    expected_command = (
+        "command=zellij run --floating --pinned true --cwd /home/pets/TOOLS/cdx_proxy_cli_v2 "
+        "--name cdx:\\ REQ1\\ Check --x 81 --y 5 --width 56 --height 15 -- "
+        "/home/pets/TOOLS/cdx_proxy_cli_v2/bin/codex_wp exec --json "
+        "Reply\\ with\\ exactly\\ REQ1\\ OK\\ and\\ stop."
     )
 
     assert result.returncode == 0, result.stderr
@@ -1041,7 +1342,10 @@ def test_codex_wp_zellij_floating_conflicts_with_new_tab_mode(
     )
 
     assert result.returncode == 2
-    assert "codex_wp: --zellij-floating cannot be combined with --zellij-new-tab." in result.stderr
+    assert (
+        "codex_wp: --zellij-floating cannot be combined with --zellij-new-tab."
+        in result.stderr
+    )
     assert _read_fake_zellij_calls(capture_path) == []
 
 
@@ -1302,7 +1606,10 @@ def test_codex_wp_zellij_pair_requires_explicit_shared_args_delimiter(
     )
 
     assert result.returncode == 2
-    assert "pair mode requires shared inner args after an explicit '--' delimiter." in result.stderr
+    assert (
+        "pair mode requires shared inner args after an explicit '--' delimiter."
+        in result.stderr
+    )
     assert _read_fake_zellij_calls(capture_path) == []
 
 
@@ -1395,7 +1702,9 @@ def test_codex_wp_zellij_pair_launches_two_panes_and_renames_by_id(
         env,
     )
 
-    list_tabs_call, run_a, run_b, rename_a, rename_b = _extract_pair_run_payloads(capture_path)
+    list_tabs_call, run_a, run_b, rename_a, rename_b = _extract_pair_run_payloads(
+        capture_path
+    )
 
     assert result.returncode == 0, result.stderr
     assert "--state" in list_tabs_call
@@ -1501,7 +1810,9 @@ def test_codex_wp_zellij_pair_reads_prompt_files_for_each_pane(
         env,
     )
 
-    _list_tabs_call, run_a, run_b, _rename_a, _rename_b = _extract_pair_run_payloads(capture_path)
+    _list_tabs_call, run_a, run_b, _rename_a, _rename_b = _extract_pair_run_payloads(
+        capture_path
+    )
     separator_a = run_a.index("--")
     separator_b = run_b.index("--")
 
@@ -1593,17 +1904,25 @@ def test_codex_wp_green_path_verifies_multistep_proxy_flow(
     wrapper_env["CODEX_BIN"] = str(fake_codex)
 
     try:
-        before_status = run_cli("status", "--json", "--auth-dir", str(auth_dir), env=env)
+        before_status = run_cli(
+            "status", "--json", "--auth-dir", str(auth_dir), env=env
+        )
         _assert_ok(before_status, label="cdx status before")
         before_status_payload = json.loads(before_status.stdout)
         assert before_status_payload["healthy"] is True
 
-        before_doctor = run_cli("doctor", "--json", "--auth-dir", str(auth_dir), env=env)
+        before_doctor = run_cli(
+            "doctor", "--json", "--auth-dir", str(auth_dir), env=env
+        )
         _assert_ok(before_doctor, label="cdx doctor before")
         before_doctor_payload = json.loads(before_doctor.stdout)
         assert before_doctor_payload["summary"]["blacklist"] == 0
 
-        requests_before = int(_debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"]["requests_total"])
+        requests_before = int(
+            _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"][
+                "requests_total"
+            ]
+        )
         events_before = _count_lines(events_file)
 
         prompts = [
@@ -1623,7 +1942,9 @@ def test_codex_wp_green_path_verifies_multistep_proxy_flow(
         for index, (prompt, expected) in enumerate(prompts, start=1):
             step_events_before = _count_lines(events_file)
             step_requests_before = int(
-                _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"]["requests_total"]
+                _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"][
+                    "requests_total"
+                ]
             )
 
             result = _run_codex_wp(prompt, wrapper_env)
@@ -1634,18 +1955,21 @@ def test_codex_wp_green_path_verifies_multistep_proxy_flow(
             assert _final_message(stream) == expected
 
             step_requests_after = int(
-                _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"]["requests_total"]
+                _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"][
+                    "requests_total"
+                ]
             )
             assert step_requests_after - step_requests_before == 1
 
             delta_events = _jsonl_slice(events_file, step_events_before)
             proxy_events = [
-                event
-                for event in delta_events
-                if event.get("event") == "proxy.request"
+                event for event in delta_events if event.get("event") == "proxy.request"
             ]
             assert proxy_events, f"missing proxy.request for request {index}"
-            assert any(str(event.get("path") or "").endswith("/responses") for event in proxy_events)
+            assert any(
+                str(event.get("path") or "").endswith("/responses")
+                for event in proxy_events
+            )
             assert any(int(event.get("status", 0)) == 200 for event in proxy_events)
 
             for event in proxy_events:
@@ -1654,7 +1978,11 @@ def test_codex_wp_green_path_verifies_multistep_proxy_flow(
                 seen_request_ids.append(request_id)
                 assert int(event.get("attempt", 0)) == 1
 
-        requests_after = int(_debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"]["requests_total"])
+        requests_after = int(
+            _debug_payload(base_url, env["CLIPROXY_MANAGEMENT_KEY"])["metrics"][
+                "requests_total"
+            ]
+        )
         events_after = _count_lines(events_file)
         assert requests_after - requests_before == 3
         assert events_after - events_before >= 3

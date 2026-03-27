@@ -46,6 +46,97 @@ build_shell_command_string() {
   printf '%s\n' "$rendered"
 }
 
+git_is_inside_work_tree() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+git_worktree_has_changes() {
+  local status_output=""
+  status_output="$(git status --short --untracked-files=all 2>/dev/null)" || return 1
+  [[ -n "$status_output" ]]
+}
+
+fixed_shortcut_error() {
+  local shortcut_flag="$1"
+  die "codex_wp: ${shortcut_flag} does not accept additional arguments. Use only 'codex_wp ${shortcut_flag}'." 2
+}
+
+fixed_shortcut_prompt() {
+  local shortcut_name="$1"
+
+  case "$shortcut_name" in
+    auto_commit)
+      cat <<'EOF'
+Use $auto-commit.
+Run the full auto-commit skill workflow for the current repository.
+Commit everything currently relevant in git status using atomic commits.
+Run the fitting checks before committing.
+Scan diffs for secrets.
+Push if a remote already exists.
+Report briefly in simplified Russian.
+EOF
+      ;;
+    code_simplifier)
+      cat <<'EOF'
+Use $code-simplifier.
+Run a narrow simplification pass for the current repository.
+Focus first on currently modified or recently touched code.
+If the repository is clean, still run a narrow relevant simplification pass instead of a wide repo rewrite.
+Preserve behavior exactly.
+Keep edits tight and readable.
+Run relevant tests after changes.
+Report only significant simplifications.
+EOF
+      ;;
+    *)
+      die "codex_wp: unsupported fixed shortcut '$shortcut_name'."
+      ;;
+  esac
+}
+
+fixed_shortcut_title() {
+  local shortcut_name="$1"
+
+  case "$shortcut_name" in
+    auto_commit)
+      printf '%s\n' "Auto Commit"
+      ;;
+    code_simplifier)
+      printf '%s\n' "Code Simplifier"
+      ;;
+    *)
+      die "codex_wp: unsupported fixed shortcut '$shortcut_name'."
+      ;;
+  esac
+}
+
+build_close_on_success_inner_command() {
+  local output_var="$1"
+  local shortcut_flag="$2"
+  shift 2
+  local -n output_ref="$output_var"
+  local base_command_string=""
+  local failure_message=""
+  local shell_script=""
+
+  base_command_string="$(build_shell_command_string "$@")"
+  failure_message="codex_wp: ${shortcut_flag} failed; leaving floating pane open."
+  shell_script=$(cat <<EOF
+$base_command_string
+status=\$?
+if [[ \$status -eq 0 ]]; then
+  if [[ -n "\${ZELLIJ_PANE_ID:-}" ]]; then
+    zellij action close-pane --pane-id "\$ZELLIJ_PANE_ID" >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
+printf '%s\n' '$failure_message' >&2
+exit "\$status"
+EOF
+)
+  output_ref=(bash -lc "$shell_script")
+}
+
 # Build file references string from array of file paths
 # Outputs: "@/abs/path1 @/abs/path2 "
 build_file_refs() {
@@ -168,6 +259,8 @@ pair_a_prompt=""
 pair_a_file=""
 pair_b_prompt=""
 pair_b_file=""
+fixed_shortcut=""
+fixed_shortcut_close_on_success=0
 files_to_include=()
 args=()
 while [[ $# -gt 0 ]]; do
@@ -207,7 +300,7 @@ while [[ $# -gt 0 ]]; do
       zellij_dry_run=1
       shift
       ;;
-    --zellij-floating)
+    -F|--zellij-floating)
       zellij_mode=1
       zellij_floating=1
       shift
@@ -286,6 +379,16 @@ while [[ $# -gt 0 ]]; do
       zellij_close_on_exit=1
       shift
       ;;
+    -A)
+      [[ -z "$fixed_shortcut" ]] || fixed_shortcut_error "-A"
+      fixed_shortcut="auto_commit"
+      shift
+      ;;
+    -S)
+      [[ -z "$fixed_shortcut" ]] || fixed_shortcut_error "-S"
+      fixed_shortcut="code_simplifier"
+      shift
+      ;;
     --zellij-replace-existing)
       die "codex_wp: --zellij-replace-existing is not supported yet." 2
       ;;
@@ -300,6 +403,45 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$fixed_shortcut" ]]; then
+  case "$fixed_shortcut" in
+    auto_commit)
+      shortcut_flag="-A"
+      shortcut_repo_error="codex_wp: -A requires a git repository. Run it from the repo you want to commit."
+      shortcut_empty_message="codex_wp: nothing to commit in the current repository."
+      ;;
+    code_simplifier)
+      shortcut_flag="-S"
+      shortcut_repo_error="codex_wp: -S requires a git repository. Run it from the repo you want to simplify."
+      shortcut_empty_message=""
+      ;;
+    *)
+      die "codex_wp: unsupported fixed shortcut '$fixed_shortcut'."
+      ;;
+  esac
+
+  if (( zellij_mode )) || (( zellij_pair_options_seen )) || (( ${#files_to_include[@]} > 0 )) || (( ${#args[@]} > 0 )); then
+    fixed_shortcut_error "$shortcut_flag"
+  fi
+
+  git_is_inside_work_tree || die "$shortcut_repo_error" 2
+
+  if [[ "$fixed_shortcut" == "auto_commit" ]] && ! git_worktree_has_changes; then
+    printf '%s\n' "$shortcut_empty_message"
+    exit 0
+  fi
+
+  zellij_mode=1
+  zellij_floating=1
+  zellij_close_on_exit=0
+  fixed_shortcut_close_on_success=1
+  zellij_float_name="$(fixed_shortcut_title "$fixed_shortcut")"
+  args=(
+    exec
+    "$(fixed_shortcut_prompt "$fixed_shortcut")"
+  )
+fi
 
 help_requested=0
 if is_help_request "${args[@]}"; then
@@ -365,13 +507,15 @@ All non-wrapper flags, including Codex -p/--profile, pass through unchanged.
 
 General wrapper flags:
   -f, --file <path>            prepend @/absolute/path references to exec prompts
+  -A                           run built-in auto-commit in a floating Zellij pane and close it on success
+  -S                           run built-in code-simplifier in a floating Zellij pane and close it on success
   --zellij-new-tab [name]      open codex_wp in a new Zellij tab
   --zellij-template <key>      choose tab layout: single, three-horizontal, three-vertical
   --zellij-cwd <path>          override the working directory used for Zellij launch
   --zellij-dry-run             print the resolved Zellij command without launching it
 
 Floating pane flags:
-  --zellij-floating            launch codex_wp in a floating pane
+  -F, --zellij-floating        launch codex_wp in a floating pane
   --zellij-top <value>         top offset for floating pane
   --zellij-right <value>       right offset for floating pane
   --zellij-width <value>       floating pane width
@@ -1287,6 +1431,9 @@ if (( zellij_mode )); then
     resolved_zellij_name="$(apply_floating_title_prefix "$resolved_zellij_name")"
     initial_zellij_name="$(resolve_initial_floating_name "$resolved_zellij_name")"
     inner_command=("$script_path" "$@")
+    if (( fixed_shortcut_close_on_success )); then
+      build_close_on_success_inner_command inner_command "$shortcut_flag" "${inner_command[@]}"
+    fi
     init_zellij_floating_run_command zellij_command "$zellij_bin"
     init_zellij_floating_run_command zellij_display_command zellij
     zellij_command+=(
