@@ -103,7 +103,9 @@ def env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Path:
     return resolve_path(auth_dir) / DEFAULT_ENV_FILE
 
 
-def scoped_env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Optional[Path]:
+def scoped_env_file_path(
+    auth_dir: str, env_file: Optional[str] = None
+) -> Optional[Path]:
     explicit = str(env_file or "").strip()
     if not explicit:
         return None
@@ -114,6 +116,20 @@ def scoped_env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Optio
     except ValueError:
         return None
     return resolved_env_file
+
+
+def _resolve_inherited_env_file_path(
+    auth_dir: str,
+    env_file: Optional[str],
+    *,
+    require_auth_dir_scope: bool,
+) -> Optional[Path]:
+    if require_auth_dir_scope:
+        return scoped_env_file_path(auth_dir, env_file)
+    explicit = str(env_file or "").strip()
+    if not explicit:
+        return None
+    return resolve_path(explicit)
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -220,18 +236,20 @@ def load_codex_wp_defaults(
         if env_file is not None
         else (None if auth_dir is not None else os.environ.get(ENV_ENV_FILE))
     )
+    inherited_env_file: Optional[Path]
     if env_file is not None:
         inherited_env_file = resolve_path(env_file)
     elif auth_dir is not None or os.environ.get(ENV_AUTH_DIR):
-        inherited_env_file = scoped_env_file_path(
+        inherited_env_file = _resolve_inherited_env_file_path(
             str(auth_dir_path),
             raw_inherited_env_file,
+            require_auth_dir_scope=True,
         )
     else:
-        inherited_env_file = (
-            resolve_path(str(raw_inherited_env_file))
-            if str(raw_inherited_env_file or "").strip()
-            else None
+        inherited_env_file = _resolve_inherited_env_file_path(
+            str(auth_dir_path),
+            raw_inherited_env_file,
+            require_auth_dir_scope=False,
         )
     path = inherited_env_file or env_file_path(str(auth_dir_path))
     merged = load_env_file(path)
@@ -414,19 +432,22 @@ def build_settings(
 ) -> Settings:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
-    raw_inherited_env_file = None if auth_dir is not None else os.environ.get(ENV_ENV_FILE)
+    raw_inherited_env_file = (
+        None if auth_dir is not None else os.environ.get(ENV_ENV_FILE)
+    )
     if auth_dir is not None:
         inherited_env_file = None
     elif os.environ.get(ENV_AUTH_DIR):
-        inherited_env_file = scoped_env_file_path(
+        inherited_env_file = _resolve_inherited_env_file_path(
             str(auth_dir_path),
             raw_inherited_env_file,
+            require_auth_dir_scope=True,
         )
     else:
-        inherited_env_file = (
-            resolve_path(str(raw_inherited_env_file))
-            if str(raw_inherited_env_file or "").strip()
-            else None
+        inherited_env_file = _resolve_inherited_env_file_path(
+            str(auth_dir_path),
+            raw_inherited_env_file,
+            require_auth_dir_scope=False,
         )
     env_path = inherited_env_file or env_file_path(str(auth_dir_path))
     file_env = load_env_file(env_path)
@@ -437,9 +458,7 @@ def build_settings(
     # redirect startup to a different auth dir.
     resolved_auth_dir = str(auth_dir_path)
     resolved_env_path = (
-        env_file_path(resolved_auth_dir)
-        if auth_dir is not None
-        else env_path
+        env_file_path(resolved_auth_dir) if auth_dir is not None else env_path
     )
     resolved_host = (
         host or merged.get(ENV_HOST) or DEFAULT_HOST
@@ -454,7 +473,7 @@ def build_settings(
         min_cli_value: int,
     ) -> int:
         if cli_value is None:
-            return env_parser(merged.get(env_key), default=default)
+            return env_parser(merged.get(env_key), default)
         return max(min_cli_value, int(cli_value))
 
     resolved_port = resolve_numeric_setting(
