@@ -384,6 +384,26 @@ class TestLoadCodexWpDefaults:
 
         assert defaults["zellij_float_name"] == "right-pane"
 
+    def test_explicit_env_file_argument_overrides_auth_dir_scope_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        explicit_env = tmp_path / "other-auths" / ".env"
+        explicit_env.parent.mkdir()
+        explicit_env.write_text(
+            f"{ENV_CODEX_WP_ZELLIJ_FLOAT_NAME}=explicit-pane\n",
+            encoding="utf-8",
+        )
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        monkeypatch.setenv(ENV_AUTH_DIR, str(auth_dir))
+
+        defaults = load_codex_wp_defaults(
+            auth_dir=str(auth_dir),
+            env_file=str(explicit_env),
+        )
+
+        assert defaults["zellij_float_name"] == "explicit-pane"
+
 
 # ============================================================================
 # Test: upsert_env_values
