@@ -167,6 +167,10 @@ def main() -> int:
     if "exec" not in argv:
         fail("expected exec subcommand")
     prompt = argv[-1]
+    log_path = os.environ.get("FAKE_CODEX_LOG_PATH", "")
+    if log_path:
+        with Path(log_path).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({{"prompt": prompt}}) + "\\n")
     is_fixed_shortcut_prompt = (
         "Use $auto-commit." in prompt or "Use $code-simplifier." in prompt
     )
@@ -375,6 +379,27 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
 
 
+def _fixed_shortcut_prompt(name: str) -> str:
+    prompts = {
+        "auto_commit": """Use $auto-commit.
+Run the full auto-commit skill workflow for the current repository.
+Commit everything currently relevant in git status using atomic commits.
+Run the fitting checks before committing.
+Scan diffs for secrets.
+Push if a remote already exists.
+Report briefly in simplified Russian.""",
+        "code_simplifier": """Use $code-simplifier.
+Run a narrow simplification pass for the current repository.
+Focus first on currently modified or recently touched code.
+If the repository is clean, still run a narrow relevant simplification pass instead of a wide repo rewrite.
+Preserve behavior exactly.
+Keep edits tight and readable.
+Run relevant tests after changes.
+Report only significant simplifications.""",
+    }
+    return prompts[name]
+
+
 def _parse_json_stream(stdout: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in stdout.splitlines() if line.strip()]
 
@@ -407,6 +432,29 @@ def _read_fake_zellij_calls(path: Path) -> list[list[str]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _read_fake_codex_prompts(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [
+        str(json.loads(line)["prompt"])
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _active_zellij_tab_stdout() -> str:
+    return json.dumps(
+        [
+            {
+                "name": "Tab #1",
+                "active": True,
+                "viewport_columns": 140,
+                "viewport_rows": 42,
+            }
+        ]
+    )
 
 
 def _zellij_env(
@@ -494,6 +542,10 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert result.returncode == 0, result.stderr
     assert "codex_wp wrapper flags" in result.stdout
     assert "Help is side-effect free." in result.stdout
+    assert (
+        "  -SA                          run built-in code-simplifier, then auto-commit"
+        in result.stdout
+    )
     assert "  -A                           run built-in auto-commit" in result.stdout
     assert (
         "  -S                           run built-in code-simplifier" in result.stdout
@@ -539,7 +591,7 @@ def test_codex_wp_preserves_upstream_profile_flag_in_help_mode(
     assert _read_fake_zellij_calls(capture_path) == []
 
 
-@pytest.mark.parametrize("shortcut_flag", ["-A", "-S"])
+@pytest.mark.parametrize("shortcut_flag", ["-SA", "-A", "-S"])
 def test_codex_wp_fixed_shortcuts_reject_additional_arguments(
     tmp_path: Path,
     shortcut_flag: str,
@@ -561,6 +613,7 @@ def test_codex_wp_fixed_shortcuts_reject_additional_arguments(
 @pytest.mark.parametrize(
     ("shortcut_flag", "expected_message"),
     [
+        ("-SA", "codex_wp: -SA requires a git repository."),
         ("-A", "codex_wp: -A requires a git repository."),
         ("-S", "codex_wp: -S requires a git repository."),
     ],
@@ -603,6 +656,102 @@ def test_codex_wp_auto_commit_shortcut_skips_clean_repo(
     assert _read_fake_zellij_calls(capture_path) == []
 
 
+def test_codex_wp_simplify_then_commit_shortcut_closes_pane_on_success(
+    tmp_path: Path,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    prompt_log_path = tmp_path / "fake_codex_prompts.jsonl"
+    fake_codex = _write_fake_codex(tmp_path)
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "CODEX_BIN": str(fake_codex),
+            "CDX_BIN": str(fake_cdx),
+            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
+            "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
+        },
+    )
+
+    result = _run_codex_wp_args(["-SA"], env, cwd=repo)
+
+    _list_tabs_call, run_call = _extract_run_payload(capture_path)
+    close_pane_call = _extract_close_pane_payload(capture_path)
+    separator_index = run_call.index("--")
+    inner_command = run_call[separator_index + 1 :]
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "terminal_11"
+    assert run_call[:9] == [
+        "run",
+        "--floating",
+        "--pinned",
+        "true",
+        "--cwd",
+        str(repo),
+        "--name",
+        "cdx: Simplify + Commit",
+        "--x",
+    ]
+    assert inner_command[:2] == ["bash", "-lc"]
+    assert "Use $code-simplifier." in inner_command[2]
+    assert "Use $auto-commit." in inner_command[2]
+    assert "codex_wp: -SA simplification failed; leaving floating pane open." in inner_command[2]
+    assert "codex_wp: -SA auto-commit failed; leaving floating pane open." in inner_command[2]
+    assert close_pane_call == ["action", "close-pane", "--pane-id", "terminal_11"]
+    assert _read_fake_codex_prompts(prompt_log_path) == [
+        _fixed_shortcut_prompt("code_simplifier"),
+        _fixed_shortcut_prompt("auto_commit"),
+    ]
+
+
+def test_codex_wp_simplify_then_commit_shortcut_closes_pane_when_nothing_to_commit(
+    tmp_path: Path,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    prompt_log_path = tmp_path / "fake_codex_prompts.jsonl"
+    fake_codex = _write_fake_codex(tmp_path)
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "CODEX_BIN": str(fake_codex),
+            "CDX_BIN": str(fake_cdx),
+            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
+            "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
+        },
+    )
+
+    result = _run_codex_wp_args(["-SA"], env, cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "terminal_11"
+    assert _extract_close_pane_payload(capture_path) == [
+        "action",
+        "close-pane",
+        "--pane-id",
+        "terminal_11",
+    ]
+    assert _read_fake_codex_prompts(prompt_log_path) == [
+        _fixed_shortcut_prompt("code_simplifier"),
+    ]
+
+
 @pytest.mark.parametrize(
     ("shortcut_flag", "dirty_repo", "prompt_fragment", "expected_name"),
     [
@@ -633,16 +782,7 @@ def test_codex_wp_fixed_shortcuts_close_pane_on_success(
         extra_env={
             "CODEX_BIN": str(fake_codex),
             "CDX_BIN": str(fake_cdx),
-            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
-                [
-                    {
-                        "name": "Tab #1",
-                        "active": True,
-                        "viewport_columns": 140,
-                        "viewport_rows": 42,
-                    }
-                ]
-            ),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
             "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
         },
     )
@@ -704,16 +844,7 @@ def test_codex_wp_fixed_shortcuts_keep_pane_open_on_failure(
             "CODEX_BIN": str(fake_codex),
             "CDX_BIN": str(fake_cdx),
             "FAKE_CODEX_FAIL_MATCH": prompt_fragment,
-            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
-                [
-                    {
-                        "name": "Tab #1",
-                        "active": True,
-                        "viewport_columns": 140,
-                        "viewport_rows": 42,
-                    }
-                ]
-            ),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
             "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
         },
     )
@@ -727,6 +858,56 @@ def test_codex_wp_fixed_shortcuts_keep_pane_open_on_failure(
     assert result.stdout.strip() == "terminal_11"
     assert prompt_fragment in run_call[run_call.index("--") + 3]
     assert not any(call[:2] == ["action", "close-pane"] for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("fail_match", "expected_prompts"),
+    [
+        ("Use $code-simplifier.", ["code_simplifier"]),
+        ("Use $auto-commit.", ["code_simplifier", "auto_commit"]),
+    ],
+)
+def test_codex_wp_simplify_then_commit_shortcut_keeps_pane_open_on_failure(
+    tmp_path: Path,
+    fail_match: str,
+    expected_prompts: list[str],
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    prompt_log_path = tmp_path / "fake_codex_prompts.jsonl"
+    fake_codex = _write_fake_codex(tmp_path)
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "CODEX_BIN": str(fake_codex),
+            "CDX_BIN": str(fake_cdx),
+            "FAKE_CODEX_FAIL_MATCH": fail_match,
+            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
+            "FAKE_ZELLIJ_RUN_EXECUTE_1": "1",
+        },
+    )
+
+    result = _run_codex_wp_args(["-SA"], env, cwd=repo)
+
+    calls = _read_fake_zellij_calls(capture_path)
+    run_call = next(call for call in calls if call[:1] == ["run"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "terminal_11"
+    assert "Use $code-simplifier." in run_call[run_call.index("--") + 3]
+    assert "Use $auto-commit." in run_call[run_call.index("--") + 3]
+    assert not any(call[:2] == ["action", "close-pane"] for call in calls)
+    assert _read_fake_codex_prompts(prompt_log_path) == [
+        _fixed_shortcut_prompt(name) for name in expected_prompts
+    ]
 
 
 def test_codex_wp_zellij_dry_run_prints_resolved_layout_and_command(
