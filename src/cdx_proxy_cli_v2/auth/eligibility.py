@@ -30,6 +30,7 @@ def fetch_limit_health(
     cooldown_at: int = DEFAULT_LIMIT_COOLDOWN_AT,
     min_remaining_percent: float = DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
     timeout: int = DEFAULT_LIMIT_TIMEOUT,
+    prefer_keyring: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     _ = float(min_remaining_percent)
     snapshot = collective_health_snapshot(
@@ -39,6 +40,7 @@ def fetch_limit_health(
         cooldown_at=cooldown_at,
         timeout=timeout,
         only="both",
+        prefer_keyring=prefer_keyring,
     )
     accounts = snapshot.get("accounts", [])
     result: Dict[str, Dict[str, Any]] = {}

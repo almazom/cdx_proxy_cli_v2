@@ -64,6 +64,73 @@ build_file_refs() {
   printf '%s' "$file_refs"
 }
 
+is_help_request() {
+  local argv=("$@")
+  local arg
+
+  for arg in "${argv[@]}"; do
+    case "$arg" in
+      -h|--help)
+        return 0
+        ;;
+    esac
+  done
+
+  [[ ${#argv[@]} -gt 0 && "${argv[0]}" == "help" ]]
+}
+
+find_exec_prompt_index() {
+  local argv=("$@")
+  local index=0
+  local arg
+
+  while (( index < ${#argv[@]} )); do
+    arg="${argv[$index]}"
+    case "$arg" in
+      --)
+        ((index++))
+        break
+        ;;
+      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message)
+        ((index+=2))
+        continue
+        ;;
+      --oss|--full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|-h|--help|-V|--version)
+        ((index++))
+        continue
+        ;;
+      -*)
+        printf '%s\n' "-1"
+        return 0
+        ;;
+      resume|review|help)
+        printf '%s\n' "-1"
+        return 0
+        ;;
+      *)
+        printf '%s\n' "$index"
+        return 0
+        ;;
+    esac
+  done
+
+  while (( index < ${#argv[@]} )); do
+    arg="${argv[$index]}"
+    case "$arg" in
+      resume|review|help)
+        printf '%s\n' "-1"
+        return 0
+        ;;
+      *)
+        printf '%s\n' "$index"
+        return 0
+        ;;
+    esac
+  done
+
+  printf '%s\n' "-1"
+}
+
 script_path="$(readlink -f "$0")"
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
@@ -227,11 +294,6 @@ while [[ $# -gt 0 ]]; do
       files_to_include+=("$2")
       shift 2
       ;;
-    -p)
-      prompt_arg="$2"
-      shift 2 || die "codex_wp: -p requires a prompt argument"
-      args+=("exec" "$prompt_arg")
-      ;;
     *)
       args+=("$1")
       shift
@@ -239,35 +301,47 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if (( zellij_pair_options_seen )) && (( ! zellij_pair_mode )); then
-  die "codex_wp: --zellij-floating-pair is required when using pair flags." 2
+help_requested=0
+if is_help_request "${args[@]}"; then
+  help_requested=1
 fi
 
 pair_shared_args=()
-if (( zellij_pair_mode )); then
-  if (( ${#files_to_include[@]} > 0 )); then
-    die "codex_wp: pair mode does not accept --file before '--'. Pass shared inner flags after '--' instead." 2
+if (( ! help_requested )); then
+  if (( zellij_pair_options_seen )) && (( ! zellij_pair_mode )); then
+    die "codex_wp: --zellij-floating-pair is required when using pair flags." 2
   fi
-  if (( ${#args[@]} > 0 )); then
-    [[ "${args[0]}" == "--" ]] || \
-      die "codex_wp: pair mode requires shared inner args after an explicit '--' delimiter." 2
-    pair_shared_args=("${args[@]:1}")
+
+  if (( zellij_pair_mode )); then
+    if (( ${#files_to_include[@]} > 0 )); then
+      die "codex_wp: pair mode does not accept --file before '--'. Pass shared inner flags after '--' instead." 2
+    fi
+    if (( ${#args[@]} > 0 )); then
+      [[ "${args[0]}" == "--" ]] || \
+        die "codex_wp: pair mode requires shared inner args after an explicit '--' delimiter." 2
+      pair_shared_args=("${args[@]:1}")
+    fi
+    if (( ${#pair_shared_args[@]} > 0 )) && [[ "${pair_shared_args[0]}" == "exec" ]]; then
+      die "codex_wp: pair mode adds 'exec' automatically. Remove it from the shared args." 2
+    fi
+    set --
+  else
+    set -- "${args[@]}"
   fi
-  if (( ${#pair_shared_args[@]} > 0 )) && [[ "${pair_shared_args[0]}" == "exec" ]]; then
-    die "codex_wp: pair mode adds 'exec' automatically. Remove it from the shared args." 2
+
+  # Prepend file references to exec prompt if files were specified
+  if (( ! zellij_pair_mode )) && [[ ${#files_to_include[@]} -gt 0 && $# -ge 1 && "$1" == "exec" ]]; then
+    shift
+    file_refs="$(build_file_refs "${files_to_include[@]}")"
+    exec_args=("$@")
+    prompt_index="$(find_exec_prompt_index "${exec_args[@]}")"
+    if [[ "$prompt_index" != "-1" ]]; then
+      exec_args[$prompt_index]="${file_refs}${exec_args[$prompt_index]}"
+    fi
+    set -- "exec" "${exec_args[@]}"
   fi
-  set --
 else
   set -- "${args[@]}"
-fi
-
-# Prepend file references to exec prompt if files were specified
-if (( ! zellij_pair_mode )) && [[ ${#files_to_include[@]} -gt 0 && $# -ge 2 && "$1" == "exec" ]]; then
-  shift
-  original_prompt="$1"
-  shift
-  file_refs="$(build_file_refs "${files_to_include[@]}")"
-  set -- "exec" "${file_refs}${original_prompt}" "$@"
 fi
 
 resolve_bin() {
@@ -281,6 +355,56 @@ resolve_bin() {
 
   command -v "$fallback_name" || true
 }
+
+print_codex_wp_wrapper_help() {
+  cat <<'EOF'
+codex_wp wrapper flags
+
+These options are handled by codex_wp before arguments pass through to codex.
+All non-wrapper flags, including Codex -p/--profile, pass through unchanged.
+
+General wrapper flags:
+  -f, --file <path>            prepend @/absolute/path references to exec prompts
+  --zellij-new-tab [name]      open codex_wp in a new Zellij tab
+  --zellij-template <key>      choose tab layout: single, three-horizontal, three-vertical
+  --zellij-cwd <path>          override the working directory used for Zellij launch
+  --zellij-dry-run             print the resolved Zellij command without launching it
+
+Floating pane flags:
+  --zellij-floating            launch codex_wp in a floating pane
+  --zellij-top <value>         top offset for floating pane
+  --zellij-right <value>       right offset for floating pane
+  --zellij-width <value>       floating pane width
+  --zellij-height <value>      floating pane height
+  --zellij-close-on-exit       close the floating pane when the command exits
+
+Floating pair flags:
+  --zellij-floating-pair       launch two floating panes
+  --pair-layout <key>          choose floating pair layout
+  --a-prompt <text>            inline prompt for pane A
+  --a-file <path>              prompt file for pane A
+  --b-prompt <text>            inline prompt for pane B
+  --b-file <path>              prompt file for pane B
+  --zellij-pair-json           emit machine-readable pair launch output
+
+Help is side-effect free. Wrapper help prints first, then upstream codex help.
+EOF
+}
+
+if (( help_requested )); then
+  codex_bin="$(resolve_bin "${CODEX_BIN:-}" "codex")"
+  [[ -n "$codex_bin" && -x "$codex_bin" ]] || \
+    die "codex_wp: codex not found. Install it or set CODEX_BIN." 127
+
+  if [[ $# -gt 0 && "$1" == "--" ]]; then
+    shift
+  fi
+  (( $# > 0 )) || set -- --help
+
+  print_codex_wp_wrapper_help
+  printf '\n'
+  exec "$codex_bin" "$@"
+fi
 
 resolve_python_bin() {
   resolve_bin "${PYTHON_BIN:-$repo_root/.venv/bin/python3}" "python3"

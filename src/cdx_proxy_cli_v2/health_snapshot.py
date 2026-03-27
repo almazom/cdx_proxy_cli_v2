@@ -103,11 +103,12 @@ def collective_health_snapshot(
     cooldown_at: int,
     timeout: int,
     only: str,
+    prefer_keyring: bool = True,
 ) -> Dict[str, Any]:
     accounts: List[Dict[str, Any]] = []
     usage_endpoint = usage_url(base_url)
 
-    for auth in load_auth_records(auths_dir):
+    for auth in load_auth_records(auths_dir, prefer_keyring=prefer_keyring):
         headers = {
             "Authorization": f"Bearer {auth.token}",
             "User-Agent": DEFAULT_USER_AGENT,

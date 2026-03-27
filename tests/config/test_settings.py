@@ -361,6 +361,29 @@ class TestLoadCodexWpDefaults:
             "zellij_title_fallback": "Process Fallback",
         }
 
+    def test_ignores_mismatched_inherited_env_file_for_active_auth_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        inherited_env = tmp_path / "other-auths" / ".env"
+        inherited_env.parent.mkdir()
+        inherited_env.write_text(
+            f"{ENV_CODEX_WP_ZELLIJ_FLOAT_NAME}=wrong-pane\n",
+            encoding="utf-8",
+        )
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        auth_env = auth_dir / ".env"
+        auth_env.write_text(
+            f"{ENV_CODEX_WP_ZELLIJ_FLOAT_NAME}=right-pane\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(ENV_AUTH_DIR, str(auth_dir))
+        monkeypatch.setenv(ENV_ENV_FILE, str(inherited_env))
+
+        defaults = load_codex_wp_defaults()
+
+        assert defaults["zellij_float_name"] == "right-pane"
+
 
 # ============================================================================
 # Test: upsert_env_values
@@ -560,15 +583,34 @@ class TestBuildSettingsPrecedence:
     ):
         inherited_env = tmp_path / "inherited.env"
         inherited_env.write_text("CLIPROXY_MANAGEMENT_KEY=inherited-key\n", encoding="utf-8")
+        monkeypatch.delenv(ENV_AUTH_DIR, raising=False)
         monkeypatch.setenv(ENV_ENV_FILE, str(inherited_env))
 
         settings = build_settings()
 
         assert settings.env_path == inherited_env
 
+    def test_mismatched_inherited_env_file_is_ignored_for_active_auth_dir(
+        self, tmp_path: Path, monkeypatch
+    ):
+        inherited_env = tmp_path / "other-auths" / ".env"
+        inherited_env.parent.mkdir()
+        inherited_env.write_text("CLIPROXY_MANAGEMENT_KEY=inherited-key\n", encoding="utf-8")
+        auth_dir = tmp_path / "auths"
+        auth_dir.mkdir()
+        monkeypatch.setenv(ENV_AUTH_DIR, str(auth_dir))
+        monkeypatch.setenv(ENV_ENV_FILE, str(inherited_env))
+
+        settings = build_settings()
+
+        assert settings.auth_dir == str(auth_dir)
+        assert settings.env_path == auth_dir / ".env"
+
     def test_auth_dir_scoped_env_file_does_not_redirect_auth_dir(
         self, tmp_path: Path, monkeypatch
     ):
+        monkeypatch.delenv(ENV_AUTH_DIR, raising=False)
+        monkeypatch.delenv(ENV_ENV_FILE, raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         default_auth_dir = tmp_path / ".codex" / "_auths"
         default_auth_dir.mkdir(parents=True)

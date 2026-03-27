@@ -265,6 +265,7 @@ class ProxyRuntime:
                     self.settings.auth_dir,
                     base_url=usage_base_url,
                     min_remaining_percent=self.settings.limit_min_remaining_percent,
+                    prefer_keyring=False,
                 )
                 self._limit_health_cache_at = now
                 fetched = True
@@ -439,7 +440,7 @@ class ProxyRuntime:
 
         auth_file = account.get("file", "")
         matching_record = None
-        for candidate in load_auth_records(self.settings.auth_dir):
+        for candidate in load_auth_records(self.settings.auth_dir, prefer_keyring=False):
             if candidate.name == auth_file:
                 matching_record = candidate
                 break
@@ -551,7 +552,7 @@ class ProxyRuntime:
 
         Returns a summary of probe results with per-key details.
         """
-        records = load_auth_records(self.settings.auth_dir)
+        records = load_auth_records(self.settings.auth_dir, prefer_keyring=False)
         if not records:
             return {
                 "probed": 0,
@@ -796,7 +797,7 @@ class ProxyRuntime:
             self._auto_heal_thread.join(timeout=2.0)
 
     def reload_auths(self) -> int:
-        records = load_auth_records(self.settings.auth_dir)
+        records = load_auth_records(self.settings.auth_dir, prefer_keyring=False)
         self.auth_pool.load(records)
         return len(records)
 

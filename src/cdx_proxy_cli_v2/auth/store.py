@@ -88,17 +88,50 @@ def extract_auth_fields(
     return token.strip(), email, account_id
 
 
-def load_auth_records(auth_dir: str) -> List[AuthRecord]:
-    """Load auth records, retrieving tokens from OS keyring when available."""
+def _looks_like_auth_record(raw: Dict[str, Any]) -> bool:
+    """Return True only for JSON payloads that resemble auth records."""
+    if any(
+        _clean_text(raw.get(key))
+        for key in (
+            "email",
+            "access_token",
+            "OPENAI_API_KEY",
+            "api_key",
+            "openai_api_key",
+            "token",
+        )
+    ):
+        return True
+
+    tokens = raw.get("tokens")
+    if not isinstance(tokens, dict):
+        return False
+
+    return any(
+        _clean_text(tokens.get(key))
+        for key in ("access_token", "account_id", "email", "id_token")
+    )
+
+
+def load_auth_records(
+    auth_dir: str, *, prefer_keyring: bool = True
+) -> List[AuthRecord]:
+    """Load auth records, optionally preferring tokens stored in OS keyring."""
     records: List[AuthRecord] = []
     for path in iter_auth_json_files(auth_dir):
         raw, error = read_auth_json(path)
         if error or raw is None:
             continue
+        if not _looks_like_auth_record(raw):
+            continue
         token, email, account_id = extract_auth_fields(raw)
 
-        # If keyring is available, try to get token from keyring first
-        if KEYRING_AVAILABLE and keyring:
+        # Runtime paths can skip keyring when a file token already exists to avoid
+        # blocking on external keyring backends during proxy startup.
+        should_query_keyring = (
+            KEYRING_AVAILABLE and keyring and (prefer_keyring or not token)
+        )
+        if should_query_keyring:
             try:
                 keyring_token = keyring.get_password(SERVICE_NAME, path.stem)
                 if keyring_token:

@@ -103,6 +103,19 @@ def env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Path:
     return resolve_path(auth_dir) / DEFAULT_ENV_FILE
 
 
+def scoped_env_file_path(auth_dir: str, env_file: Optional[str] = None) -> Optional[Path]:
+    explicit = str(env_file or "").strip()
+    if not explicit:
+        return None
+    resolved_auth_dir = resolve_path(auth_dir).resolve()
+    resolved_env_file = resolve_path(explicit).resolve()
+    try:
+        resolved_env_file.relative_to(resolved_auth_dir)
+    except ValueError:
+        return None
+    return resolved_env_file
+
+
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
@@ -202,12 +215,25 @@ def load_codex_wp_defaults(
 ) -> Dict[str, object]:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
-    inherited_env_file = (
+    raw_inherited_env_file = (
         env_file
         if env_file is not None
         else (None if auth_dir is not None else os.environ.get(ENV_ENV_FILE))
     )
-    path = env_file_path(str(auth_dir_path), inherited_env_file)
+    if env_file is not None:
+        inherited_env_file = resolve_path(env_file)
+    elif auth_dir is not None or os.environ.get(ENV_AUTH_DIR):
+        inherited_env_file = scoped_env_file_path(
+            str(auth_dir_path),
+            raw_inherited_env_file,
+        )
+    else:
+        inherited_env_file = (
+            resolve_path(str(raw_inherited_env_file))
+            if str(raw_inherited_env_file or "").strip()
+            else None
+        )
+    path = inherited_env_file or env_file_path(str(auth_dir_path))
     merged = load_env_file(path)
     merged.update(os.environ)
 
@@ -388,8 +414,21 @@ def build_settings(
 ) -> Settings:
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
-    inherited_env_file = None if auth_dir is not None else os.environ.get(ENV_ENV_FILE)
-    env_path = env_file_path(str(auth_dir_path), inherited_env_file)
+    raw_inherited_env_file = None if auth_dir is not None else os.environ.get(ENV_ENV_FILE)
+    if auth_dir is not None:
+        inherited_env_file = None
+    elif os.environ.get(ENV_AUTH_DIR):
+        inherited_env_file = scoped_env_file_path(
+            str(auth_dir_path),
+            raw_inherited_env_file,
+        )
+    else:
+        inherited_env_file = (
+            resolve_path(str(raw_inherited_env_file))
+            if str(raw_inherited_env_file or "").strip()
+            else None
+        )
+    env_path = inherited_env_file or env_file_path(str(auth_dir_path))
     file_env = load_env_file(env_path)
     merged = dict(file_env)
     merged.update(os.environ)

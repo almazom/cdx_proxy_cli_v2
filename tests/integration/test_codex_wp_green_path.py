@@ -138,6 +138,19 @@ def final_text(prompt: str) -> str:
 
 def main() -> int:
     argv = sys.argv[1:]
+    if "--help" in argv or (argv and argv[0] == "help"):
+        if "review" in argv:
+            print("Fake Codex Review Help")
+            print("Usage: codex review [OPTIONS]")
+        elif "exec" in argv:
+            print("Fake Codex Exec Help")
+            print("Usage: codex exec [OPTIONS] [PROMPT] [COMMAND]")
+        else:
+            print("Fake Codex CLI Help")
+            print("Usage: codex [OPTIONS] [PROMPT]")
+        print("  -p, --profile <CONFIG_PROFILE>")
+        return 0
+
     if "exec" not in argv:
         fail("expected exec subcommand")
     if "--json" not in argv:
@@ -395,6 +408,77 @@ def _extract_pair_run_payloads(path: Path) -> tuple[list[str], list[str], list[s
     assert len(run_calls) == 2
     assert len(rename_calls) == 2
     return calls[0], run_calls[0], run_calls[1], rename_calls[0], rename_calls[1]
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_usage"),
+    [
+        (["--zellij-floating", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
+        (["--zellij-new-tab", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
+        (["--zellij-floating-pair", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
+        (["--pair-layout", "stacked", "--help"], "Usage: codex [OPTIONS] [PROMPT]"),
+        (["review", "--help"], "Usage: codex review [OPTIONS]"),
+    ],
+)
+def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
+    tmp_path: Path,
+    args: list[str],
+    expected_usage: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    fake_codex = _write_fake_codex(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={"CODEX_BIN": str(fake_codex)},
+    )
+
+    result = _run_codex_wp_args(args, env)
+
+    assert result.returncode == 0, result.stderr
+    assert "codex_wp wrapper flags" in result.stdout
+    assert "Help is side-effect free." in result.stdout
+    assert expected_usage in result.stdout
+    assert _read_fake_zellij_calls(capture_path) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_usage"),
+    [
+        (
+            ["exec", "-p", "test-profile", "--help"],
+            "Usage: codex exec [OPTIONS] [PROMPT] [COMMAND]",
+        ),
+        (
+            ["review", "-p", "test-profile", "--help"],
+            "Usage: codex review [OPTIONS]",
+        ),
+    ],
+)
+def test_codex_wp_preserves_upstream_profile_flag_in_help_mode(
+    tmp_path: Path,
+    args: list[str],
+    expected_usage: str,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    fake_codex = _write_fake_codex(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={"CODEX_BIN": str(fake_codex)},
+    )
+
+    result = _run_codex_wp_args(args, env)
+
+    assert result.returncode == 0, result.stderr
+    assert expected_usage in result.stdout
+    assert "-p, --profile <CONFIG_PROFILE>" in result.stdout
+    assert "unexpected argument" not in result.stderr
+    assert _read_fake_zellij_calls(capture_path) == []
 
 
 def test_codex_wp_zellij_dry_run_prints_resolved_layout_and_command(
@@ -736,6 +820,63 @@ def test_codex_wp_zellij_floating_dry_run_uses_default_preset(
         expected_command,
     ]
     assert calls == [["action", "list-tabs", "--json", "--state", "--dimensions"]]
+
+
+def test_codex_wp_file_refs_follow_exec_options_in_floating_dry_run(
+    tmp_path: Path,
+) -> None:
+    _write_fake_zellij(tmp_path)
+    capture_path = tmp_path / "fake_zellij.jsonl"
+    context_file = tmp_path / "plan.md"
+    context_file.write_text("# plan\n", encoding="utf-8")
+
+    env = _zellij_env(
+        tmp_path,
+        capture_path,
+        extra_env={
+            "FAKE_ZELLIJ_LIST_TABS_STDOUT": json.dumps(
+                [
+                    {
+                        "name": "Tab #1",
+                        "active": True,
+                        "viewport_columns": 140,
+                        "viewport_rows": 42,
+                    }
+                ]
+            ),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "--zellij-floating",
+            "--zellij-dry-run",
+            "-f",
+            str(context_file),
+            "exec",
+            "--ephemeral",
+            "-C",
+            "/tmp/pilot",
+            "Reply with exactly REQ1 OK and stop.",
+        ],
+        env,
+    )
+
+    expected_command = (
+        "command=zellij run --floating --pinned true --cwd /tmp/pilot "
+        "--name cdx:\\ REQ1\\ Check --x 81 --y 5 --width 56 --height 15 -- "
+        f"{ROOT / 'bin/codex_wp'} exec --ephemeral -C /tmp/pilot "
+        f"@{context_file}\\ Reply\\ with\\ exactly\\ REQ1\\ OK\\ and\\ stop."
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "floating=top=12% right=2% width=40% height=35% close_on_exit=false",
+        expected_command,
+    ]
+    assert _read_fake_zellij_calls(capture_path) == [
+        ["action", "list-tabs", "--json", "--state", "--dimensions"]
+    ]
 
 
 def test_codex_wp_zellij_floating_launch_derives_x_from_right_padding(

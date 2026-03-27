@@ -82,6 +82,25 @@ def test_load_auth_records_fallback_to_file(mock_keyring, tmp_path):
     assert records[0].token == "file-token-789"
 
 
+@pytest.mark.skipif(not KEYRING_AVAILABLE, reason="keyring not installed")
+def test_load_auth_records_can_skip_keyring_for_runtime_paths(tmp_path, monkeypatch):
+    """Runtime callers can avoid keyring lookups when a file token already exists."""
+    auth_file = tmp_path / "runtime_auth.json"
+    auth_file.write_text(
+        '{"access_token": "file-token-789", "email": "runtime@example.com"}'
+    )
+
+    def fail_get_password(_service, _name):
+        raise AssertionError("keyring should not be queried")
+
+    monkeypatch.setattr("keyring.get_password", fail_get_password)
+
+    records = load_auth_records(str(tmp_path), prefer_keyring=False)
+
+    assert len(records) == 1
+    assert records[0].token == "file-token-789"
+
+
 def test_load_auth_records_without_keyring(tmp_path):
     """Test loading works without keyring (backward compatibility)."""
     auth_file = tmp_path / "no_keyring_auth.json"
@@ -92,6 +111,59 @@ def test_load_auth_records_without_keyring(tmp_path):
 
     assert len(records) == 1
     assert records[0].token == "plain-token"
+
+
+def test_load_auth_records_ignores_runtime_state_json_without_keyring_lookup(
+    tmp_path, monkeypatch
+):
+    """Runtime metadata files must not be treated as auth records."""
+    auth_file = tmp_path / "runtime_auth.json"
+    auth_file.write_text(
+        '{"access_token": "plain-token", "email": "runtime@example.com"}'
+    )
+    state_file = tmp_path / "rr_proxy_v2.state.json"
+    state_file.write_text(
+        '{"status": "running", "base_url": "http://127.0.0.1:43123"}'
+    )
+
+    class FakeKeyring:
+        @staticmethod
+        def get_password(_service, name):
+            raise AssertionError(f"unexpected keyring lookup for {name}")
+
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.KEYRING_AVAILABLE", True)
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.keyring", FakeKeyring)
+
+    records = load_auth_records(str(tmp_path), prefer_keyring=False)
+
+    assert len(records) == 1
+    assert records[0].name == "runtime_auth.json"
+    assert records[0].token == "plain-token"
+
+
+def test_load_auth_records_runtime_path_keeps_keyring_backed_auth_metadata(
+    tmp_path, monkeypatch
+):
+    """Runtime paths should still load auth files that rely on keyring tokens."""
+    auth_file = tmp_path / "keyring_auth.json"
+    auth_file.write_text('{"email": "keyring@example.com"}')
+
+    class FakeKeyring:
+        @staticmethod
+        def get_password(_service, name):
+            if name != "keyring_auth":
+                raise AssertionError(f"unexpected keyring lookup for {name}")
+            return "keyring-token"
+
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.KEYRING_AVAILABLE", True)
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.keyring", FakeKeyring)
+
+    records = load_auth_records(str(tmp_path), prefer_keyring=False)
+
+    assert len(records) == 1
+    assert records[0].name == "keyring_auth.json"
+    assert records[0].token == "keyring-token"
+    assert records[0].email == "keyring@example.com"
 
 
 def test_save_auth_record_falls_back_to_file_without_keyring(tmp_path):
