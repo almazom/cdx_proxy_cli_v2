@@ -86,6 +86,43 @@ def test_singleton_lock_rejects_unverified_replacement(tmp_path: Path) -> None:
     assert pid_path.read_text(encoding="utf-8") == "4242"
 
 
+def test_is_expected_trace_process_matches_default_auth_dir(tmp_path: Path) -> None:
+    """Trace started without --auth-dir (using default) should still match."""
+    auth_dir = tmp_path / "auths"
+    auth_dir.mkdir()
+    pid = 4242
+    # cmdline has no --auth-dir — same as running `cdx trace` with the default
+    cmdline = "/usr/bin/python3 -m cdx_proxy_cli_v2 trace --limit 20"
+
+    with (
+        patch("cdx_proxy_cli_v2.runtime.singleton._is_pid_running", return_value=True),
+        patch(
+            "cdx_proxy_cli_v2.runtime.singleton._read_process_cmdline",
+            return_value=cmdline,
+        ),
+    ):
+        assert is_expected_trace_process(pid, str(auth_dir)) is True
+
+
+def test_is_expected_trace_process_rejects_different_auth_dir(tmp_path: Path) -> None:
+    """Trace started with a different --auth-dir should NOT match."""
+    auth_dir = tmp_path / "auths"
+    auth_dir.mkdir()
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    pid = 4242
+    cmdline = f"/usr/bin/python3 -m cdx_proxy_cli_v2 trace --auth-dir {other_dir} --limit 20"
+
+    with (
+        patch("cdx_proxy_cli_v2.runtime.singleton._is_pid_running", return_value=True),
+        patch(
+            "cdx_proxy_cli_v2.runtime.singleton._read_process_cmdline",
+            return_value=cmdline,
+        ),
+    ):
+        assert is_expected_trace_process(pid, str(auth_dir)) is False
+
+
 def test_singleton_lock_replaces_verified_process(tmp_path: Path) -> None:
     pid_path = tmp_path / "cdx_trace.pid"
     pid_path.write_text("4242", encoding="utf-8")

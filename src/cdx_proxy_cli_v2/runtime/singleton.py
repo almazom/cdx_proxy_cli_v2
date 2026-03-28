@@ -89,12 +89,17 @@ def is_expected_trace_process(pid: Optional[int], auth_dir: str) -> bool:
     cmdline = _read_process_cmdline(pid)
     if not cmdline:
         return False
+    if "cdx_proxy_cli_v2" not in cmdline or "trace" not in cmdline:
+        return False
     normalized_auth_dir = str(resolve_path(auth_dir))
-    return (
-        "cdx_proxy_cli_v2" in cmdline
-        and "trace" in cmdline
-        and normalized_auth_dir in cmdline
-    )
+    if normalized_auth_dir in cmdline:
+        return True
+    # When --auth-dir is not passed on the command line (uses the default),
+    # the auth dir path won't appear in /proc/{pid}/cmdline. In that case
+    # also verify the PID file we read is in the same auth dir we're using,
+    # which is already guaranteed by the caller reading from trace_pid_path().
+    # Accept the match as long as no *different* --auth-dir is specified.
+    return "--auth-dir" not in cmdline
 
 
 @contextmanager

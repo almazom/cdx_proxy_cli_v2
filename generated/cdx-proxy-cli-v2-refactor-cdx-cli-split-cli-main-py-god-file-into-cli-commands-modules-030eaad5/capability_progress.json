@@ -1,0 +1,33 @@
+{
+  "contract": "capability-progress@1.0",
+  "progress_percent": 100,
+  "passed_count": 5,
+  "total_count": 5,
+  "gates": [
+    {
+      "id": "planning_handoff_live",
+      "label": "Planning handoff is live",
+      "passed": true
+    },
+    {
+      "id": "split_handoff_live",
+      "label": "Split handoff is live",
+      "passed": true
+    },
+    {
+      "id": "implementation_guided_orchestration_live",
+      "label": "Implementation guided orchestration is live",
+      "passed": true
+    },
+    {
+      "id": "expert_improvement_loop_live",
+      "label": "Expert improvement loop is live",
+      "passed": true
+    },
+    {
+      "id": "package_reconciled",
+      "label": "Current package artifacts are reconciled",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Implementation Plan: cdx_proxy_cli_v2 | Refactor cdx CLI: split cli/main.py God file into cli/commands/ modules, extract a declarative settings resolver to reduce build_settings() boilerplate from 200 lines to ~30, unify --force/--replace flags into consistent naming across proxy and trace subcommands, and add usage example epilogs to all subcommands. Keep full backward compatibility | v2",
+  "slug": "cdx-proxy-cli-v2-refactor-cdx-cli-split-cli-main-py-god-file-into-cli-commands-modules-030eaad5",
+  "package_path": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-refactor-cdx-cli-split-cli-main-py-god-file-into-cli-commands-modules-030eaad5",
+  "input_plan": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-refactor-cdx-cli-split-cli-main-py-god-file-into-cli-commands-modules-030eaad5/INPUT_IMPLEMENTATION_PLAN.md",
+  "card_count": 4,
+  "total_story_points": 8,
+  "card_ids": [
+  "0001",
+  "0002",
+  "0003",
+  "0004"
+]
+}

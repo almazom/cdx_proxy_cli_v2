@@ -1,0 +1,84 @@
+{
+  "meta": {
+    "status": "ready",
+    "generated_at": "2026-03-28T16:10:00Z",
+    "input_plan": "INPUT_IMPLEMENTATION_PLAN.md",
+    "package_path": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-refactor-cdx-cli-split-cli-main-py-god-file-into-cli-commands-modules-030eaad5",
+    "repo_root": "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  },
+  "cards": [
+    {
+      "id": "0001",
+      "title": "Split main.py into cli/commands/ modules",
+      "status": "ready",
+      "story_points": 2,
+      "estimated_hours": 2,
+      "depends_on": [],
+      "source_refs": ["T-1.1"],
+      "acceptance_refs": ["AC-001", "AC-002"],
+      "files": ["src/cdx_proxy_cli_v2/cli/main.py", "src/cdx_proxy_cli_v2/cli/commands/__init__.py"],
+      "evidence": [],
+      "transition_history": [
+        {"from": null, "to": "ready", "at": "2026-03-28T16:10:00Z", "note": "Initialized during package generation."}
+      ]
+    },
+    {
+      "id": "0002",
+      "title": "Declarative settings resolver in settings.py",
+      "status": "ready",
+      "story_points": 2,
+      "estimated_hours": 2,
+      "depends_on": [],
+      "source_refs": ["T-1.2"],
+      "acceptance_refs": ["AC-001", "AC-002"],
+      "files": ["src/cdx_proxy_cli_v2/config/settings.py"],
+      "evidence": [],
+      "transition_history": [
+        {"from": null, "to": "ready", "at": "2026-03-28T16:10:00Z", "note": "Initialized during package generation."}
+      ]
+    },
+    {
+      "id": "0003",
+      "title": "Unify --force/--replace flags + add help epilogs",
+      "status": "backlog",
+      "story_points": 1,
+      "estimated_hours": 1,
+      "depends_on": ["0001"],
+      "source_refs": ["T-1.1"],
+      "acceptance_refs": ["AC-001"],
+      "files": ["src/cdx_proxy_cli_v2/cli/main.py"],
+      "evidence": [],
+      "transition_history": [
+        {"from": null, "to": "backlog", "at": "2026-03-28T16:10:00Z", "note": "Initialized during package generation."}
+      ]
+    },
+    {
+      "id": "0004",
+      "title": "Run tests and verify no regressions",
+      "status": "backlog",
+      "story_points": 1,
+      "estimated_hours": 1,
+      "depends_on": ["0001", "0002", "0003"],
+      "source_refs": ["T-2.1"],
+      "acceptance_refs": ["AC-003"],
+      "files": [],
+      "evidence": [],
+      "transition_history": [
+        {"from": null, "to": "backlog", "at": "2026-03-28T16:10:00Z", "note": "Initialized during package generation."}
+      ]
+    }
+  ],
+  "status_counts": {
+    "backlog": 2,
+    "ready": 2,
+    "in_progress": 0,
+    "simplify": 0,
+    "commit": 0,
+    "codex-review": 0,
+    "done": 0,
+    "blocked": 0
+  },
+  "current_card": "0001",
+  "total_story_points": 6,
+  "total_estimated_hours": 6
+}

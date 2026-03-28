@@ -409,6 +409,35 @@ class Settings:
         return replace(self, management_key=key)
 
 
+# Declarative spec for numeric settings resolved via _resolve_spec_int().
+# Each tuple: (kwarg_name, field_name, env_key, default, parser, min_cli)
+_NUMERIC_SPECS: list[tuple[str, str, str, int, Callable[[Optional[str], int], int], int]] = [
+    ("trace_max", "trace_max", ENV_TRACE_MAX, DEFAULT_TRACE_MAX, parse_positive_int, 1),
+    ("request_timeout", "request_timeout", ENV_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT, parse_positive_int, 1),
+    ("compact_timeout", "compact_timeout", ENV_COMPACT_TIMEOUT, DEFAULT_COMPACT_TIMEOUT, parse_positive_int, 1),
+    ("auto_reset_streak", "auto_reset_streak", ENV_AUTO_RESET_STREAK, DEFAULT_AUTO_RESET_STREAK, parse_positive_int, 1),
+    ("auto_reset_cooldown", "auto_reset_cooldown", ENV_AUTO_RESET_COOLDOWN, DEFAULT_AUTO_RESET_COOLDOWN, parse_positive_int, 1),
+    ("auto_heal_interval", "auto_heal_interval", ENV_AUTO_HEAL_INTERVAL, DEFAULT_AUTO_HEAL_INTERVAL, parse_positive_int, 1),
+    ("auto_heal_success_target", "auto_heal_success_target", ENV_AUTO_HEAL_SUCCESS_TARGET, DEFAULT_AUTO_HEAL_SUCCESS_TARGET, parse_positive_int, 1),
+    ("auto_heal_max_attempts", "auto_heal_max_attempts", ENV_AUTO_HEAL_MAX_ATTEMPTS, DEFAULT_AUTO_HEAL_MAX_ATTEMPTS, parse_positive_int, 1),
+    ("max_ejection_percent", "max_ejection_percent", ENV_MAX_EJECTION_PERCENT, DEFAULT_MAX_EJECTION_PERCENT, parse_positive_int, 1),
+    ("consecutive_error_threshold", "consecutive_error_threshold", ENV_CONSECUTIVE_ERROR_THRESHOLD, DEFAULT_CONSECUTIVE_ERROR_THRESHOLD, parse_positive_int, 1),
+]
+
+
+def _resolve_spec_int(
+    cli_value: Optional[int],
+    merged_env: Dict[str, str],
+    env_key: str,
+    default: int,
+    env_parser: Callable[[Optional[str], int], int],
+    min_cli_value: int,
+) -> int:
+    if cli_value is None:
+        return env_parser(merged_env.get(env_key), default)
+    return max(min_cli_value, int(cli_value))
+
+
 def build_settings(
     *,
     auth_dir: Optional[str] = None,
@@ -432,6 +461,7 @@ def build_settings(
     max_ejection_percent: Optional[int] = None,
     consecutive_error_threshold: Optional[int] = None,
 ) -> Settings:
+    # --- resolve env sources ---
     initial_auth_dir = auth_dir or os.environ.get(ENV_AUTH_DIR) or DEFAULT_AUTH_DIR
     auth_dir_path = resolve_path(initial_auth_dir)
     env_path = _resolve_startup_env_path(auth_dir_path, auth_dir=auth_dir)
@@ -439,179 +469,76 @@ def build_settings(
     merged = dict(file_env)
     merged.update(os.environ)
 
-    # The auth-dir-scoped .env can supply runtime defaults, but it must not
-    # redirect startup to a different auth dir.
+    # --- special-case: paths and strings ---
     resolved_auth_dir = str(auth_dir_path)
-    resolved_env_path = (
-        env_file_path(resolved_auth_dir) if auth_dir is not None else env_path
+    resolved_env_path = env_file_path(resolved_auth_dir) if auth_dir is not None else env_path
+    resolved_host = (host or merged.get(ENV_HOST) or DEFAULT_HOST).strip() or DEFAULT_HOST
+    resolved_upstream = normalize_upstream(
+        upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM, default=DEFAULT_UPSTREAM,
     )
-    resolved_host = (
-        host or merged.get(ENV_HOST) or DEFAULT_HOST
-    ).strip() or DEFAULT_HOST
 
-    def resolve_numeric_setting(
-        *,
-        cli_value: Optional[int],
-        env_key: str,
-        default: int,
-        env_parser: Callable[[Optional[str], int], int],
-        min_cli_value: int,
-    ) -> int:
-        if cli_value is None:
-            return env_parser(merged.get(env_key), default)
-        return max(min_cli_value, int(cli_value))
-
-    resolved_port = resolve_numeric_setting(
-        cli_value=port,
-        env_key=ENV_PORT,
-        default=0,
-        env_parser=parse_port,
-        min_cli_value=0,
-    )
+    # --- special-case: port (range-validated) ---
+    resolved_port = _resolve_spec_int(port, merged, ENV_PORT, 0, parse_port, 0)
     if not (0 <= resolved_port <= 65535):
         raise ValueError("port must be between 0 and 65535")
 
-    resolved_upstream = normalize_upstream(
-        upstream or merged.get(ENV_UPSTREAM) or DEFAULT_UPSTREAM,
-        default=DEFAULT_UPSTREAM,
-    )
-    raw_key = (
-        management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
-    )
-    # Handle both Python None and string "None" from env files
+    # --- special-case: management key (strip "None" strings) ---
+    raw_key = management_key if management_key is not None else merged.get(ENV_MANAGEMENT_KEY)
     key_str = str(raw_key).strip()
     resolved_key = key_str if key_str and key_str.lower() != "none" else None
 
-    if allow_non_loopback is None:
-        resolved_allow_non_loopback = parse_bool(
-            merged.get(ENV_ALLOW_NON_LOOPBACK), default=False
+    # --- special-case: booleans ---
+    resolved_allow_non_loopback = (
+        bool(allow_non_loopback)
+        if allow_non_loopback is not None
+        else parse_bool(merged.get(ENV_ALLOW_NON_LOOPBACK), default=False)
+    )
+    resolved_auto_reset_on_single_key = (
+        bool(auto_reset_on_single_key)
+        if auto_reset_on_single_key is not None
+        else parse_bool(merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY), default=False)
+    )
+
+    # --- special-case: percentage float ---
+    resolved_limit_min_remaining_percent = (
+        min(100.0, max(0.0, float(limit_min_remaining_percent)))
+        if limit_min_remaining_percent is not None
+        else parse_percentage_float(
+            merged.get(ENV_LIMIT_MIN_REMAINING_PERCENT), default=DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
         )
-    else:
-        resolved_allow_non_loopback = bool(allow_non_loopback)
-
-    resolved_trace_max = resolve_numeric_setting(
-        cli_value=trace_max,
-        env_key=ENV_TRACE_MAX,
-        default=DEFAULT_TRACE_MAX,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
     )
 
-    resolved_request_timeout = resolve_numeric_setting(
-        cli_value=request_timeout,
-        env_key=ENV_REQUEST_TIMEOUT,
-        default=DEFAULT_REQUEST_TIMEOUT,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_compact_timeout = resolve_numeric_setting(
-        cli_value=compact_timeout,
-        env_key=ENV_COMPACT_TIMEOUT,
-        default=DEFAULT_COMPACT_TIMEOUT,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    if limit_min_remaining_percent is None:
-        resolved_limit_min_remaining_percent = parse_percentage_float(
-            merged.get(ENV_LIMIT_MIN_REMAINING_PERCENT),
-            default=DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
-        )
-    else:
-        resolved_limit_min_remaining_percent = min(
-            100.0, max(0.0, float(limit_min_remaining_percent))
-        )
-
-    resolved_max_in_flight_requests = (
-        DEFAULT_MAX_IN_FLIGHT_REQUESTS
-        if max_in_flight_requests is None
-        else max(0, int(max_in_flight_requests))
-    )
-    if max_in_flight_requests is None:
-        raw_max_in_flight = merged.get(ENV_MAX_IN_FLIGHT_REQUESTS)
-        if raw_max_in_flight is not None:
+    # --- special-case: in-flight/pending (allow 0, with env fallback) ---
+    def _resolve_non_negative(cli_val: Optional[int], env_key: str, default: int) -> int:
+        if cli_val is not None:
+            return max(0, cli_val)
+        raw = merged.get(env_key)
+        if raw is not None:
             try:
-                resolved_max_in_flight_requests = max(0, int(raw_max_in_flight))
+                return max(0, int(raw))
             except ValueError:
-                resolved_max_in_flight_requests = DEFAULT_MAX_IN_FLIGHT_REQUESTS
+                return default
+        return default
 
-    resolved_max_pending_requests = (
-        DEFAULT_MAX_PENDING_REQUESTS
-        if max_pending_requests is None
-        else max(0, int(max_pending_requests))
-    )
-    if max_pending_requests is None:
-        raw_max_pending = merged.get(ENV_MAX_PENDING_REQUESTS)
-        if raw_max_pending is not None:
-            try:
-                resolved_max_pending_requests = max(0, int(raw_max_pending))
-            except ValueError:
-                resolved_max_pending_requests = DEFAULT_MAX_PENDING_REQUESTS
+    resolved_max_in_flight = _resolve_non_negative(max_in_flight_requests, ENV_MAX_IN_FLIGHT_REQUESTS, DEFAULT_MAX_IN_FLIGHT_REQUESTS)
+    resolved_max_pending = _resolve_non_negative(max_pending_requests, ENV_MAX_PENDING_REQUESTS, DEFAULT_MAX_PENDING_REQUESTS)
 
-    if auto_reset_on_single_key is None:
-        resolved_auto_reset_on_single_key = parse_bool(
-            merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY),
-            default=False,
-        )
-    else:
-        resolved_auto_reset_on_single_key = bool(auto_reset_on_single_key)
-
-    resolved_auto_reset_streak = resolve_numeric_setting(
-        cli_value=auto_reset_streak,
-        env_key=ENV_AUTO_RESET_STREAK,
-        default=DEFAULT_AUTO_RESET_STREAK,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_auto_reset_cooldown = resolve_numeric_setting(
-        cli_value=auto_reset_cooldown,
-        env_key=ENV_AUTO_RESET_COOLDOWN,
-        default=DEFAULT_AUTO_RESET_COOLDOWN,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_auto_heal_interval = resolve_numeric_setting(
-        cli_value=auto_heal_interval,
-        env_key=ENV_AUTO_HEAL_INTERVAL,
-        default=DEFAULT_AUTO_HEAL_INTERVAL,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_auto_heal_success_target = resolve_numeric_setting(
-        cli_value=auto_heal_success_target,
-        env_key=ENV_AUTO_HEAL_SUCCESS_TARGET,
-        default=DEFAULT_AUTO_HEAL_SUCCESS_TARGET,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_auto_heal_max_attempts = resolve_numeric_setting(
-        cli_value=auto_heal_max_attempts,
-        env_key=ENV_AUTO_HEAL_MAX_ATTEMPTS,
-        default=DEFAULT_AUTO_HEAL_MAX_ATTEMPTS,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_max_ejection_percent = resolve_numeric_setting(
-        cli_value=max_ejection_percent,
-        env_key=ENV_MAX_EJECTION_PERCENT,
-        default=DEFAULT_MAX_EJECTION_PERCENT,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
-
-    resolved_consecutive_error_threshold = resolve_numeric_setting(
-        cli_value=consecutive_error_threshold,
-        env_key=ENV_CONSECUTIVE_ERROR_THRESHOLD,
-        default=DEFAULT_CONSECUTIVE_ERROR_THRESHOLD,
-        env_parser=parse_positive_int,
-        min_cli_value=1,
-    )
+    # --- declarative numeric specs ---
+    cli_overrides = {
+        "trace_max": trace_max,
+        "request_timeout": request_timeout,
+        "compact_timeout": compact_timeout,
+        "auto_reset_streak": auto_reset_streak,
+        "auto_reset_cooldown": auto_reset_cooldown,
+        "auto_heal_interval": auto_heal_interval,
+        "auto_heal_success_target": auto_heal_success_target,
+        "auto_heal_max_attempts": auto_heal_max_attempts,
+        "max_ejection_percent": max_ejection_percent,
+        "consecutive_error_threshold": consecutive_error_threshold,
+    }
+    spec_resolved: dict[str, int] = {}
+    for kwarg, field, env_key, default, parser, min_val in _NUMERIC_SPECS:
+        spec_resolved[field] = _resolve_spec_int(cli_overrides[kwarg], merged, env_key, default, parser, min_val)
 
     return Settings(
         auth_dir=resolved_auth_dir,
@@ -621,20 +548,11 @@ def build_settings(
         management_key=resolved_key,
         env_file=str(resolved_env_path),
         allow_non_loopback=resolved_allow_non_loopback,
-        trace_max=resolved_trace_max,
-        request_timeout=resolved_request_timeout,
-        compact_timeout=resolved_compact_timeout,
         limit_min_remaining_percent=resolved_limit_min_remaining_percent,
-        max_in_flight_requests=resolved_max_in_flight_requests,
-        max_pending_requests=resolved_max_pending_requests,
+        max_in_flight_requests=resolved_max_in_flight,
+        max_pending_requests=resolved_max_pending,
         auto_reset_on_single_key=resolved_auto_reset_on_single_key,
-        auto_reset_streak=resolved_auto_reset_streak,
-        auto_reset_cooldown=resolved_auto_reset_cooldown,
-        auto_heal_interval=resolved_auto_heal_interval,
-        auto_heal_success_target=resolved_auto_heal_success_target,
-        auto_heal_max_attempts=resolved_auto_heal_max_attempts,
-        max_ejection_percent=resolved_max_ejection_percent,
-        consecutive_error_threshold=resolved_consecutive_error_threshold,
+        **spec_resolved,
     )
 
 

@@ -1,0 +1,645 @@
+{
+  "score_method": "dual-gate-v3",
+  "threshold": 95,
+  "score": 95,
+  "passed": true,
+  "reviewed_at": "2026-03-28T13:12:46Z",
+  "card_count": 4,
+  "issues": [
+  "0002: card needs an example payload or artifact sketch",
+  "0003: title remains generic relative to the artifact",
+  "0003: card needs an example payload or artifact sketch",
+  "0004: title remains generic relative to the artifact"
+],
+  "blockers": [],
+  "summary": [
+  "expert satisfaction: 98",
+  "confidence: 95",
+  "developer success estimate: 98",
+  "blocking findings: none"
+],
+  "expert_satisfaction": 98,
+  "confidence": 95,
+  "developer_success_estimate": 98,
+  "hardening_history": [
+  {
+    "iteration": 1,
+    "card_actions": {
+      "0001": [
+        "expanded implementation guidance with card-local steps and example",
+        "rewrote acceptance into card-specific pass-fail checks"
+      ],
+      "0002": [
+        "expanded implementation guidance with card-local steps and example",
+        "rewrote acceptance into card-specific pass-fail checks"
+      ],
+      "0003": [
+        "expanded implementation guidance with card-local steps and example",
+        "rewrote acceptance into card-specific pass-fail checks"
+      ],
+      "0004": [
+        "expanded implementation guidance with card-local steps and example",
+        "rewrote acceptance into card-specific pass-fail checks"
+      ]
+    },
+    "package_actions": []
+  }
+],
+  "cards": [
+  {
+    "id": "0001",
+    "title": "Implementation - Update `src/cdx_proxy_cli_v2/cli/main.py` to implement: Refactor cdx CLI: split...",
+    "score": 100,
+    "passed": true,
+    "blocked": false,
+    "findings": [],
+    "blocking_findings": [],
+    "dimension_scores": {
+      "outcome_clarity": 100,
+      "file_targeting": 100,
+      "implementation_guidance": 100,
+      "verification_executability": 100,
+      "acceptance_testability": 100,
+      "dependency_fitness": 100,
+      "scope_discipline": 100,
+      "developer_confidence": 100
+    },
+    "dimensions": [
+      {
+        "label": "outcome clarity",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "file targeting",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "implementation guidance",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "verification executability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "acceptance testability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "dependency fitness",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "scope discipline",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "developer confidence",
+        "score": 100,
+        "passed": true
+      }
+    ]
+  },
+  {
+    "id": "0002",
+    "title": "Implementation - Update `src/cdx_proxy_cli_v2/config/settings.py` only if the requested behavior...",
+    "score": 97,
+    "passed": true,
+    "blocked": false,
+    "findings": [
+      "card needs an example payload or artifact sketch"
+    ],
+    "blocking_findings": [],
+    "dimension_scores": {
+      "outcome_clarity": 100,
+      "file_targeting": 100,
+      "implementation_guidance": 80,
+      "verification_executability": 100,
+      "acceptance_testability": 100,
+      "dependency_fitness": 100,
+      "scope_discipline": 100,
+      "developer_confidence": 97
+    },
+    "dimensions": [
+      {
+        "label": "outcome clarity",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "file targeting",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "implementation guidance",
+        "score": 80,
+        "passed": false
+      },
+      {
+        "label": "verification executability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "acceptance testability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "dependency fitness",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "scope discipline",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "developer confidence",
+        "score": 97,
+        "passed": true
+      }
+    ]
+  },
+  {
+    "id": "0003",
+    "title": "Verification - Run the repo verification commands and confirm the requested behavior works without...",
+    "score": 95,
+    "passed": true,
+    "blocked": false,
+    "findings": [
+      "title remains generic relative to the artifact",
+      "card needs an example payload or artifact sketch"
+    ],
+    "blocking_findings": [],
+    "dimension_scores": {
+      "outcome_clarity": 85,
+      "file_targeting": 100,
+      "implementation_guidance": 80,
+      "verification_executability": 100,
+      "acceptance_testability": 100,
+      "dependency_fitness": 100,
+      "scope_discipline": 100,
+      "developer_confidence": 95
+    },
+    "dimensions": [
+      {
+        "label": "outcome clarity",
+        "score": 85,
+        "passed": false
+      },
+      {
+        "label": "file targeting",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "implementation guidance",
+        "score": 80,
+        "passed": false
+      },
+      {
+        "label": "verification executability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "acceptance testability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "dependency fitness",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "scope discipline",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "developer confidence",
+        "score": 95,
+        "passed": true
+      }
+    ]
+  },
+  {
+    "id": "0004",
+    "title": "Verification - Confirm the exported handoff still uses one canonical `IMPLEMENTATION_PLAN.md`",
+    "score": 98,
+    "passed": true,
+    "blocked": false,
+    "findings": [
+      "title remains generic relative to the artifact"
+    ],
+    "blocking_findings": [],
+    "dimension_scores": {
+      "outcome_clarity": 85,
+      "file_targeting": 100,
+      "implementation_guidance": 100,
+      "verification_executability": 100,
+      "acceptance_testability": 100,
+      "dependency_fitness": 100,
+      "scope_discipline": 100,
+      "developer_confidence": 98
+    },
+    "dimensions": [
+      {
+        "label": "outcome clarity",
+        "score": 85,
+        "passed": false
+      },
+      {
+        "label": "file targeting",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "implementation guidance",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "verification executability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "acceptance testability",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "dependency fitness",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "scope discipline",
+        "score": 100,
+        "passed": true
+      },
+      {
+        "label": "developer confidence",
+        "score": 98,
+        "passed": true
+      }
+    ]
+  }
+],
+  "structural": {
+  "score_method": "structural-v2",
+  "threshold": 95,
+  "score": 100,
+  "passed": true,
+  "reviewed_at": "2026-03-28T13:12:46Z",
+  "card_count": 4,
+  "issues": [],
+  "cards": [
+    {
+      "id": "0001",
+      "title": "Implementation - Update `src/cdx_proxy_cli_v2/cli/main.py` to implement: Refactor cdx CLI: split...",
+      "score": 100,
+      "passed": true,
+      "issues": []
+    },
+    {
+      "id": "0002",
+      "title": "Implementation - Update `src/cdx_proxy_cli_v2/config/settings.py` only if the requested behavior...",
+      "score": 100,
+      "passed": true,
+      "issues": []
+    },
+    {
+      "id": "0003",
+      "title": "Verification - Run the repo verification commands and confirm the requested behavior works without...",
+      "score": 100,
+      "passed": true,
+      "issues": []
+    },
+    {
+      "id": "0004",
+      "title": "Verification - Confirm the exported handoff still uses one canonical `IMPLEMENTATION_PLAN.md`",
+      "score": 100,
+      "passed": true,
+      "issues": []
+    }
+  ]
+},
+  "expert": {
+  "reviewer_profile": "trello-kanban-expert-v2",
+  "threshold": 95,
+  "score": 95,
+  "passed": true,
+  "reviewed_at": "2026-03-28T13:12:46Z",
+  "card_count": 4,
+  "issues": [
+    "0002: card needs an example payload or artifact sketch",
+    "0003: title remains generic relative to the artifact",
+    "0003: card needs an example payload or artifact sketch",
+    "0004: title remains generic relative to the artifact"
+  ],
+  "blockers": [],
+  "cards": [
+    {
+      "id": "0001",
+      "title": "Implementation - Update `src/cdx_proxy_cli_v2/cli/main.py` to implement: Refactor cdx CLI: split...",
+      "score": 100,
+      "passed": true,
+      "blocked": false,
+      "findings": [],
+      "blocking_findings": [],
+      "dimension_scores": {
+        "outcome_clarity": 100,
+        "file_targeting": 100,
+        "implementation_guidance": 100,
+        "verification_executability": 100,
+        "acceptance_testability": 100,
+        "dependency_fitness": 100,
+        "scope_discipline": 100,
+        "developer_confidence": 100
+      },
+      "dimensions": [
+        {
+          "label": "outcome clarity",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "file targeting",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "implementation guidance",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "verification executability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "acceptance testability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "dependency fitness",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "scope discipline",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "developer confidence",
+          "score": 100,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "0002",
+      "title": "Implementation - Update `src/cdx_proxy_cli_v2/config/settings.py` only if the requested behavior...",
+      "score": 97,
+      "passed": true,
+      "blocked": false,
+      "findings": [
+        "card needs an example payload or artifact sketch"
+      ],
+      "blocking_findings": [],
+      "dimension_scores": {
+        "outcome_clarity": 100,
+        "file_targeting": 100,
+        "implementation_guidance": 80,
+        "verification_executability": 100,
+        "acceptance_testability": 100,
+        "dependency_fitness": 100,
+        "scope_discipline": 100,
+        "developer_confidence": 97
+      },
+      "dimensions": [
+        {
+          "label": "outcome clarity",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "file targeting",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "implementation guidance",
+          "score": 80,
+          "passed": false
+        },
+        {
+          "label": "verification executability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "acceptance testability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "dependency fitness",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "scope discipline",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "developer confidence",
+          "score": 97,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "0003",
+      "title": "Verification - Run the repo verification commands and confirm the requested behavior works without...",
+      "score": 95,
+      "passed": true,
+      "blocked": false,
+      "findings": [
+        "title remains generic relative to the artifact",
+        "card needs an example payload or artifact sketch"
+      ],
+      "blocking_findings": [],
+      "dimension_scores": {
+        "outcome_clarity": 85,
+        "file_targeting": 100,
+        "implementation_guidance": 80,
+        "verification_executability": 100,
+        "acceptance_testability": 100,
+        "dependency_fitness": 100,
+        "scope_discipline": 100,
+        "developer_confidence": 95
+      },
+      "dimensions": [
+        {
+          "label": "outcome clarity",
+          "score": 85,
+          "passed": false
+        },
+        {
+          "label": "file targeting",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "implementation guidance",
+          "score": 80,
+          "passed": false
+        },
+        {
+          "label": "verification executability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "acceptance testability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "dependency fitness",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "scope discipline",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "developer confidence",
+          "score": 95,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "0004",
+      "title": "Verification - Confirm the exported handoff still uses one canonical `IMPLEMENTATION_PLAN.md`",
+      "score": 98,
+      "passed": true,
+      "blocked": false,
+      "findings": [
+        "title remains generic relative to the artifact"
+      ],
+      "blocking_findings": [],
+      "dimension_scores": {
+        "outcome_clarity": 85,
+        "file_targeting": 100,
+        "implementation_guidance": 100,
+        "verification_executability": 100,
+        "acceptance_testability": 100,
+        "dependency_fitness": 100,
+        "scope_discipline": 100,
+        "developer_confidence": 98
+      },
+      "dimensions": [
+        {
+          "label": "outcome clarity",
+          "score": 85,
+          "passed": false
+        },
+        {
+          "label": "file targeting",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "implementation guidance",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "verification executability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "acceptance testability",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "dependency fitness",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "scope discipline",
+          "score": 100,
+          "passed": true
+        },
+        {
+          "label": "developer confidence",
+          "score": 98,
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "iterations_run": 2,
+  "max_iterations": 3,
+  "expert_satisfaction": 98,
+  "confidence": 95,
+  "developer_success_estimate": 98,
+  "improvement_loop": true,
+  "improvements_applied": true,
+  "hardening_history": [
+    {
+      "iteration": 1,
+      "card_actions": {
+        "0001": [
+          "expanded implementation guidance with card-local steps and example",
+          "rewrote acceptance into card-specific pass-fail checks"
+        ],
+        "0002": [
+          "expanded implementation guidance with card-local steps and example",
+          "rewrote acceptance into card-specific pass-fail checks"
+        ],
+        "0003": [
+          "expanded implementation guidance with card-local steps and example",
+          "rewrote acceptance into card-specific pass-fail checks"
+        ],
+        "0004": [
+          "expanded implementation guidance with card-local steps and example",
+          "rewrote acceptance into card-specific pass-fail checks"
+        ]
+      },
+      "package_actions": []
+    }
+  ],
+  "summary": [
+    "expert satisfaction: 98",
+    "confidence: 95",
+    "developer success estimate: 98",
+    "blocking findings: none"
+  ]
+}
+}
