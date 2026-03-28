@@ -4,27 +4,24 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-from cdx_proxy_cli_v2.auth.store import extract_auth_fields, read_auth_json
+from cdx_proxy_cli_v2.auth.store import read_auth_json
+from cdx_proxy_cli_v2.cli.doctor_view import _extract_accounts
 from cdx_proxy_cli_v2.cli.fs import _atomic_write_json, _get_codex_home
-from cdx_proxy_cli_v2.observability.limits_history import read_latest_limits_snapshot
-
 from cdx_proxy_cli_v2.cli.shared import (
     ROTATE_HEALTH_TIMEOUT_SECONDS,
     _healthy_base_url_or_none,
     _management_headers,
     _settings_from_args,
 )
-from cdx_proxy_cli_v2.cli.doctor_view import _extract_accounts
+from cdx_proxy_cli_v2.observability.limits_history import read_latest_limits_snapshot
 from cdx_proxy_cli_v2.proxy.http_client import fetch_json
-from cdx_proxy_cli_v2.runtime.service import service_status
 
 
 def _rotation_accounts(
     *, settings, base_url: str, headers: dict[str, str]
-) -> list[dict[str, any]]:
-    from cdx_proxy_cli_v2.cli.shared import _fetch_health_accounts
-
+) -> list[dict[str, Any]]:
     last_error: Exception | None = None
     for path in ("/health", "/trace?limit=1"):
         try:
@@ -59,8 +56,6 @@ def _rotation_accounts(
 
 def handle_rotate(args: argparse.Namespace) -> int:
     """Rotate active auth key for codex CLI."""
-    from cdx_proxy_cli_v2.config.settings import Settings
-
     settings = _settings_from_args(args)
     base_url = _healthy_base_url_or_none(settings)
     if base_url is None:
@@ -84,9 +79,7 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
     if not healthy_auths:
         print("Error: No healthy auth keys available.", file=sys.stderr)
-        print(
-            "All keys are in cooldown, blacklist, or probation state.", file=sys.stderr
-        )
+        print("All keys are in cooldown, blacklist, or probation state.", file=sys.stderr)
         print("Run `cdx doctor` to see current auth states.", file=sys.stderr)
         return 1
 
@@ -110,17 +103,12 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
     if dry_run:
         if json_output:
-            output = {
+            print(json.dumps({
                 "dry_run": True,
-                "selected": {
-                    "file": selected_file,
-                    "email": selected_email,
-                    "used": selected_used,
-                },
+                "selected": {"file": selected_file, "email": selected_email, "used": selected_used},
                 "source": str(source_path),
                 "destination": str(dest_path),
-            }
-            print(json.dumps(output, indent=2))
+            }, indent=2))
         else:
             print("Dry run: Would rotate to auth key")
             print(f"  File: {selected_file}")
@@ -131,6 +119,7 @@ def handle_rotate(args: argparse.Namespace) -> int:
             print(f"  Destination: {dest_path}")
         return 0
 
+    # Validate source path is within auth directory (prevent path traversal)
     try:
         if not source_path.resolve().is_relative_to(auth_dir_path):
             print(f"Error: Invalid auth file path: {selected_file}", file=sys.stderr)
@@ -155,16 +144,11 @@ def handle_rotate(args: argparse.Namespace) -> int:
         return 1
 
     if json_output:
-        output = {
+        print(json.dumps({
             "success": True,
-            "selected": {
-                "file": selected_file,
-                "email": selected_email,
-                "used": selected_used,
-            },
+            "selected": {"file": selected_file, "email": selected_email, "used": selected_used},
             "destination": str(dest_path),
-        }
-        print(json.dumps(output, indent=2))
+        }, indent=2))
     else:
         print(f"Rotated to auth key: {selected_file}")
         if selected_email:
