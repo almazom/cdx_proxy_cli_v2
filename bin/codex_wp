@@ -1880,6 +1880,7 @@ hook_extract_intent_text() {
   local session_id="$1"
   local session_file=""
   local intent_text=""
+  local -a command=()
   local processing_provider="pi"
   local preflight_timeout=30
   local runtime_timeout=300
@@ -1888,28 +1889,20 @@ hook_extract_intent_text() {
   session_file="$(hook_resolve_session_file "$session_id")" || true
   [[ -n "$session_file" ]] || return 0
 
+  command=(
+    extract-intent_cli
+    --input "$session_file"
+    --pretty
+    --processing-provider "$processing_provider"
+    --preflight-timeout "$preflight_timeout"
+    --runtime-timeout "$runtime_timeout"
+  )
+
   if command -v timeout >/dev/null 2>&1; then
-    intent_text="$(
-      timeout "$timeout_seconds" \
-        extract-intent_cli \
-        --input "$session_file" \
-        --pretty \
-        --processing-provider "$processing_provider" \
-        --preflight-timeout "$preflight_timeout" \
-        --runtime-timeout "$runtime_timeout" \
-        2>/dev/null || true
-    )"
-  else
-    intent_text="$(
-      extract-intent_cli \
-        --input "$session_file" \
-        --pretty \
-        --processing-provider "$processing_provider" \
-        --preflight-timeout "$preflight_timeout" \
-        --runtime-timeout "$runtime_timeout" \
-        2>/dev/null || true
-    )"
+    command=(timeout "$timeout_seconds" "${command[@]}")
   fi
+
+  intent_text="$("${command[@]}" 2>/dev/null || true)"
 
   if [[ -n "$intent_text" ]]; then
     printf '%s' "$intent_text"
@@ -1969,8 +1962,8 @@ hook_build_notification() {
     resume_preview="${resume_preview//$'\r'/ }"
     footer="▶ resume: ${resume_preview:0:120}"
   else
-    header="🔴 Codex Exec Complete"
-    footer="🛑 all ${total} iterations complete"
+    header="🏁 Codex Exec Complete"
+    footer="✅ all ${total} iterations complete"
   fi
 
   bar="$(hook_progress_bar "$turn" "$total")"

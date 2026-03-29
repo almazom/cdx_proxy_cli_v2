@@ -324,6 +324,7 @@ def write_session_event(
     with session_file.open("a", encoding="utf-8") as handle:
         for payload in lines:
             handle.write(json.dumps(payload) + "\\n")
+
 def print_json_events(session_id: str, turn: int, text: str) -> None:
     if os.environ.get("FAKE_HOOK_CODEX_EMIT_WEIRD_JSON") == "1":
         print("[]")
@@ -1072,7 +1073,8 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
     assert "3/3" in messages[2]
     assert "🧭 Intent" in messages[0]
     assert "▶ resume: resume again" in messages[0]
-    assert "Codex Exec Complete" in messages[2]
+    assert "🏁 Codex Exec Complete" in messages[2]
+    assert "✅ all 3 iterations complete" in messages[2]
     session_id = next(iter(session_ids))
     for message in messages:
         assert session_id in message
