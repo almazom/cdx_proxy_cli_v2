@@ -238,6 +238,256 @@ if __name__ == "__main__":
     return _write_executable(tmp_path / "fake_codex", body)
 
 
+def _write_fake_hook_codex(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def fail(message: str, code: int = 2) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+def parse_workdir(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg == "-C" and index + 1 < len(argv):
+            return argv[index + 1]
+    return None
+
+
+def append_log(record: dict[str, object]) -> None:
+    log_path = os.environ.get("FAKE_HOOK_CODEX_LOG_PATH", "")
+    if not log_path:
+        return
+    with Path(log_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\\n")
+
+
+def session_file_for(home: Path, session_id: str) -> Path:
+    session_dir = home / ".codex" / "sessions" / "2026" / "03" / "29"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir / f"rollout-fake-{{session_id}}.jsonl"
+
+
+def next_turn_number(session_file: Path) -> int:
+    if not session_file.exists():
+        return 1
+    turns = 0
+    for line in session_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if payload.get("type") == "turn_context":
+            turns += 1
+    return turns + 1
+
+
+def write_session_event(
+    session_file: Path,
+    *,
+    session_id: str,
+    turn: int,
+    prompt: str,
+    text: str,
+) -> None:
+    lines: list[dict[str, object]] = []
+    if not session_file.exists():
+        lines.append(
+            {{
+                "type": "session_meta",
+                "payload": {{"id": session_id, "source": "exec", "originator": "codex_exec"}},
+            }}
+        )
+    lines.append(
+        {{
+            "type": "turn_context",
+            "payload": {{"session_id": session_id, "turn_id": f"turn-{{turn}}"}},
+        }}
+    )
+    lines.append(
+        {{
+            "type": "event_msg",
+            "payload": {{"role": "user", "content": prompt}},
+        }}
+    )
+    lines.append(
+        {{
+            "type": "event_msg",
+            "payload": {{"role": "assistant", "content": text}},
+        }}
+    )
+    with session_file.open("a", encoding="utf-8") as handle:
+        for payload in lines:
+            handle.write(json.dumps(payload) + "\\n")
+def print_json_events(session_id: str, turn: int, text: str) -> None:
+    if os.environ.get("FAKE_HOOK_CODEX_EMIT_WEIRD_JSON") == "1":
+        print("[]")
+        print(json.dumps({{"type": "session_meta", "payload": []}}))
+        print(json.dumps({{"type": "event_msg", "payload": []}}))
+        print(json.dumps({{"type": "item.completed", "item": "oops"}}))
+    print(json.dumps({{"type": "session_meta", "payload": {{"id": session_id, "source": "exec"}}}}))
+    print(json.dumps({{"type": "thread.started", "thread_id": session_id}}))
+    print(json.dumps({{"type": "turn.started"}}))
+    print(
+        json.dumps(
+            {{
+                "type": "event_msg",
+                "payload": {{"role": "assistant", "content": text}},
+            }}
+        )
+    )
+    print(
+        json.dumps(
+            {{
+                "type": "item.completed",
+                "item": {{"id": f"item_{{turn}}", "type": "agent_message", "text": text}},
+            }}
+        )
+    )
+    print(
+        json.dumps(
+            {{
+                "type": "turn.completed",
+                "usage": {{"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+            }}
+        )
+    )
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if "--help" in argv or (argv and argv[0] == "help"):
+        if "exec" in argv and "resume" in argv:
+            print("Fake Codex Exec Resume Help")
+            print("Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]")
+        elif "exec" in argv:
+            print("Fake Codex Exec Help")
+            print("Usage: codex exec [OPTIONS] [PROMPT] [COMMAND]")
+        else:
+            print("Fake Codex CLI Help")
+            print("Usage: codex [OPTIONS] [PROMPT]")
+        print("  -p, --profile <CONFIG_PROFILE>")
+        return 0
+
+    if "--dangerously-bypass-approvals-and-sandbox" not in argv:
+        fail("missing bypass flag")
+    if "OPENAI_BASE_URL" in os.environ:
+        fail("OPENAI_BASE_URL should be unset")
+    if "OPENAI_API_BASE" in os.environ:
+        fail("OPENAI_API_BASE should be unset")
+
+    workdir = parse_workdir(argv)
+    if workdir:
+        os.chdir(workdir)
+
+    home = Path(os.environ.get("HOME", str(Path.home())))
+
+    if "exec" not in argv and "e" not in argv:
+        prompt = argv[-1] if argv and not argv[-1].startswith("-") else ""
+        append_log({{"mode": "interactive", "argv": argv, "prompt": prompt}})
+        if prompt:
+            print("Interactive OK")
+        return 0
+
+    json_mode = "--json" in argv
+    if not json_mode:
+        fail("expected --json")
+
+    is_resume = "resume" in argv
+    if is_resume:
+        session_id = argv[-2]
+        prompt = argv[-1]
+    else:
+        session_id = os.environ.get("FAKE_HOOK_CODEX_SESSION_ID", "fake-hook-session-0001")
+        prompt = argv[-1]
+
+    session_file = session_file_for(home, session_id)
+    turn = next_turn_number(session_file)
+
+    append_log(
+        {{
+            "mode": "resume" if is_resume else "exec",
+            "argv": argv,
+            "prompt": prompt,
+            "session_id": session_id,
+            "turn": turn,
+        }}
+    )
+
+    fail_on_turn = os.environ.get("FAKE_HOOK_CODEX_FAIL_ON_TURN", "")
+    if fail_on_turn and int(fail_on_turn) == turn:
+        fail(f"forced hook failure on turn {{turn}}", code=1)
+
+    text = os.environ.get("FAKE_HOOK_CODEX_MESSAGE_PREFIX", "Hook reply")
+    text = f"{{text}} {{turn}}: {{prompt}}"
+
+    write_session_event(
+        session_file,
+        session_id=session_id,
+        turn=turn,
+        prompt=prompt,
+        text=text,
+    )
+    print_json_events(session_id, turn, text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+    return _write_executable(tmp_path / "fake_hook_codex", body)
+
+
+def _write_fake_cdx_hook(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+log_path = Path(os.environ["FAKE_CDX_HOOK_LOG_PATH"])
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+"""
+    return _write_executable(tmp_path / "cdx-hook", body)
+
+
+def _write_fake_t2me(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+log_path = Path(os.environ["FAKE_T2ME_LOG_PATH"])
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+"""
+    return _write_executable(tmp_path / "t2me", body)
+
+
+def _write_fake_extract_intent(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+log_path = os.environ.get("FAKE_EXTRACT_INTENT_LOG_PATH")
+if log_path:
+    with Path(log_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+
+print(os.environ.get("FAKE_EXTRACT_INTENT_TEXT", "🧭 Intent\\n① fake"))
+"""
+    return _write_executable(tmp_path / "extract-intent_cli", body)
+
+
 def _write_fake_zellij(tmp_path: Path) -> tuple[Path, Path]:
     capture_path = tmp_path / "fake_zellij.jsonl"
     body = f"""#!{sys.executable}
@@ -444,6 +694,16 @@ def _read_fake_codex_prompts(path: Path) -> list[str]:
     ]
 
 
+def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def _active_zellij_tab_stdout() -> str:
     return json.dumps(
         [
@@ -465,6 +725,18 @@ def _zellij_env(
 ) -> dict[str, str]:
     env = os.environ.copy()
     env["FAKE_ZELLIJ_CAPTURE_PATH"] = str(capture_path)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}".rstrip(os.pathsep)
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
+def _path_env(
+    tmp_path: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    env = os.environ.copy()
     env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}".rstrip(os.pathsep)
     if extra_env:
         env.update(extra_env)
@@ -550,8 +822,407 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert (
         "  -S                           run built-in code-simplifier" in result.stdout
     )
+    assert "  --hook-times <n>             how many stop events per session (requires --hook stop)" in result.stdout
+    assert "  --hook-time <n>              legacy alias for --hook-times" in result.stdout
+    assert "  --hook-target <target>       override Telegram target for notifications" in result.stdout
     assert expected_usage in result.stdout
     assert _read_fake_zellij_calls(capture_path) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_stderr"),
+    [
+        (
+            ["exec", "--json", "hello", "--hook-prompt", "resume"],
+            "--hook-prompt, --hook-times, --hook-target, and --hook-extract-intent require --hook stop.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "resume"],
+            "--hook only supports 'stop'.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop"],
+            "--hook stop requires --hook-prompt.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt", "resume"],
+            "--hook stop requires --hook-times.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt", "resume", "--hook-times", "0"],
+            "--hook-times must be a positive integer.",
+        ),
+        (
+            [
+                "--zellij-new-tab",
+                "hook-tab",
+                "exec",
+                "--json",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "1",
+            ],
+            "--hook is not supported with zellij launch modes yet.",
+        ),
+    ],
+)
+def test_codex_wp_hook_validation_fails_early(
+    tmp_path: Path,
+    args: list[str],
+    expected_stderr: str,
+) -> None:
+    result = _run_codex_wp_args(args, _path_env(tmp_path))
+
+    assert result.returncode == 2
+    assert expected_stderr in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_stderr"),
+    [
+        (
+            ["exec", "hello", "--hook", "stop", "--hook-prompt", "resume", "--hook-times", "2"],
+            "headless --hook stop requires 'exec --json'",
+        ),
+        (
+            [
+                "exec",
+                "--json",
+                "--ephemeral",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "2",
+            ],
+            "headless --hook stop does not support --ephemeral",
+        ),
+        (
+            [
+                "exec",
+                "resume",
+                "--json",
+                "fake-session",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "2",
+            ],
+            "does not support manual 'exec resume'",
+        ),
+    ],
+)
+def test_codex_wp_headless_hook_preconditions(
+    tmp_path: Path,
+    args: list[str],
+    expected_stderr: str,
+) -> None:
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    result = _run_codex_wp_args(args, env)
+
+    assert result.returncode == 2
+    assert expected_stderr in result.stderr
+
+
+@pytest.mark.parametrize("extract_intent", [False, True])
+def test_codex_wp_interactive_hook_activation_forwards_expected_args(
+    tmp_path: Path,
+    extract_intent: bool,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    hook_log = tmp_path / "cdx-hook.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_cdx_hook(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_CDX_HOOK_LOG_PATH": str(hook_log),
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    args = [
+        "hello interactive",
+        "--hook",
+        "stop",
+        "--hook-prompt",
+        "resume work",
+        "--hook-times",
+        "2",
+        "--hook-target",
+        "@ops",
+    ]
+    if extract_intent:
+        args.append("--hook-extract-intent")
+
+    result = _run_codex_wp_args(args, env, cwd=project)
+
+    assert result.returncode == 0, result.stderr
+    records = _read_jsonl_records(hook_log)
+    assert len(records) == 1
+    argv = list(records[0]["argv"])
+    assert argv[:2] == ["stop", "on"]
+    assert "--project" in argv
+    assert str(project) in argv
+    assert "--mode" in argv and "resume" in argv
+    assert "--ask" in argv and "resume work" in argv
+    assert "--times" in argv and "2" in argv
+    assert "--target" in argv and "@ops" in argv
+    assert ("--extract-intent" in argv) is extract_intent
+
+
+def test_codex_wp_headless_hook_loop_runs_and_notifies(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+    extract_intent_log = tmp_path / "extract-intent.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+    _write_fake_extract_intent(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_EXTRACT_INTENT_LOG_PATH": str(extract_intent_log),
+            "FAKE_EXTRACT_INTENT_TEXT": "🧭 Intent\\n① fake step",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "3",
+            "--hook-target",
+            "@ops",
+            "--hook-extract-intent",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 3
+    assert [record["mode"] for record in codex_records] == ["exec", "resume", "resume"]
+    assert codex_records[0]["prompt"] == "first headless prompt"
+    assert codex_records[1]["prompt"] == "resume again"
+    assert codex_records[2]["prompt"] == "resume again"
+    session_ids = {str(record["session_id"]) for record in codex_records}
+    assert len(session_ids) == 1
+
+    notification_records = _read_jsonl_records(t2me_log)
+    assert len(notification_records) == 3
+    for record in notification_records:
+        assert record["argv"][:3] == ["send", "--target", "@ops"]
+    messages = [str(record["argv"][-1]) for record in notification_records]
+    assert "🚆🪪🔟 TRAIN-" in messages[0]
+    assert "🚃 wagon 1/3" in messages[0]
+    assert "🚃 wagon 2/3" in messages[1]
+    assert "🚃 wagon 3/3" in messages[2]
+    assert "1/3" in messages[0]
+    assert "2/3" in messages[1]
+    assert "3/3" in messages[2]
+    assert "🧭 Intent" in messages[0]
+    assert "▶ resume: resume again" in messages[0]
+    assert "Codex Exec Complete" in messages[2]
+    session_id = next(iter(session_ids))
+    for message in messages:
+        assert session_id in message
+
+    session_files = list((home / ".codex" / "sessions").rglob("*.jsonl"))
+    assert len(session_files) == 1
+
+    extract_intent_records = _read_jsonl_records(extract_intent_log)
+    assert len(extract_intent_records) == 3
+    for record in extract_intent_records:
+        argv = list(record["argv"])
+        assert argv[:3] == ["--input", str(session_files[0]), "--pretty"]
+        assert "--processing-provider" in argv and "pi" in argv
+        assert "--preflight-timeout" in argv and "30" in argv
+        assert "--runtime-timeout" in argv and "300" in argv
+
+    session_text = session_files[0].read_text(encoding="utf-8")
+    assert session_id in session_text
+    assert "turn_context" in session_text
+    assert not (tmp_path / "cdx-hook.jsonl").exists()
+
+
+def test_codex_wp_headless_hook_loop_tolerates_non_dict_json_variants(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_HOOK_CODEX_EMIT_WEIRD_JSON": "1",
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-time",
+            "2",
+            "--hook-target",
+            "@ops",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 2
+    session_ids = {str(record["session_id"]) for record in codex_records}
+    assert len(session_ids) == 1
+
+    notification_records = _read_jsonl_records(t2me_log)
+    assert len(notification_records) == 2
+    messages = [str(record["argv"][-1]) for record in notification_records]
+    assert "🚆🪪🔟 TRAIN-" in messages[0]
+    assert "🚃 wagon 1/2" in messages[0]
+    assert "🚃 wagon 2/2" in messages[1]
+    assert "Hook reply 1: first headless prompt" in messages[0]
+    assert "Hook reply 2: resume again" in messages[1]
+    session_id = next(iter(session_ids))
+    for message in messages:
+        assert session_id in message
+
+
+def test_codex_wp_headless_hook_loop_aborts_on_resume_failure(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_HOOK_CODEX_FAIL_ON_TURN": "2",
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "3",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 1
+
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 2
+    assert [record["turn"] for record in codex_records] == [1, 2]
+
+    notification_records = _read_jsonl_records(t2me_log)
+    assert len(notification_records) == 2
+    first_message = str(notification_records[0]["argv"][-1])
+    second_message = str(notification_records[1]["argv"][-1])
+    assert "🚆🪪🔟 TRAIN-" in first_message
+    assert "🚃 wagon 1/3" in first_message
+    assert "🚃 wagon 2/3" in second_message
+    assert "1/3" in first_message
+    assert "Codex Exec FAILED" in second_message
+    assert "iteration 2 of 3" in second_message
 
 
 @pytest.mark.parametrize(

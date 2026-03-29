@@ -318,6 +318,12 @@ pair_b_file=""
 fixed_shortcut=""
 fixed_shortcut_close_on_success=0
 files_to_include=()
+# --hook* flags
+hook_mode=""
+hook_prompt=""
+hook_times=""
+hook_target=""
+hook_extract_intent=0
 args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -458,6 +464,30 @@ while [[ $# -gt 0 ]]; do
       files_to_include+=("$2")
       shift 2
       ;;
+    --hook)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook requires a value (stop)." 2
+      hook_mode="$2"
+      shift 2
+      ;;
+    --hook-prompt)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-prompt requires prompt text." 2
+      hook_prompt="$2"
+      shift 2
+      ;;
+    --hook-time|--hook-times)
+      [[ $# -ge 2 ]] || die "codex_wp: $1 requires a number." 2
+      hook_times="$2"
+      shift 2
+      ;;
+    --hook-target)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-target requires a Telegram target." 2
+      hook_target="$2"
+      shift 2
+      ;;
+    --hook-extract-intent)
+      hook_extract_intent=1
+      shift
+      ;;
     *)
       args+=("$1")
       shift
@@ -516,6 +546,31 @@ fi
 help_requested=0
 if is_help_request "${args[@]}"; then
   help_requested=1
+fi
+
+validate_hook_flags() {
+  if [[ -z "$hook_mode" ]]; then
+    if [[ -n "$hook_prompt" || -n "$hook_times" || -n "$hook_target" || $hook_extract_intent -eq 1 ]]; then
+      die \
+        "codex_wp: --hook-prompt, --hook-times, --hook-target, and --hook-extract-intent require --hook stop." \
+        2
+    fi
+    return 0
+  fi
+
+  [[ "$hook_mode" == "stop" ]] || die "codex_wp: --hook only supports 'stop'." 2
+  [[ -n "$hook_prompt" ]] || die "codex_wp: --hook stop requires --hook-prompt." 2
+  [[ -n "$hook_times" ]] || die "codex_wp: --hook stop requires --hook-times." 2
+  [[ "$hook_times" =~ ^[1-9][0-9]*$ ]] || \
+    die "codex_wp: --hook-times must be a positive integer." 2
+
+  if (( zellij_mode )); then
+    die "codex_wp: --hook is not supported with zellij launch modes yet." 2
+  fi
+}
+
+if (( ! help_requested )); then
+  validate_hook_flags
 fi
 
 pair_shared_args=()
@@ -584,6 +639,14 @@ General wrapper flags:
   --zellij-template <key>      choose tab layout: single, three-horizontal, three-vertical
   --zellij-cwd <path>          override the working directory used for Zellij launch
   --zellij-dry-run             print the resolved Zellij command without launching it
+
+Hook flags (interactive uses cdx-hook; headless exec uses a wrapper loop):
+  --hook stop                  enable stop hook handling
+  --hook-prompt <text>         prompt injected back on each codex stop (requires --hook stop)
+  --hook-times <n>             how many stop events per session (requires --hook stop)
+  --hook-time <n>              legacy alias for --hook-times
+  --hook-target <target>       override Telegram target for notifications
+  --hook-extract-intent        attach extract-intent summary to each notification
 
 Floating pane flags:
   -F, --zellij-floating        launch codex_wp in a floating pane
@@ -1629,6 +1692,448 @@ PY
   exec "${zellij_command[@]}"
 fi
 
+array_has() {
+  local needle="$1"
+  shift
+  local item
+
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+hook_is_headless_mode() {
+  [[ $# -gt 0 ]] || return 1
+  case "$1" in
+    exec|e)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+hook_python_bin() {
+  if [[ -z "$codex_wp_python_bin" ]]; then
+    codex_wp_python_bin="$(resolve_python_bin)"
+  fi
+  [[ -n "$codex_wp_python_bin" && -x "$codex_wp_python_bin" ]] || \
+    die "codex_wp: python3 not found. Install it or set PYTHON_BIN." 127
+  printf '%s\n' "$codex_wp_python_bin"
+}
+
+hook_require_headless_preconditions() {
+  [[ $# -gt 0 ]] || return 0
+
+  if [[ $# -gt 1 && "$2" == "resume" ]]; then
+    die "codex_wp: --hook stop does not support manual 'exec resume'. Start with 'exec' and let the wrapper manage resumes." 2
+  fi
+
+  array_has --json "$@" || \
+    die "codex_wp: headless --hook stop requires 'exec --json' so session metadata can be parsed." 2
+
+  if array_has --ephemeral "$@"; then
+    die "codex_wp: headless --hook stop does not support --ephemeral because resume requires a persisted session." 2
+  fi
+}
+
+hook_progress_bar() {
+  local used="$1"
+  local total="$2"
+  local width=10
+  local filled=0
+  local empty=0
+  local bar=""
+  local i
+
+  (( total > 0 )) || total=1
+  filled=$(( used * width / total ))
+  if (( filled > width )); then
+    filled=$width
+  fi
+  empty=$(( width - filled ))
+
+  for ((i = 0; i < filled; i++)); do
+    bar+="█"
+  done
+  for ((i = 0; i < empty; i++)); do
+    bar+="░"
+  done
+
+  printf '%s\n' "$bar"
+}
+
+hook_parse_session_id() {
+  local source_file="$1"
+  local python_bin
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$source_file" <<'PY' 2>/dev/null
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("type") == "session_meta":
+            body = payload.get("payload")
+            if not isinstance(body, dict):
+                continue
+            value = body.get("id")
+            if value:
+                print(value)
+                raise SystemExit(0)
+        if payload.get("type") == "thread.started":
+            value = payload.get("thread_id")
+            if value:
+                print(value)
+                raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+hook_parse_last_message() {
+  local source_file="$1"
+  local python_bin
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$source_file" <<'PY' 2>/dev/null
+import json
+import sys
+
+def flatten_text(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") in {"output_text", "text"}:
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return " ".join(parts)
+    return ""
+
+last = ""
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        if payload.get("type") == "event_msg":
+            body = payload.get("payload")
+            if not isinstance(body, dict):
+                continue
+            if body.get("role") == "assistant":
+                text = flatten_text(body.get("content"))
+                if text.strip():
+                    last = text.strip()
+        elif payload.get("type") == "item.completed":
+            item = payload.get("item")
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "agent_message":
+                text = flatten_text(item.get("text"))
+                if text.strip():
+                    last = text.strip()
+
+last = " ".join(last.split())
+if last:
+    print(last[:400])
+PY
+}
+
+hook_resolve_session_file() {
+  local session_id="$1"
+  local sessions_root="${HOME:-}/.codex/sessions"
+
+  [[ -n "$session_id" ]] || return 1
+  [[ -d "$sessions_root" ]] || return 1
+
+  find "$sessions_root" -type f -name "*${session_id}*.jsonl" 2>/dev/null | LC_ALL=C sort | tail -n 1
+}
+
+hook_extract_intent_text() {
+  local session_id="$1"
+  local session_file=""
+  local intent_text=""
+  local processing_provider="pi"
+  local preflight_timeout=30
+  local runtime_timeout=300
+  local timeout_seconds=$(( preflight_timeout + runtime_timeout + 5 ))
+
+  session_file="$(hook_resolve_session_file "$session_id")" || true
+  [[ -n "$session_file" ]] || return 0
+
+  if command -v timeout >/dev/null 2>&1; then
+    intent_text="$(
+      timeout "$timeout_seconds" \
+        extract-intent_cli \
+        --input "$session_file" \
+        --pretty \
+        --processing-provider "$processing_provider" \
+        --preflight-timeout "$preflight_timeout" \
+        --runtime-timeout "$runtime_timeout" \
+        2>/dev/null || true
+    )"
+  else
+    intent_text="$(
+      extract-intent_cli \
+        --input "$session_file" \
+        --pretty \
+        --processing-provider "$processing_provider" \
+        --preflight-timeout "$preflight_timeout" \
+        --runtime-timeout "$runtime_timeout" \
+        2>/dev/null || true
+    )"
+  fi
+
+  if [[ -n "$intent_text" ]]; then
+    printf '%s' "$intent_text"
+  fi
+}
+
+hook_send_notification() {
+  local message="$1"
+  local -a command=(t2me send)
+
+  if [[ -n "$hook_target" ]]; then
+    command+=(--target "$hook_target")
+  fi
+  command+=("$message")
+
+  if ! "${command[@]}" >/dev/null 2>&1; then
+    printf '%s\n' "codex_wp: hook-loop: t2me send failed." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+hook_generate_train_id() {
+  local python_bin=""
+  local timestamp=""
+  local suffix=""
+
+  python_bin="$(hook_python_bin)"
+  timestamp="$(date -u +%Y%m%d-%H%M%S)"
+  suffix="$("$python_bin" - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:4].upper())
+PY
+)"
+
+  printf 'TRAIN-%s-%s\n' "$timestamp" "$suffix"
+}
+
+hook_build_notification() {
+  local train_id="$1"
+  local session_id="$2"
+  local turn="$3"
+  local total="$4"
+  local last_msg="$5"
+  local intent_text="${6:-}"
+  local header=""
+  local footer=""
+  local bar=""
+  local project_name=""
+  local resume_preview=""
+  local message=""
+
+  if (( turn < total )); then
+    header="🟡 Codex Exec → Resuming"
+    resume_preview="${hook_prompt//$'\n'/ }"
+    resume_preview="${resume_preview//$'\r'/ }"
+    footer="▶ resume: ${resume_preview:0:120}"
+  else
+    header="🔴 Codex Exec Complete"
+    footer="🛑 all ${total} iterations complete"
+  fi
+
+  bar="$(hook_progress_bar "$turn" "$total")"
+  project_name="$(basename "$PWD")"
+
+  if [[ -z "$last_msg" ]]; then
+    last_msg="—"
+  fi
+
+  message="$(printf '%s\n\n🚆🪪🔟 %s\n🚃 wagon %s/%s\n📁 %s\n🔄 %s · #%03d\n\n📊 %s/%s  %s\n\n💬 %s' \
+    "$header" \
+    "$train_id" \
+    "$turn" \
+    "$total" \
+    "$project_name" \
+    "$session_id" \
+    "$turn" \
+    "$turn" \
+    "$total" \
+    "$bar" \
+    "$last_msg")"
+
+  if [[ -n "$intent_text" ]]; then
+    message+=$'\n\n'"$intent_text"
+  fi
+
+  message+=$'\n\n'"$footer"
+  printf '%s' "$message"
+}
+
+hook_build_error_notification() {
+  local train_id="$1"
+  local session_id="$2"
+  local turn="$3"
+  local total="$4"
+  local failure_text="$5"
+  local last_msg="$6"
+  local bar=""
+  local project_name=""
+  local message=""
+
+  bar="$(hook_progress_bar "$turn" "$total")"
+  project_name="$(basename "$PWD")"
+
+  if [[ -z "$last_msg" ]]; then
+    last_msg="—"
+  fi
+
+  message="$(printf '🔴 Codex Exec FAILED\n\n🚆🪪🔟 %s\n🚃 wagon %s/%s\n📁 %s\n🔄 %s · #%03d\n\n📊 %s/%s  %s\n\n%s\n💬 %s\n\n🛑 loop aborted at iteration %s of %s' \
+    "$train_id" \
+    "$turn" \
+    "$total" \
+    "$project_name" \
+    "$session_id" \
+    "$turn" \
+    "$turn" \
+    "$total" \
+    "$bar" \
+    "$failure_text" \
+    "$last_msg" \
+    "$turn" \
+    "$total")"
+  printf '%s' "$message"
+}
+
+hook_run_codex_stream() {
+  local output_file="$1"
+  shift
+
+  env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
+    "$codex_bin" -c "$config_arg" --dangerously-bypass-approvals-and-sandbox "$@" 2>&1 | tee "$output_file"
+}
+
+run_headless_hook_loop() {
+  local -a initial_args=("$@")
+  local -a resume_args=()
+  local skip_git_repo_check=0
+  local tmpdir=""
+  local output_file=""
+  local session_id=""
+  local parsed_session_id=""
+  local train_id=""
+  local last_msg=""
+  local intent_text=""
+  local notify_text=""
+  local failure_text=""
+  local exit_code=0
+  local turn=0
+
+  hook_require_headless_preconditions "${initial_args[@]}"
+
+  if array_has --skip-git-repo-check "${initial_args[@]}"; then
+    skip_git_repo_check=1
+  fi
+
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/codex-wp-hook-XXXXXX")" || \
+    die "codex_wp: failed to create a temporary hook directory." 1
+  train_id="$(hook_generate_train_id)"
+
+  for ((turn = 1; turn <= hook_times; turn++)); do
+    output_file="$tmpdir/iter-${turn}.jsonl"
+    exit_code=0
+
+    if (( turn == 1 )); then
+      if ! hook_run_codex_stream "$output_file" "${initial_args[@]}"; then
+        exit_code=${PIPESTATUS[0]}
+      fi
+    else
+      resume_args=(exec resume --json)
+      if (( skip_git_repo_check )); then
+        resume_args+=(--skip-git-repo-check)
+      fi
+      resume_args+=("$session_id" "$hook_prompt")
+      if ! hook_run_codex_stream "$output_file" "${resume_args[@]}"; then
+        exit_code=${PIPESTATUS[0]}
+      fi
+    fi
+
+    parsed_session_id="$(hook_parse_session_id "$output_file" || true)"
+    if [[ -n "$parsed_session_id" ]]; then
+      if [[ -z "$session_id" ]]; then
+        session_id="$parsed_session_id"
+      elif [[ "$parsed_session_id" != "$session_id" ]]; then
+        last_msg="$(hook_parse_last_message "$output_file" || true)"
+        failure_text="❌ session_id changed unexpectedly (${parsed_session_id} != ${session_id})"
+        notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$hook_times" "$failure_text" "$last_msg")"
+        hook_send_notification "$notify_text" || true
+        rm -rf "$tmpdir"
+        return 1
+      fi
+    fi
+
+    last_msg="$(hook_parse_last_message "$output_file" || true)"
+
+    if [[ -z "$session_id" ]]; then
+      failure_text="❌ failed to parse session_id from codex JSON output"
+      notify_text="$(hook_build_error_notification "$train_id" "-" "$turn" "$hook_times" "$failure_text" "$last_msg")"
+      hook_send_notification "$notify_text" || true
+      rm -rf "$tmpdir"
+      return 1
+    fi
+
+    if (( exit_code != 0 )); then
+      failure_text="❌ codex exec failed (exit ${exit_code})"
+      notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$hook_times" "$failure_text" "$last_msg")"
+      hook_send_notification "$notify_text" || true
+      rm -rf "$tmpdir"
+      return "$exit_code"
+    fi
+
+    intent_text=""
+    if (( hook_extract_intent )); then
+      intent_text="$(hook_extract_intent_text "$session_id" || true)"
+    fi
+
+    notify_text="$(hook_build_notification "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text")"
+    hook_send_notification "$notify_text" || true
+  done
+
+  rm -rf "$tmpdir"
+  return 0
+}
+
 cdx_bin="$(resolve_bin "${CDX_BIN:-$repo_root/.venv/bin/cdx}" "cdx")"
 [[ -n "$cdx_bin" && -x "$cdx_bin" ]] || \
   die "codex_wp: cdx not found. Install it or set CDX_BIN." 127
@@ -1644,6 +2149,29 @@ base_url="${CLIPROXY_BASE_URL:-}"
 [[ -n "$base_url" ]] || die "codex_wp: missing CLIPROXY_BASE_URL from proxy setup."
 
 config_arg="openai_base_url=\"$base_url\""
+
+# ── Hook activation ──────────────────────────────────────────────────────────
+if [[ -n "$hook_mode" ]]; then
+  if hook_is_headless_mode "$@"; then
+    run_headless_hook_loop "$@"
+    exit $?
+  fi
+
+  hook_cli="$(command -v cdx-hook || true)"
+  [[ -n "$hook_cli" && -x "$hook_cli" ]] || \
+    die "codex_wp: cdx-hook not found. Install cdx_hooks_cli." 127
+
+  hook_args=(stop on --project "$PWD" --mode resume --ask "$hook_prompt" --times "$hook_times")
+  if [[ -n "$hook_target" ]]; then
+    hook_args+=(--target "$hook_target")
+  fi
+  if (( hook_extract_intent )); then
+    hook_args+=(--extract-intent)
+  fi
+
+  printf 'codex_wp: activating hook → %s %s\n' "$hook_cli" "${hook_args[*]}"
+  "$hook_cli" "${hook_args[@]}" || die "codex_wp: cdx-hook activation failed." 2
+fi
 
 exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
   "$codex_bin" -c "$config_arg" --dangerously-bypass-approvals-and-sandbox "$@"
