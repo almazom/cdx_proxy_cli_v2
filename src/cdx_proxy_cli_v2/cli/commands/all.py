@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
-from pathlib import Path
 
 from cdx_proxy_cli_v2.cli.shared import _load_codex_auth_identity, _settings_from_args
 from cdx_proxy_cli_v2.observability.collective_dashboard import (

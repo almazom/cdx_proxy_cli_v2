@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
 from rich.console import Console
 from rich.table import Table
 
-from cdx_proxy_cli_v2.config.settings import Settings
 from cdx_proxy_cli_v2.runtime.service import service_status
 
 from cdx_proxy_cli_v2.cli.shared import _settings_from_args

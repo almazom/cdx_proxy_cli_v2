@@ -6,7 +6,6 @@ import sys
 
 from cdx_proxy_cli_v2.cli.doctor_view import (
     _doctor_payload,
-    _extract_accounts,
     _render_doctor_table,
     _render_probe_results,
 )

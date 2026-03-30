@@ -6,8 +6,6 @@ import sys
 from cdx_proxy_cli_v2.runtime.service import start_service, stop_service
 
 from cdx_proxy_cli_v2.cli.shared import (
-    DOCTOR_HEALTH_TIMEOUT_SECONDS,
-    _management_headers,
     _proxy_eval_hint,
     _proxy_exports,
     _proxy_shell_setup,
