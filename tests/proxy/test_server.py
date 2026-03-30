@@ -764,6 +764,14 @@ class TestModelsEndpoint:
 class TestMergedHealth:
     """Tests for merged runtime + limit health output."""
 
+    def test_health_snapshot_includes_next_auth(self, test_settings, sample_auth_record):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        snapshot = runtime.health_snapshot(refresh=False)
+
+        assert snapshot["next_auth_file"] == sample_auth_record.name
+        assert snapshot["next_auth_email"] == sample_auth_record.email
+
     def test_health_snapshot_respects_limit_cooldown(
         self, test_settings, sample_auth_record
     ):
@@ -827,6 +835,7 @@ class TestMergedHealth:
         assert payload["limits"]["accounts"][0]["file"] == sample_auth_record.name
         assert payload["limits"]["accounts"][0]["five_hour"]["used_percent"] == 89.5
         assert payload["limits"]["fetched_at"] is not None
+        assert payload["limits"]["next_auth_file"] is None
         assert latest_limits_path(test_settings.auth_dir).exists()
 
         history_lines = limits_history_path(test_settings.auth_dir).read_text().splitlines()
@@ -943,6 +952,150 @@ class TestRuntimeTransitionsAndOverload:
         assert snapshot["status"] == "OK"
         assert not any(event.get("event") == "auth.cooldown" for event in events)
 
+    def test_compact_request_skips_warn_auths(
+        self,
+        test_settings,
+    ):
+        warn_auth = AuthRecord(
+            name="warn.json",
+            path="/tmp/warn.json",
+            token="tok-warn",
+            email="warn@example.com",
+        )
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([warn_auth, ok_auth])
+        runtime._limit_health_cache = {
+            warn_auth.name: {
+                "file": warn_auth.name,
+                "email": warn_auth.email,
+                "status": "WARN",
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 85.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+            ok_auth.name: {
+                "file": ok_auth.name,
+                "email": ok_auth.email,
+                "status": "OK",
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+        runtime._refresh_limit_health = MagicMock(return_value=runtime._limit_health_cache)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_COMPACT_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b"{}",
+            )
+        )
+
+        handler._proxy_request()
+
+        sent_headers = handler._run_upstream_attempt.call_args.kwargs["headers"]
+        assert sent_headers["Authorization"] == f"Bearer {ok_auth.token}"
+
+    def test_next_auth_payload_respects_compact_route(
+        self,
+        test_settings,
+    ):
+        warn_auth = AuthRecord(
+            name="warn.json",
+            path="/tmp/warn.json",
+            token="tok-warn",
+            email="warn@example.com",
+        )
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([warn_auth, ok_auth])
+        runtime._limit_health_cache = {
+            warn_auth.name: {
+                "file": warn_auth.name,
+                "email": warn_auth.email,
+                "status": "WARN",
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 85.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+            ok_auth.name: {
+                "file": ok_auth.name,
+                "email": ok_auth.email,
+                "status": "OK",
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+
+        next_auth = runtime.next_auth_payload(route="compact")
+
+        assert next_auth == {"file": ok_auth.name, "email": ok_auth.email}
+
+    def test_response_limit_feedback_quarantines_key_immediately(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        runtime._refresh_limit_health = MagicMock(return_value=runtime._limit_health_cache)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=json.dumps(
+                    {
+                        "rate_limits": {
+                            "secondary": {
+                                "used_percent": 91.0,
+                                "window_minutes": 10080,
+                                "reset_after_seconds": 1800,
+                            }
+                        }
+                    }
+                ).encode("utf-8"),
+            )
+        )
+
+        handler._proxy_request()
+
+        merged_account = runtime._merged_accounts(limit_health=runtime._limit_health_cache)[0]
+        events = runtime.trace_store.list(limit=20)
+        assert merged_account["status"] == "COOLDOWN"
+        assert merged_account["reason"] == "limit_weekly"
+        assert merged_account["eligible_now"] is False
+        assert runtime.auth_pool.pick() is None
+        assert any(event.get("event") == "auth.limit_blocked" for event in events)
+
     def test_proxy_request_logs_auth_ejected_transition_at_threshold(
         self,
         test_settings,
@@ -992,6 +1145,8 @@ class TestRuntimeTransitionsAndOverload:
         assert metrics["auth_restores_total"] == 0
         assert metrics["auth_available"] == 1
         assert metrics["in_flight_requests"] == 0
+        assert payload["next_auth_file"] == sample_auth_record.name
+        assert payload["next_auth_email"] == sample_auth_record.email
 
 
 class TestProbeBehavior:

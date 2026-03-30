@@ -115,3 +115,57 @@ def _fetch_health_accounts(
         timeout=timeout,
     )
     return _extract_accounts(payload)
+
+
+def _next_auth_from_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    next_auth_file = str(payload.get("next_auth_file") or "").strip()
+    next_auth_email = str(payload.get("next_auth_email") or "").strip()
+    if not next_auth_file:
+        return None
+
+    for account in _extract_accounts(payload):
+        auth_file = str(account.get("file") or "").strip()
+        if auth_file != next_auth_file:
+            continue
+        selected = dict(account)
+        if next_auth_email and not str(selected.get("email") or "").strip():
+            selected["email"] = next_auth_email
+        return selected
+
+    selected: Dict[str, Any] = {"file": next_auth_file}
+    if next_auth_email:
+        selected["email"] = next_auth_email
+    return selected
+
+
+def _fetch_runtime_next_auth(
+    *, base_url: str, headers: Dict[str, str], timeout: float
+) -> Optional[Dict[str, Any]]:
+    last_error: Exception | None = None
+    for path in ("/health", "/trace?limit=1"):
+        try:
+            payload = fetch_json(
+                base_url=base_url,
+                path=path,
+                headers=headers,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        if path.startswith("/trace"):
+            limits = payload.get("limits")
+            if isinstance(limits, dict):
+                next_auth = _next_auth_from_payload(limits)
+                if next_auth is not None:
+                    return next_auth
+            continue
+
+        next_auth = _next_auth_from_payload(payload)
+        if next_auth is not None:
+            return next_auth
+
+    if last_error is not None:
+        raise RuntimeError(str(last_error))
+    return None

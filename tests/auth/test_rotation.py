@@ -31,6 +31,46 @@ def test_round_robin_and_cooldown() -> None:
     assert second.record.name != first.record.name
 
 
+def test_pick_can_filter_allowed_names() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    picked = pool.pick(allowed_names={"b.json"})
+
+    assert picked is not None
+    assert picked.record.name == "b.json"
+    assert pool.pick(allowed_names={"missing.json"}) is None
+
+
+def test_preview_next_pick_can_filter_allowed_names() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    preview = pool.preview_next_pick(allowed_names={"b.json"})
+
+    assert preview is not None
+    assert preview["file"] == "b.json"
+    assert pool.preview_next_pick(allowed_names={"missing.json"}) is None
+
+
 def test_blacklist_then_probation_then_recovery(monkeypatch) -> None:
     now = 1000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
@@ -358,7 +398,7 @@ def test_nearly_exhausted_limit_window_temporarily_leaves_rotation(monkeypatch) 
                 }
             }
         },
-        min_remaining_percent=11.0,
+        min_remaining_percent=15.0,
     )
 
     assert pool.pick() is None

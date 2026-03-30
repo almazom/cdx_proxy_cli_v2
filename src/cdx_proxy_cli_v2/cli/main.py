@@ -38,14 +38,29 @@ from cdx_proxy_cli_v2.cli.shared import (  # noqa: F401 — re-exported for back
     _proxy_shell_setup,
     _settings_from_args,
 )
-from cdx_proxy_cli_v2.runtime.service import service_status
-from cdx_proxy_cli_v2.proxy.http_client import fetch_json
+from cdx_proxy_cli_v2.runtime.service import service_status  # noqa: F401
+from cdx_proxy_cli_v2.proxy.http_client import fetch_json  # noqa: F401
 from cdx_proxy_cli_v2.observability.collective_dashboard import (
-    build_collective_payload,
-    build_collective_payload_from_accounts,
+    build_collective_payload,  # noqa: F401
+    build_collective_payload_from_accounts,  # noqa: F401
 )
 from cdx_proxy_cli_v2.cli.doctor_view import _state_bucket  # noqa: F401
 from cdx_proxy_cli_v2.config.settings import format_shell_exports  # noqa: F401
+
+_PUBLIC_COMMANDS = (
+    "proxy",
+    "status",
+    "doctor",
+    "stop",
+    "trace",
+    "logs",
+    "limits",
+    "migrate",
+    "reset",
+    "rotate",
+    "all",
+)
+_PUBLIC_COMMANDS_METAVAR = "{" + ",".join(_PUBLIC_COMMANDS) + "}"
 
 
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
@@ -114,6 +129,18 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _hide_subparser_from_help(
+    subparsers: argparse._SubParsersAction, command: str
+) -> None:
+    choice_actions = getattr(subparsers, "_choices_actions", None)
+    if not isinstance(choice_actions, list):
+        return
+    for action in list(choice_actions):
+        if getattr(action, "dest", None) == command:
+            choice_actions.remove(action)
+            break
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="cdx proxy cli v2",
@@ -122,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", metavar=_PUBLIC_COMMANDS_METAVAR)
 
     # -- proxy --
     proxy_parser = sub.add_parser(
@@ -405,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_server_parser = sub.add_parser("run-server", help=argparse.SUPPRESS)
     _add_runtime_options(run_server_parser)
     run_server_parser.set_defaults(handler=handle_run_server)
+    _hide_subparser_from_help(sub, "run-server")
 
     return parser
 
@@ -423,7 +451,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     handler = getattr(args, "handler", None)
     if handler is None:
         parser.print_help()
-        return 2
+        return 0
     try:
         return int(handler(args))
     except RuntimeError as exc:

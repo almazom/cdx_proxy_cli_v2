@@ -102,12 +102,26 @@ class RoundRobinAuthPool:
             else:
                 self._index = 0
 
-    def pick(self) -> Optional[AuthState]:
+    @staticmethod
+    def _normalize_allowed_names(
+        allowed_names: Optional[set[str]],
+    ) -> Optional[set[str]]:
+        if allowed_names is None:
+            return None
+        return {str(name).strip() for name in allowed_names if str(name).strip()}
+
+    def pick(self, *, allowed_names: Optional[set[str]] = None) -> Optional[AuthState]:
         """Choose the next currently eligible auth from already-known state only."""
         with self._lock:
             now = time.time()
             self._restore_stable_state_after_cooldown(now, self._states)
-            available = [state for state in self._states if state.available(now)]
+            allowed = self._normalize_allowed_names(allowed_names)
+            available = [
+                state
+                for state in self._states
+                if state.available(now)
+                and (allowed is None or state.record.name in allowed)
+            ]
 
             if not available:
                 return None
@@ -137,12 +151,20 @@ class RoundRobinAuthPool:
         with self._lock:
             return len(self._states)
 
-    def preview_next_pick(self) -> Optional[dict]:
+    def preview_next_pick(
+        self, *, allowed_names: Optional[set[str]] = None
+    ) -> Optional[dict]:
         """Return the next auth that would be picked without mutating pool state."""
         with self._lock:
             now = time.time()
             self._restore_stable_state_after_cooldown(now, self._states)
-            available = [state for state in self._states if state.available(now)]
+            allowed = self._normalize_allowed_names(allowed_names)
+            available = [
+                state
+                for state in self._states
+                if state.available(now)
+                and (allowed is None or state.record.name in allowed)
+            ]
             if not available:
                 return None
 

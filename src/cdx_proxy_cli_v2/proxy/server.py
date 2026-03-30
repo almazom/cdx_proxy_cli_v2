@@ -53,6 +53,10 @@ from cdx_proxy_cli_v2.proxy.upstream import (
 from cdx_proxy_cli_v2.config.settings import Settings, build_settings
 from cdx_proxy_cli_v2.observability.trace_store import TraceStore
 from cdx_proxy_cli_v2.proxy.overload import LocalOverloadGuard
+from cdx_proxy_cli_v2.proxy.limit_feedback import (
+    merge_limit_feedback,
+    parse_limit_feedback,
+)
 
 DEFAULT_MAX_REQUEST_BODY = 10 * 1024 * 1024
 DEFAULT_MAX_RESPONSE_BODY = 10 * 1024 * 1024
@@ -208,7 +212,7 @@ class ProxyRuntime:
         stale = True
         if snapshot_fetched_at > 0:
             stale = (time.time() - snapshot_fetched_at) >= LIMIT_TRACE_STALE_SECONDS
-        next_pick = self.auth_pool.preview_next_pick() or {}
+        next_pick = self.next_auth_payload() or {}
         payload: Dict[str, Any] = {
             "fetched_at": snapshot_fetched_at or None,
             "stale": stale,
@@ -696,6 +700,31 @@ class ProxyRuntime:
         )
         return counters
 
+    def next_auth_payload(self, *, route: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        allowed_auth_names = self.allowed_auth_names_for_route(route or "")
+        if allowed_auth_names is not None and not allowed_auth_names:
+            return None
+        next_pick = self.auth_pool.preview_next_pick(allowed_names=allowed_auth_names)
+        if not isinstance(next_pick, dict):
+            return None
+        return dict(next_pick)
+
+    def allowed_auth_names_for_route(self, route: str) -> Optional[set[str]]:
+        normalized_route = str(route or "").strip().lower()
+        if normalized_route != "compact":
+            return None
+        allowed: set[str] = set()
+        for account in self._merged_accounts(limit_health=self._limit_health_cache):
+            auth_file = str(account.get("file") or "").strip()
+            status = str(account.get("status") or "UNKNOWN").upper()
+            if (
+                auth_file
+                and bool(account.get("eligible_now"))
+                and status == "OK"
+            ):
+                allowed.add(auth_file)
+        return allowed
+
     def _emit_auth_transitions(
         self,
         *,
@@ -786,6 +815,45 @@ class ProxyRuntime:
             error_code=error_code,
         )
 
+    def apply_response_limit_feedback(
+        self,
+        auth_name: str,
+        *,
+        auth_email: Optional[str],
+        headers: List[Tuple[str, str]],
+        body: bytes,
+    ) -> None:
+        feedback = parse_limit_feedback(headers=headers, body=body)
+        if not isinstance(feedback, dict):
+            return
+
+        with self._limit_health_lock:
+            before_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+            updated_limit_health = dict(self._limit_health_cache)
+            updated_limit_health[auth_name] = merge_limit_feedback(
+                existing=updated_limit_health.get(auth_name),
+                feedback=feedback,
+                auth_name=auth_name,
+                auth_email=auth_email,
+            )
+            self._limit_health_cache = updated_limit_health
+            self._limit_health_cache_at = time.time()
+            self.auth_pool.apply_limit_health(
+                self._limit_health_cache,
+                min_remaining_percent=self.settings.limit_min_remaining_percent,
+            )
+            after_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+            self._store_limits_snapshot(
+                error=None,
+                fetched_at=self._limit_health_cache_at,
+                append_history=False,
+            )
+
+        self._emit_auth_transitions(
+            before_accounts=before_accounts,
+            after_accounts=after_accounts,
+        )
+
     def shutdown(self) -> None:
         """Shutdown runtime and stop background threads."""
         self._limit_sampler_stop.set()
@@ -806,8 +874,11 @@ class ProxyRuntime:
             self.reload_auths()
         self._refresh_limit_health(force=refresh, persist_snapshot=refresh)
         accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+        next_pick = self.next_auth_payload() or {}
         return {
             "ok": merged_ok(accounts),
+            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
+            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "accounts": accounts,
         }
 
@@ -815,6 +886,7 @@ class ProxyRuntime:
         return self.trace_store.list(limit=limit)
 
     def debug_payload(self, host: str, port: int) -> Dict[str, Any]:
+        next_pick = self.next_auth_payload() or {}
         return {
             "status": "running",
             "host": host,
@@ -838,6 +910,8 @@ class ProxyRuntime:
             "limit_sampler_trace_active": self._trace_recently_polled(),
             "limits_fetched_at": self._latest_limits_fetched_at or None,
             "limits_stale": self._limits_snapshot_stale(),
+            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
+            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "pid": os.getpid(),
             "event_log_file": str(self.logger.path),
             "metrics": self.metrics_snapshot(),
@@ -1358,7 +1432,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
             attempt = 0
             while attempt < max_attempts:
-                auth_state = runtime.auth_pool.pick()
+                allowed_auth_names = runtime.allowed_auth_names_for_route(context.route)
+                if allowed_auth_names is not None and not allowed_auth_names:
+                    break
+
+                auth_state = runtime.auth_pool.pick(allowed_names=allowed_auth_names)
                 if not auth_state:
                     break
 
@@ -1404,6 +1482,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     auth_state.record.name,
                     status=attempt_result.status,
                     error_code=attempt_result.error_code,
+                )
+                runtime.apply_response_limit_feedback(
+                    auth_state.record.name,
+                    auth_email=auth_state.record.email,
+                    headers=attempt_result.headers,
+                    body=attempt_result.body,
                 )
                 runtime.maybe_auto_reset_single_key_stall()
 

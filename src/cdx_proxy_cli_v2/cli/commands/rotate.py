@@ -4,54 +4,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 from cdx_proxy_cli_v2.auth.store import read_auth_json
-from cdx_proxy_cli_v2.cli.doctor_view import _extract_accounts
 from cdx_proxy_cli_v2.cli.fs import _atomic_write_json, _get_codex_home
 from cdx_proxy_cli_v2.cli.shared import (
     ROTATE_HEALTH_TIMEOUT_SECONDS,
+    _fetch_runtime_next_auth,
     _healthy_base_url_or_none,
     _management_headers,
     _settings_from_args,
 )
-from cdx_proxy_cli_v2.observability.limits_history import read_latest_limits_snapshot
-from cdx_proxy_cli_v2.proxy.http_client import fetch_json
-
-
-def _rotation_accounts(
-    *, settings, base_url: str, headers: dict[str, str]
-) -> list[dict[str, Any]]:
-    last_error: Exception | None = None
-    for path in ("/health", "/trace?limit=1"):
-        try:
-            payload = fetch_json(
-                base_url=base_url,
-                path=path,
-                headers=headers,
-                timeout=ROTATE_HEALTH_TIMEOUT_SECONDS,
-            )
-        except Exception as exc:
-            last_error = exc
-            continue
-        if path.startswith("/trace"):
-            limits = payload.get("limits")
-            if isinstance(limits, dict):
-                accounts = _extract_accounts(limits)
-                if accounts:
-                    return accounts
-            continue
-        accounts = _extract_accounts(payload)
-        if accounts:
-            return accounts
-
-    snapshot = read_latest_limits_snapshot(settings.auth_dir)
-    accounts = _extract_accounts(snapshot)
-    if accounts:
-        return accounts
-    if last_error is not None:
-        raise RuntimeError(str(last_error))
-    raise RuntimeError("no auth state available")
 
 
 def handle_rotate(args: argparse.Namespace) -> int:
@@ -63,30 +25,20 @@ def handle_rotate(args: argparse.Namespace) -> int:
 
     headers = _management_headers(settings)
     try:
-        accounts = _rotation_accounts(settings=settings, base_url=base_url, headers=headers)
+        selected = _fetch_runtime_next_auth(
+            base_url=base_url,
+            headers=headers,
+            timeout=ROTATE_HEALTH_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
-        print(f"Failed to fetch health status: {exc}", file=sys.stderr)
+        print(f"Failed to fetch next auth selection: {exc}", file=sys.stderr)
         return 1
 
-    healthy_auths = [
-        acc
-        for acc in accounts
-        if (
-            bool(acc.get("eligible_now"))
-            or str(acc.get("status", "")).upper() in {"OK", "WARN"}
-        )
-    ]
-
-    if not healthy_auths:
+    if not isinstance(selected, dict):
         print("Error: No healthy auth keys available.", file=sys.stderr)
         print("All keys are in cooldown, blacklist, or probation state.", file=sys.stderr)
         print("Run `cdx doctor` to see current auth states.", file=sys.stderr)
         return 1
-
-    healthy_auths.sort(
-        key=lambda a: (int(a.get("used") or 0), str(a.get("file") or ""))
-    )
-    selected = healthy_auths[0]
 
     selected_file = str(selected.get("file") or "")
     selected_email = str(selected.get("email") or selected.get("account") or "")

@@ -319,7 +319,7 @@ class TestAutoHealProbationCycle:
                         }
                     }
                 },
-                min_remaining_percent=11.0,
+                min_remaining_percent=15.0,
             )
 
             now = now + float(DEFAULT_BLACKLIST_SECONDS) + 1.0
