@@ -421,6 +421,9 @@ def main() -> int:
     )
 
     fail_on_turn = os.environ.get("FAKE_HOOK_CODEX_FAIL_ON_TURN", "")
+    noisy_turn = os.environ.get("FAKE_HOOK_CODEX_NOISY_TURN", "")
+    if noisy_turn and int(noisy_turn) == turn:
+        print(f"pilot stderr note turn {{turn}}", file=sys.stderr)
     if fail_on_turn and int(fail_on_turn) == turn:
         fail(f"forced hook failure on turn {{turn}}", code=1)
 
@@ -652,7 +655,32 @@ Report only significant simplifications.""",
 
 
 def _parse_json_stream(stdout: str) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in stdout.splitlines() if line.strip()]
+    records: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _manager_events(stdout: str) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in _parse_json_stream(stdout)
+        if record.get("type") == "hook.delivery"
+    ]
+
+
+def _single_session_id(records: list[dict[str, Any]]) -> str:
+    session_ids = {str(record["session_id"]) for record in records}
+    assert len(session_ids) == 1
+    return next(iter(session_ids))
 
 
 def _final_message(events: list[dict[str, Any]]) -> str:
@@ -825,7 +853,21 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     )
     assert "  --hook-times <n>             how many stop events per session (requires --hook stop)" in result.stdout
     assert "  --hook-time <n>              legacy alias for --hook-times" in result.stdout
-    assert "  --hook-target <target>       override Telegram target for notifications" in result.stdout
+    assert (
+        "  --hook-supervision <mode>    primary supervision API: observation|management"
+        in result.stdout
+    )
+    assert (
+        "  --hook-delivery <mode>       low-level transport override: telegram|manager"
+        in result.stdout
+    )
+    assert (
+        "  --hook-target <target>       override Telegram target (telegram delivery only)"
+        in result.stdout
+    )
+    assert "Proxy companion commands:" in result.stdout
+    assert "codex_wp auto-boots cdx proxy" in result.stdout
+    assert "cdx doctor --probe           probe auth keys and classify health" in result.stdout
     assert expected_usage in result.stdout
     assert _read_fake_zellij_calls(capture_path) == []
 
@@ -835,11 +877,37 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     [
         (
             ["exec", "--json", "hello", "--hook-prompt", "resume"],
-            "--hook-prompt, --hook-times, --hook-target, and --hook-extract-intent require --hook stop.",
+            "--hook-prompt, --hook-times, --hook-target, --hook-delivery, --hook-supervision, and --hook-extract-intent require --hook stop.",
         ),
         (
             ["exec", "--json", "hello", "--hook", "resume"],
             "--hook only supports 'stop'.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-delivery", "email"],
+            "--hook-delivery only supports 'telegram' or 'manager'.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-supervision", "mystery mode"],
+            "--hook-supervision only supports observation/management phrases.",
+        ),
+        (
+            [
+                "exec",
+                "--json",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "1",
+                "--hook-delivery",
+                "telegram",
+                "--hook-supervision",
+                "codex_wp under observation",
+            ],
+            "--hook-supervision only supports --hook-delivery manager.",
         ),
         (
             ["exec", "--json", "hello", "--hook", "stop"],
@@ -852,6 +920,24 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
         (
             ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt", "resume", "--hook-times", "0"],
             "--hook-times must be a positive integer.",
+        ),
+        (
+            [
+                "exec",
+                "--json",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "1",
+                "--hook-delivery",
+                "manager",
+                "--hook-target",
+                "@ops",
+            ],
+            "--hook-target is only supported with --hook-delivery telegram.",
         ),
         (
             [
@@ -877,6 +963,56 @@ def test_codex_wp_hook_validation_fails_early(
     expected_stderr: str,
 ) -> None:
     result = _run_codex_wp_args(args, _path_env(tmp_path))
+
+    assert result.returncode == 2
+    assert expected_stderr in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected_stderr"),
+    [
+        (
+            ["--hook-delivery", "manager"],
+            "--hook-delivery manager is only supported for headless 'exec --json' hook runs.",
+        ),
+        (
+            ["--hook-supervision", "codex_wp under observation"],
+            "--hook-supervision is only supported for headless 'exec --json' hook runs.",
+        ),
+    ],
+)
+def test_codex_wp_interactive_hook_rejects_manager_delivery(
+    tmp_path: Path,
+    extra_args: list[str],
+    expected_stderr: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_cdx_hook(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    args = [
+        "hello interactive",
+        "--hook",
+        "stop",
+        "--hook-prompt",
+        "resume work",
+        "--hook-times",
+        "2",
+        *extra_args,
+    ]
+
+    result = _run_codex_wp_args(args, env, cwd=project)
 
     assert result.returncode == 2
     assert expected_stderr in result.stderr
@@ -1021,7 +1157,7 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
             "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
             "FAKE_T2ME_LOG_PATH": str(t2me_log),
             "FAKE_EXTRACT_INTENT_LOG_PATH": str(extract_intent_log),
-            "FAKE_EXTRACT_INTENT_TEXT": "🧭 Intent\\n① fake step",
+            "FAKE_EXTRACT_INTENT_TEXT": "🧭 Intent\n① fake step",
             "HOME": str(home),
         },
     )
@@ -1095,6 +1231,206 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
     assert session_id in session_text
     assert "turn_context" in session_text
     assert not (tmp_path / "cdx-hook.jsonl").exists()
+
+
+def test_codex_wp_headless_hook_loop_emits_manager_events(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+    extract_intent_log = tmp_path / "extract-intent.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+    _write_fake_extract_intent(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_EXTRACT_INTENT_LOG_PATH": str(extract_intent_log),
+            "FAKE_EXTRACT_INTENT_TEXT": "🧭 Intent\\n① fake step",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "3",
+            "--hook-delivery",
+            "manager",
+            "--hook-extract-intent",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 3
+    session_id = _single_session_id(codex_records)
+    manager_events = _manager_events(result.stdout)
+    assert [record["event"] for record in manager_events] == ["stop", "stop", "complete"]
+    for index, record in enumerate(manager_events, start=1):
+        assert record["delivery"] == "manager"
+        assert record["hook_event_name"] == "Stop"
+        assert record["supervision"] == "manager"
+        assert record["session_id"] == session_id
+        assert record["turn"] == index
+        assert record["total"] == 3
+        assert record["project"] == "project"
+        assert str(record["last_assistant_message"]).startswith(f"Hook reply {index}:")
+        assert record["train_id"].startswith("TRAIN-")
+        assert str(record["intent_text"]).replace("\\n", "\n") == "🧭 Intent\n① fake step"
+
+    assert _read_jsonl_records(t2me_log) == []
+
+    extract_intent_records = _read_jsonl_records(extract_intent_log)
+    assert len(extract_intent_records) == 3
+
+
+def test_codex_wp_headless_manager_delivery_tolerates_missing_t2me_and_stderr_noise(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_HOOK_CODEX_MESSAGE_PREFIX": "Pilot",
+            "FAKE_HOOK_CODEX_NOISY_TURN": "2",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "3",
+            "--hook-delivery",
+            "manager",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "pilot stderr note turn 2" in result.stdout
+
+    manager_events = _manager_events(result.stdout)
+    assert [record["event"] for record in manager_events] == ["stop", "stop", "complete"]
+    assert [record["supervision"] for record in manager_events] == ["manager", "manager", "manager"]
+    assert manager_events[0]["last_assistant_message"] == "Pilot 1: first headless prompt"
+    assert manager_events[1]["last_assistant_message"] == "Pilot 2: resume again"
+    assert manager_events[2]["last_assistant_message"] == "Pilot 3: resume again"
+
+
+@pytest.mark.parametrize(
+    ("alias_value", "expected_supervision"),
+    [
+        ("codex_wp under observation", "observation"),
+        ("manage codex_wp", "management"),
+    ],
+)
+def test_codex_wp_headless_hook_supervision_alias_maps_to_manager(
+    tmp_path: Path,
+    alias_value: str,
+    expected_supervision: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "2",
+            "--hook-supervision",
+            alias_value,
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    manager_events = _manager_events(result.stdout)
+    assert [record["event"] for record in manager_events] == ["stop", "complete"]
+    assert [record["delivery"] for record in manager_events] == ["manager", "manager"]
+    assert [record["supervision"] for record in manager_events] == [
+        expected_supervision,
+        expected_supervision,
+    ]
+    assert _read_jsonl_records(t2me_log) == []
 
 
 def test_codex_wp_headless_hook_loop_tolerates_non_dict_json_variants(
@@ -1225,6 +1561,70 @@ def test_codex_wp_headless_hook_loop_aborts_on_resume_failure(
     assert "1/3" in first_message
     assert "Codex Exec FAILED" in second_message
     assert "iteration 2 of 3" in second_message
+
+
+def test_codex_wp_headless_hook_loop_emits_manager_error_event(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_HOOK_CODEX_FAIL_ON_TURN": "2",
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "3",
+            "--hook-delivery",
+            "manager",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 1
+
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 2
+    session_id = _single_session_id(codex_records)
+    manager_events = _manager_events(result.stdout)
+    assert [record["event"] for record in manager_events] == ["stop", "error"]
+    assert [record["supervision"] for record in manager_events] == ["manager", "manager"]
+    assert manager_events[0]["last_assistant_message"] == "Hook reply 1: first headless prompt"
+    assert manager_events[1]["failure_text"] == "❌ codex exec failed (exit 1)"
+    assert manager_events[1]["session_id"] == session_id
+    assert manager_events[1]["turn"] == 2
+    assert manager_events[1]["total"] == 3
+
+    assert _read_jsonl_records(t2me_log) == []
 
 
 @pytest.mark.parametrize(

@@ -56,6 +56,7 @@ tail -n 20 ~/.codex/_auths/rr_proxy_v2.events.jsonl
 ## Notes
 
 - `bin/codex_wp` performs the same proxy bootstrap for a single `codex` invocation and injects `openai_base_url` explicitly.
+- For the headless supervision flags, phrase aliases, and manager JSON event contract, use `docs/CODEX_WP_SUPERVISION.md`.
 - For a reproducible multi-step smoke test with trace and event-log evidence, use `docs/operations/codex_wp_observability_runbook.md`.
 - Websocket auth failures should now rotate to the next key instead of leaving the bad key in service.
 - Non-auth client errors such as `405 Method Not Allowed` should not poison a healthy key.

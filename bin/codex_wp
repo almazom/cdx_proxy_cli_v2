@@ -278,6 +278,33 @@ find_exec_prompt_index() {
   printf '%s\n' "-1"
 }
 
+normalize_hook_supervision() {
+  local raw="$1"
+  local lowered=""
+
+  lowered="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+
+  case "$lowered" in
+    observation|observed|under-observation|under_observation|"under observation"|"codex_wp under observation")
+      printf '%s\n' "observation"
+      ;;
+    management|managed|under-management|under_management|"under management"|manage|manager|manage-codex-wp|manage_codex_wp|"manage codex_wp"|"codex_wp under management")
+      printf '%s\n' "management"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+hook_effective_supervision() {
+  if [[ -n "$hook_supervision" ]]; then
+    printf '%s\n' "$hook_supervision"
+  else
+    printf '%s\n' "manager"
+  fi
+}
+
 script_path="$(readlink -f "$0")"
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
@@ -323,6 +350,10 @@ hook_mode=""
 hook_prompt=""
 hook_times=""
 hook_target=""
+hook_delivery="telegram"
+hook_delivery_explicit=0
+hook_supervision=""
+hook_supervision_explicit=0
 hook_extract_intent=0
 args=()
 while [[ $# -gt 0 ]]; do
@@ -484,6 +515,18 @@ while [[ $# -gt 0 ]]; do
       hook_target="$2"
       shift 2
       ;;
+    --hook-delivery)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-delivery requires a value (telegram or manager)." 2
+      hook_delivery="$2"
+      hook_delivery_explicit=1
+      shift 2
+      ;;
+    --hook-supervision)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-supervision requires a value." 2
+      hook_supervision="$2"
+      hook_supervision_explicit=1
+      shift 2
+      ;;
     --hook-extract-intent)
       hook_extract_intent=1
       shift
@@ -550,19 +593,36 @@ fi
 
 validate_hook_flags() {
   if [[ -z "$hook_mode" ]]; then
-    if [[ -n "$hook_prompt" || -n "$hook_times" || -n "$hook_target" || $hook_extract_intent -eq 1 ]]; then
+    if [[ -n "$hook_prompt" || -n "$hook_times" || -n "$hook_target" || $hook_delivery_explicit -eq 1 || $hook_supervision_explicit -eq 1 || $hook_extract_intent -eq 1 ]]; then
       die \
-        "codex_wp: --hook-prompt, --hook-times, --hook-target, and --hook-extract-intent require --hook stop." \
+        "codex_wp: --hook-prompt, --hook-times, --hook-target, --hook-delivery, --hook-supervision, and --hook-extract-intent require --hook stop." \
         2
     fi
     return 0
   fi
 
   [[ "$hook_mode" == "stop" ]] || die "codex_wp: --hook only supports 'stop'." 2
+  if (( hook_supervision_explicit )); then
+    hook_supervision="$(normalize_hook_supervision "$hook_supervision")" || \
+      die "codex_wp: --hook-supervision only supports observation/management phrases." 2
+    if (( hook_delivery_explicit )) && [[ "$hook_delivery" != "manager" ]]; then
+      die "codex_wp: --hook-supervision only supports --hook-delivery manager." 2
+    fi
+    hook_delivery="manager"
+  fi
+  case "$hook_delivery" in
+    telegram|manager) ;;
+    *)
+      die "codex_wp: --hook-delivery only supports 'telegram' or 'manager'." 2
+      ;;
+  esac
   [[ -n "$hook_prompt" ]] || die "codex_wp: --hook stop requires --hook-prompt." 2
   [[ -n "$hook_times" ]] || die "codex_wp: --hook stop requires --hook-times." 2
   [[ "$hook_times" =~ ^[1-9][0-9]*$ ]] || \
     die "codex_wp: --hook-times must be a positive integer." 2
+  if [[ "$hook_delivery" == "manager" && -n "$hook_target" ]]; then
+    die "codex_wp: --hook-target is only supported with --hook-delivery telegram." 2
+  fi
 
   if (( zellij_mode )); then
     die "codex_wp: --hook is not supported with zellij launch modes yet." 2
@@ -645,7 +705,9 @@ Hook flags (interactive uses cdx-hook; headless exec uses a wrapper loop):
   --hook-prompt <text>         prompt injected back on each codex stop (requires --hook stop)
   --hook-times <n>             how many stop events per session (requires --hook stop)
   --hook-time <n>              legacy alias for --hook-times
-  --hook-target <target>       override Telegram target for notifications
+  --hook-supervision <mode>    primary supervision API: observation|management
+  --hook-delivery <mode>       low-level transport override: telegram|manager
+  --hook-target <target>       override Telegram target (telegram delivery only)
   --hook-extract-intent        attach extract-intent summary to each notification
 
 Floating pane flags:
@@ -664,6 +726,17 @@ Floating pair flags:
   --b-prompt <text>            inline prompt for pane B
   --b-file <path>              prompt file for pane B
   --zellij-pair-json           emit machine-readable pair launch output
+
+Proxy companion commands:
+  codex_wp auto-boots cdx proxy via `cdx proxy --print-env-only`
+  cdx status --json            show proxy pid, base_url, and auth count
+  cdx doctor --probe           probe auth keys and classify health
+  cdx all                      show per-key 5h/weekly usage dashboard
+  cdx rotate --dry-run         preview the next auth rotation
+  cdx reset --state blacklist  clear stuck keys after auth fixes
+  cdx trace --limit 20         tail recent routing events
+  cdx logs --lines 50          tail proxy service logs
+  cdx limits --tail 10         show persisted limits history
 
 Help is side-effect free. Wrapper help prints first, then upstream codex help.
 EOF
@@ -1926,6 +1999,75 @@ hook_send_notification() {
   return 0
 }
 
+hook_emit_manager_event() {
+  local event="$1"
+  local train_id="$2"
+  local session_id="$3"
+  local turn="$4"
+  local total="$5"
+  local last_msg="${6:-}"
+  local intent_text="${7:-}"
+  local failure_text="${8:-}"
+  local python_bin=""
+  local project_name=""
+  local supervision=""
+
+  python_bin="$(hook_python_bin)"
+  project_name="$(basename "$PWD")"
+  supervision="$(hook_effective_supervision)"
+
+  "$python_bin" - "$event" "$train_id" "$session_id" "$turn" "$total" "$project_name" "$last_msg" "$intent_text" "$failure_text" "$supervision" <<'PY'
+import json
+import sys
+
+event, train_id, session_id, turn, total, project_name, last_msg, intent_text, failure_text, supervision = sys.argv[1:]
+
+payload = {
+    "type": "hook.delivery",
+    "delivery": "manager",
+    "hook_event_name": "Stop",
+    "event": event,
+    "supervision": supervision,
+    "train_id": train_id,
+    "session_id": session_id,
+    "turn": int(turn),
+    "total": int(total),
+    "project": project_name,
+    "last_assistant_message": last_msg,
+}
+if intent_text:
+    payload["intent_text"] = intent_text
+if failure_text:
+    payload["failure_text"] = failure_text
+
+print(json.dumps(payload, ensure_ascii=False))
+PY
+}
+
+hook_dispatch_delivery() {
+  local event="$1"
+  local train_id="$2"
+  local session_id="$3"
+  local turn="$4"
+  local total="$5"
+  local last_msg="${6:-}"
+  local intent_text="${7:-}"
+  local failure_text="${8:-}"
+  local notify_text=""
+
+  if [[ "$hook_delivery" == "manager" ]]; then
+    hook_emit_manager_event "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "$failure_text"
+    return 0
+  fi
+
+  if [[ "$event" == "error" ]]; then
+    notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$total" "$failure_text" "$last_msg")"
+  else
+    notify_text="$(hook_build_notification "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text")"
+  fi
+  hook_send_notification "$notify_text"
+}
+
 hook_generate_train_id() {
   local python_bin=""
   local timestamp=""
@@ -2048,7 +2190,6 @@ run_headless_hook_loop() {
   local train_id=""
   local last_msg=""
   local intent_text=""
-  local notify_text=""
   local failure_text=""
   local exit_code=0
   local turn=0
@@ -2089,8 +2230,7 @@ run_headless_hook_loop() {
       elif [[ "$parsed_session_id" != "$session_id" ]]; then
         last_msg="$(hook_parse_last_message "$output_file" || true)"
         failure_text="❌ session_id changed unexpectedly (${parsed_session_id} != ${session_id})"
-        notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$hook_times" "$failure_text" "$last_msg")"
-        hook_send_notification "$notify_text" || true
+        hook_dispatch_delivery "error" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "" "$failure_text" || true
         rm -rf "$tmpdir"
         return 1
       fi
@@ -2100,16 +2240,14 @@ run_headless_hook_loop() {
 
     if [[ -z "$session_id" ]]; then
       failure_text="❌ failed to parse session_id from codex JSON output"
-      notify_text="$(hook_build_error_notification "$train_id" "-" "$turn" "$hook_times" "$failure_text" "$last_msg")"
-      hook_send_notification "$notify_text" || true
+      hook_dispatch_delivery "error" "$train_id" "-" "$turn" "$hook_times" "$last_msg" "" "$failure_text" || true
       rm -rf "$tmpdir"
       return 1
     fi
 
     if (( exit_code != 0 )); then
       failure_text="❌ codex exec failed (exit ${exit_code})"
-      notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$hook_times" "$failure_text" "$last_msg")"
-      hook_send_notification "$notify_text" || true
+      hook_dispatch_delivery "error" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "" "$failure_text" || true
       rm -rf "$tmpdir"
       return "$exit_code"
     fi
@@ -2119,8 +2257,11 @@ run_headless_hook_loop() {
       intent_text="$(hook_extract_intent_text "$session_id" || true)"
     fi
 
-    notify_text="$(hook_build_notification "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text")"
-    hook_send_notification "$notify_text" || true
+    if (( turn == hook_times )); then
+      hook_dispatch_delivery "complete" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" || true
+    else
+      hook_dispatch_delivery "stop" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" || true
+    fi
   done
 
   rm -rf "$tmpdir"
@@ -2148,6 +2289,13 @@ if [[ -n "$hook_mode" ]]; then
   if hook_is_headless_mode "$@"; then
     run_headless_hook_loop "$@"
     exit $?
+  fi
+
+  if [[ "$hook_delivery" != "telegram" ]]; then
+    if (( hook_supervision_explicit )); then
+      die "codex_wp: --hook-supervision is only supported for headless 'exec --json' hook runs." 2
+    fi
+    die "codex_wp: --hook-delivery manager is only supported for headless 'exec --json' hook runs." 2
   fi
 
   hook_cli="$(command -v cdx-hook || true)"

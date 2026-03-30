@@ -62,6 +62,12 @@ cdx stop
 - `cdx stop`: shutdown proxy
 - `cdx logs --lines 120`: tail proxy log file
 
+## codex_wp Supervision
+
+- primary human-facing API: `bin/codex_wp ... --hook-supervision observation|management`
+- low-level transport override: `bin/codex_wp ... --hook-delivery telegram|manager`
+- canonical contract and examples: `docs/CODEX_WP_SUPERVISION.md`
+
 ## Runtime Files
 
 Under `~/.codex/_auths` (or `CLIPROXY_AUTH_DIR`):
