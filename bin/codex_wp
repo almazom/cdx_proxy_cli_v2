@@ -2314,5 +2314,11 @@ if [[ -n "$hook_mode" ]]; then
   "$hook_cli" "${hook_args[@]}" || die "codex_wp: cdx-hook activation failed." 2
 fi
 
+# --no-alt-screen: preserve scrollback inside zellij (codex TUI uses alternate screen by default)
+codex_flags=(--dangerously-bypass-approvals-and-sandbox)
+if [[ -n "${ZELLIJ:-}" ]]; then
+  codex_flags+=(--no-alt-screen)
+fi
+
 exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
-  "$codex_bin" -c "$config_arg" --dangerously-bypass-approvals-and-sandbox "$@"
+  "$codex_bin" -c "$config_arg" "${codex_flags[@]}" "$@"
