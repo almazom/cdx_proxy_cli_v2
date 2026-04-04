@@ -13,6 +13,9 @@ from typing import Optional
 from cdx_proxy_cli_v2 import __version__
 from cdx_proxy_cli_v2.cli.commands import (
     handle_all,
+    handle_codex_runtime_ensure,
+    handle_codex_runtime_status,
+    handle_codex_runtime_stop,
     handle_doctor,
     handle_limits,
     handle_logs,
@@ -20,6 +23,7 @@ from cdx_proxy_cli_v2.cli.commands import (
     handle_proxy,
     handle_reset,
     handle_rotate,
+    handle_run_codex_broker,
     handle_run_server,
     handle_status,
     handle_stop,
@@ -49,6 +53,7 @@ from cdx_proxy_cli_v2.config.settings import format_shell_exports  # noqa: F401
 
 _PUBLIC_COMMANDS = (
     "proxy",
+    "codex-runtime",
     "status",
     "doctor",
     "stop",
@@ -186,6 +191,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="print only `export ...` lines (safe for eval/source)",
     )
     proxy_parser.set_defaults(handler=handle_proxy)
+
+    # -- codex-runtime --
+    codex_runtime_parser = sub.add_parser(
+        "codex-runtime",
+        help="manage shared codex app-server runtime",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    _add_runtime_options(codex_runtime_parser)
+    codex_runtime_sub = codex_runtime_parser.add_subparsers(
+        dest="codex_runtime_command", required=True
+    )
+
+    codex_runtime_ensure = codex_runtime_sub.add_parser(
+        "ensure", help="start or reuse a workspace-scoped codex runtime"
+    )
+    _add_runtime_options(codex_runtime_ensure)
+    codex_runtime_ensure.add_argument("--cwd", default=".")
+    codex_runtime_ensure.add_argument("--json", action="store_true")
+    codex_runtime_ensure.set_defaults(handler=handle_codex_runtime_ensure)
+
+    codex_runtime_status = codex_runtime_sub.add_parser(
+        "status", help="inspect workspace-scoped codex runtime status"
+    )
+    _add_runtime_options(codex_runtime_status)
+    codex_runtime_status.add_argument("--cwd", default=".")
+    codex_runtime_status.add_argument("--json", action="store_true")
+    codex_runtime_status.set_defaults(handler=handle_codex_runtime_status)
+
+    codex_runtime_stop = codex_runtime_sub.add_parser(
+        "stop", help="stop workspace-scoped codex runtime"
+    )
+    _add_runtime_options(codex_runtime_stop)
+    codex_runtime_stop.add_argument("--cwd", default=".")
+    codex_runtime_stop.add_argument("--json", action="store_true")
+    codex_runtime_stop.set_defaults(handler=handle_codex_runtime_stop)
 
     # -- status --
     status_parser = sub.add_parser(
@@ -433,6 +473,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(run_server_parser)
     run_server_parser.set_defaults(handler=handle_run_server)
     _hide_subparser_from_help(sub, "run-server")
+    run_broker_parser = sub.add_parser(
+        "run-codex-broker",
+        help=argparse.SUPPRESS,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    run_broker_parser.add_argument("--cwd", required=True)
+    run_broker_parser.add_argument("--socket-path", required=True)
+    run_broker_parser.set_defaults(handler=handle_run_codex_broker)
+    _hide_subparser_from_help(sub, "run-codex-broker")
 
     return parser
 
@@ -462,3 +511,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

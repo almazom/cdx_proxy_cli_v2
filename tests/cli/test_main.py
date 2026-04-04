@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import sys
 import tomllib
 import pytest
 from pathlib import Path
@@ -200,6 +203,26 @@ class TestLoadCodexAuthIdentity:
             result = handle_status(args)
 
         assert result == 0
+
+
+class TestModuleEntrypoint:
+    def test_python_m_cli_main_help_is_clean(self, tmp_path: Path) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root / "src")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "cdx_proxy_cli_v2.cli.main", "--help"],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "usage:" in result.stdout.lower()
+        assert "RuntimeWarning" not in result.stderr
 
 
 class TestHandleStop:
