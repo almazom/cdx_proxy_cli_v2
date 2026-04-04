@@ -1,6 +1,6 @@
 # codex_wp Supervision Contract
 
-**Last verified:** 2026-03-30
+**Last verified:** 2026-04-03
 **Status:** OK
 
 ## Purpose
@@ -11,9 +11,23 @@ headless hook mode.
 Use this when you need one stable answer to:
 
 - which flag is the primary human-facing API
+- how interactive `--hook stop` lifecycle behaves
 - how phrase aliases normalize
 - what manager-mode JSON events contain
 - what remains headless-only today
+
+## Interactive Lifecycle
+
+Interactive `codex_wp --hook stop ...` still uses `cdx-hook`, but the wrapper now
+owns the lifecycle for the current run:
+
+- before activation, `codex_wp` clears any existing managed Stop hook in the target project
+- it enables the Stop hook only for the current interactive run
+- after Codex exits, it disables that managed Stop hook again, including non-zero exits
+- plain interactive `codex_wp ...` runs also clear any managed Stop hook before launch
+
+Result: one run with `codex_wp --hook stop ...` does not leak Stop-hook
+notifications into the next plain `codex_wp` run in the same project.
 
 ## Recommended API
 
@@ -51,8 +65,16 @@ canonical supervision string.
 
 `--hook-delivery` remains supported as a low-level transport override:
 
+- `mattermost` (default for `codex_wp --hook stop`)
 - `telegram`
+- `both`
 - `manager`
+
+`--hook-last-message-format` controls only the Mattermost rendering of the last
+assistant message:
+
+- `raw` (default)
+- `ru3` (3 short Russian bullets, max 3 words each, with raw fallback if summarization fails)
 
 Recommended rule:
 

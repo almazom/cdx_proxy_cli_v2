@@ -278,6 +278,53 @@ find_exec_prompt_index() {
   printf '%s\n' "-1"
 }
 
+find_first_passthrough_token() {
+  local argv=("$@")
+  local index=0
+  local arg
+
+  while (( index < ${#argv[@]} )); do
+    arg="${argv[$index]}"
+    case "$arg" in
+      --)
+        ((index++))
+        break
+        ;;
+      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message)
+        ((index+=2))
+        continue
+        ;;
+      --oss|--full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|-h|--help|-V|--version)
+        ((index++))
+        continue
+        ;;
+      -*)
+        ((index++))
+        continue
+        ;;
+      *)
+        printf '%s\n' "$arg"
+        return 0
+        ;;
+    esac
+  done
+
+  while (( index < ${#argv[@]} )); do
+    arg="${argv[$index]}"
+    case "$arg" in
+      -*)
+        ((index++))
+        ;;
+      *)
+        printf '%s\n' "$arg"
+        return 0
+        ;;
+    esac
+  done
+
+  printf '\n'
+}
+
 normalize_hook_supervision() {
   local raw="$1"
   local lowered=""
@@ -345,16 +392,24 @@ pair_b_file=""
 fixed_shortcut=""
 fixed_shortcut_close_on_success=0
 files_to_include=()
+prompt_shortcut=""
 # --hook* flags
 hook_mode=""
 hook_prompt=""
 hook_times=""
+hook_prompt_mode="static"
+hook_prompt_mode_explicit=0
+hook_auto_stop_on_complete=0
 hook_target=""
-hook_delivery="telegram"
+hook_delivery="mattermost"
 hook_delivery_explicit=0
+hook_last_message_format="raw"
+hook_last_message_format_explicit=0
 hook_supervision=""
 hook_supervision_explicit=0
 hook_extract_intent=0
+hook_cleanup_after_run=0
+hook_cleanup_project_root=""
 args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -472,6 +527,17 @@ while [[ $# -gt 0 ]]; do
       zellij_close_on_exit=1
       shift
       ;;
+    -p|--prompt)
+      if [[ -n "$(find_first_passthrough_token "${args[@]}")" ]]; then
+        [[ $# -ge 2 ]] || die "codex_wp: $1 requires prompt text." 2
+        args+=("$1" "$2")
+        shift 2
+        continue
+      fi
+      [[ $# -ge 2 ]] || die "codex_wp: $1 requires prompt text." 2
+      prompt_shortcut="$2"
+      shift 2
+      ;;
     -SA)
       [[ -z "$fixed_shortcut" ]] || fixed_shortcut_error "-SA"
       fixed_shortcut="simplify_then_commit"
@@ -505,10 +571,20 @@ while [[ $# -gt 0 ]]; do
       hook_prompt="$2"
       shift 2
       ;;
-    --hook-time|--hook-times)
+    --hook-time|--hook-times|--hook-max-turns)
       [[ $# -ge 2 ]] || die "codex_wp: $1 requires a number." 2
       hook_times="$2"
       shift 2
+      ;;
+    --hook-prompt-mode)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-prompt-mode requires a value (static, auto, or hybrid)." 2
+      hook_prompt_mode="$2"
+      hook_prompt_mode_explicit=1
+      shift 2
+      ;;
+    --hook-auto-stop-on-complete)
+      hook_auto_stop_on_complete=1
+      shift
       ;;
     --hook-target)
       [[ $# -ge 2 ]] || die "codex_wp: --hook-target requires a Telegram target." 2
@@ -516,9 +592,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --hook-delivery)
-      [[ $# -ge 2 ]] || die "codex_wp: --hook-delivery requires a value (telegram or manager)." 2
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-delivery requires a value (mattermost, telegram, both, or manager)." 2
       hook_delivery="$2"
       hook_delivery_explicit=1
+      shift 2
+      ;;
+    --hook-last-message-format)
+      [[ $# -ge 2 ]] || die "codex_wp: --hook-last-message-format requires a value (raw or ru3)." 2
+      hook_last_message_format="$2"
+      hook_last_message_format_explicit=1
       shift 2
       ;;
     --hook-supervision)
@@ -591,11 +673,18 @@ if is_help_request "${args[@]}"; then
   help_requested=1
 fi
 
+hook_requested_headless=0
+if [[ -n "$prompt_shortcut" ]]; then
+  hook_requested_headless=1
+elif (( ${#args[@]} > 0 )) && [[ "${args[0]}" == "exec" || "${args[0]}" == "e" ]]; then
+  hook_requested_headless=1
+fi
+
 validate_hook_flags() {
   if [[ -z "$hook_mode" ]]; then
-    if [[ -n "$hook_prompt" || -n "$hook_times" || -n "$hook_target" || $hook_delivery_explicit -eq 1 || $hook_supervision_explicit -eq 1 || $hook_extract_intent -eq 1 ]]; then
+    if [[ -n "$hook_prompt" || -n "$hook_times" || -n "$hook_target" || $hook_prompt_mode_explicit -eq 1 || $hook_auto_stop_on_complete -eq 1 || $hook_delivery_explicit -eq 1 || $hook_last_message_format_explicit -eq 1 || $hook_supervision_explicit -eq 1 || $hook_extract_intent -eq 1 ]]; then
       die \
-        "codex_wp: --hook-prompt, --hook-times, --hook-target, --hook-delivery, --hook-supervision, and --hook-extract-intent require --hook stop." \
+        "codex_wp: --hook-prompt, --hook-times, --hook-prompt-mode, --hook-auto-stop-on-complete, --hook-target, --hook-delivery, --hook-last-message-format, --hook-supervision, and --hook-extract-intent require --hook stop." \
         2
     fi
     return 0
@@ -611,17 +700,47 @@ validate_hook_flags() {
     hook_delivery="manager"
   fi
   case "$hook_delivery" in
-    telegram|manager) ;;
+    telegram|mattermost|both|manager) ;;
     *)
-      die "codex_wp: --hook-delivery only supports 'telegram' or 'manager'." 2
+      die "codex_wp: --hook-delivery only supports 'telegram', 'mattermost', 'both', or 'manager'." 2
       ;;
   esac
-  [[ -n "$hook_prompt" ]] || die "codex_wp: --hook stop requires --hook-prompt." 2
+  case "$hook_last_message_format" in
+    raw|ru3) ;;
+    *)
+      die "codex_wp: --hook-last-message-format only supports 'raw' or 'ru3'." 2
+      ;;
+  esac
+  case "$hook_prompt_mode" in
+    static|auto|hybrid) ;;
+    *)
+      die "codex_wp: --hook-prompt-mode only supports 'static', 'auto', or 'hybrid'." 2
+      ;;
+  esac
+  if (( ! hook_requested_headless )) && [[ "$hook_prompt_mode" != "static" ]]; then
+    die "codex_wp: --hook-prompt-mode auto/hybrid is only supported for headless 'exec --json' hook runs." 2
+  fi
+  if (( ! hook_requested_headless )) && (( hook_auto_stop_on_complete )); then
+    die "codex_wp: --hook-auto-stop-on-complete is only supported for headless 'exec --json' hook runs." 2
+  fi
+  if (( hook_auto_stop_on_complete )) && [[ "$hook_prompt_mode" == "static" ]]; then
+    die "codex_wp: --hook-auto-stop-on-complete requires --hook-prompt-mode auto or hybrid." 2
+  fi
+  if [[ "$hook_prompt_mode" == "static" ]]; then
+    [[ -n "$hook_prompt" ]] || die "codex_wp: --hook stop requires --hook-prompt." 2
+  elif [[ "$hook_prompt_mode" == "hybrid" ]]; then
+    [[ -n "$hook_prompt" ]] || die "codex_wp: --hook-prompt-mode hybrid requires --hook-prompt for fallback." 2
+  elif [[ -n "$hook_prompt" ]]; then
+    die "codex_wp: --hook-prompt-mode auto does not use --hook-prompt. Remove it or use --hook-prompt-mode hybrid." 2
+  fi
   [[ -n "$hook_times" ]] || die "codex_wp: --hook stop requires --hook-times." 2
   [[ "$hook_times" =~ ^[1-9][0-9]*$ ]] || \
     die "codex_wp: --hook-times must be a positive integer." 2
+  if [[ "$hook_delivery" == "mattermost" && -n "$hook_target" ]]; then
+    die "codex_wp: --hook-target requires telegram delivery (use telegram or both)." 2
+  fi
   if [[ "$hook_delivery" == "manager" && -n "$hook_target" ]]; then
-    die "codex_wp: --hook-target is only supported with --hook-delivery telegram." 2
+    die "codex_wp: --hook-target is only supported with --hook-delivery telegram or both." 2
   fi
 
   if (( zellij_mode )); then
@@ -631,6 +750,16 @@ validate_hook_flags() {
 
 if (( ! help_requested )); then
   validate_hook_flags
+fi
+
+if [[ -n "$prompt_shortcut" ]]; then
+  if (( zellij_pair_mode )); then
+    die "codex_wp: -p/--prompt is not supported with --zellij-floating-pair." 2
+  fi
+  if (( ${#args[@]} > 0 )) && [[ "${args[0]}" == "exec" || "${args[0]}" == "e" ]]; then
+    die "codex_wp: -p/--prompt already implies 'exec --json'; remove explicit 'exec'." 2
+  fi
+  args=(exec --json "$prompt_shortcut" "${args[@]}")
 fi
 
 pair_shared_args=()
@@ -688,9 +817,10 @@ print_codex_wp_wrapper_help() {
 codex_wp wrapper flags
 
 These options are handled by codex_wp before arguments pass through to codex.
-All non-wrapper flags, including Codex -p/--profile, pass through unchanged.
+All non-wrapper flags pass through unchanged.
 
 General wrapper flags:
+  -p, --prompt <text>          shortcut: run 'exec --json <text>' headless
   -f, --file <path>            prepend @/absolute/path references to exec prompts
   -SA                          run built-in code-simplifier, then auto-commit, in one floating Zellij pane and close it on success
   -A                           run built-in auto-commit in a floating Zellij pane and close it on success
@@ -700,14 +830,19 @@ General wrapper flags:
   --zellij-cwd <path>          override the working directory used for Zellij launch
   --zellij-dry-run             print the resolved Zellij command without launching it
 
-Hook flags (interactive uses cdx-hook; headless exec uses a wrapper loop):
+Hook flags (interactive --hook stop is session-scoped; headless exec uses a wrapper loop):
   --hook stop                  enable stop hook handling
-  --hook-prompt <text>         prompt injected back on each codex stop (requires --hook stop)
+  --hook-prompt <text>         static resume prompt (required for static; fallback for hybrid)
   --hook-times <n>             how many stop events per session (requires --hook stop)
   --hook-time <n>              legacy alias for --hook-times
+  --hook-max-turns <n>         alias for --hook-times
+  --hook-prompt-mode <mode>    next prompt strategy: static|auto|hybrid (default: static)
+  --hook-auto-stop-on-complete end early when auto mode says the task is complete
   --hook-supervision <mode>    primary supervision API: observation|management
-  --hook-delivery <mode>       low-level transport override: telegram|manager
-  --hook-target <target>       override Telegram target (telegram delivery only)
+  --hook-delivery <mode>       low-level transport override: mattermost|telegram|both|manager (default: mattermost)
+  --hook-last-message-format <mode>
+                               format last assistant message for Mattermost: raw|ru3
+  --hook-target <target>       override Telegram target (telegram/both only)
   --hook-extract-intent        attach extract-intent summary to each notification
 
 Floating pane flags:
@@ -1791,6 +1926,48 @@ hook_is_headless_mode() {
   esac
 }
 
+hook_is_interactive_mode() {
+  [[ $# -eq 0 ]] && return 0
+  case "$1" in
+    exec|e|review|help)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+hook_resolve_project_root_from_args() {
+  local inner_args=("$@")
+  local derived_root="$PWD"
+  local index=0
+  local arg=""
+
+  while (( index < ${#inner_args[@]} )); do
+    arg="${inner_args[$index]}"
+    case "$arg" in
+      -C|--cd)
+        if (( index + 1 < ${#inner_args[@]} )); then
+          derived_root="${inner_args[$((index + 1))]}"
+          ((index+=2))
+          continue
+        fi
+        ;;
+      --cd=*)
+        derived_root="${arg#--cd=}"
+        ;;
+    esac
+    ((index++))
+  done
+
+  if [[ "$derived_root" == /* ]]; then
+    printf '%s\n' "$derived_root"
+  else
+    printf '%s\n' "$PWD/$derived_root"
+  fi
+}
+
 hook_python_bin() {
   if [[ -z "$codex_wp_python_bin" ]]; then
     codex_wp_python_bin="$(resolve_python_bin)"
@@ -1812,6 +1989,153 @@ hook_require_headless_preconditions() {
 
   if array_has --ephemeral "$@"; then
     die "codex_wp: headless --hook stop does not support --ephemeral because resume requires a persisted session." 2
+  fi
+}
+
+hook_resolve_cli() {
+  command -v cdx-hook || true
+}
+
+hook_project_has_managed_state() {
+  local project_root="${1:-$PWD}"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$project_root" <<'PY' 2>/dev/null
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+codex_dir = project_root / ".codex"
+settings_path = codex_dir / "cdx-hook.json"
+wrapper_path = codex_dir / "hooks" / "cdx_hook_stop_handler.py"
+hooks_path = codex_dir / "hooks.json"
+
+if settings_path.exists() or wrapper_path.exists():
+    raise SystemExit(0)
+if not hooks_path.exists():
+    raise SystemExit(1)
+
+try:
+    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+stop_groups = payload.get("hooks", {}).get("Stop")
+if not isinstance(stop_groups, list):
+    raise SystemExit(1)
+
+for group in stop_groups:
+    if isinstance(group, dict) and group.get("_managed_by") == "cdx-hook":
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+hook_inline_disable_project_managed_stop() {
+  local project_root="${1:-$PWD}"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$project_root" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+OWNED_CONFIG_TOML = (
+    "# Managed by cdx-hook. Remove this file only if you no longer need Codex hooks.\n"
+    "[features]\n"
+    "codex_hooks = true\n"
+)
+
+project_root = Path(sys.argv[1])
+codex_dir = project_root / ".codex"
+hooks_path = codex_dir / "hooks.json"
+settings_path = codex_dir / "cdx-hook.json"
+state_path = codex_dir / "cdx-hook-state.json"
+wrapper_path = codex_dir / "hooks" / "cdx_hook_stop_handler.py"
+config_path = codex_dir / "config.toml"
+
+settings = None
+settings_path_existed = settings_path.exists()
+if settings_path.exists():
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except Exception:
+        settings = None
+
+managed_hook_present = False
+if hooks_path.exists():
+    try:
+        payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        hooks = payload.get("hooks")
+        if isinstance(hooks, dict):
+            stop_groups = hooks.get("Stop")
+            if isinstance(stop_groups, list):
+                filtered = []
+                for group in stop_groups:
+                    if isinstance(group, dict) and group.get("_managed_by") == "cdx-hook":
+                        managed_hook_present = True
+                        continue
+                    filtered.append(group)
+                if filtered:
+                    hooks["Stop"] = filtered
+                else:
+                    hooks.pop("Stop", None)
+                if managed_hook_present:
+                    hooks_path.write_text(
+                        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+
+for path in (settings_path, state_path, wrapper_path):
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError:
+        pass
+
+try:
+    if config_path.exists() and config_path.read_text(encoding="utf-8") == OWNED_CONFIG_TOML:
+        owned_by_settings = bool(settings and settings.get("owned_config_toml"))
+        if owned_by_settings or not settings_path_existed:
+            config_path.unlink()
+except OSError:
+    pass
+PY
+}
+
+hook_disable_project_managed_stop() {
+  local project_root="${1:-$PWD}"
+  local hook_cli=""
+
+  if ! hook_project_has_managed_state "$project_root"; then
+    return 0
+  fi
+
+  hook_cli="$(hook_resolve_cli)"
+  if [[ -n "$hook_cli" && -x "$hook_cli" ]]; then
+    if "$hook_cli" stop off --project "$project_root" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  hook_inline_disable_project_managed_stop "$project_root"
+}
+
+hook_cleanup_on_exit() {
+  if (( ! hook_cleanup_after_run )); then
+    return 0
+  fi
+
+  hook_cleanup_after_run=0
+  if ! hook_disable_project_managed_stop "$hook_cleanup_project_root" >/dev/null 2>&1; then
+    printf '%s\n' "codex_wp: failed to clean temporary stop hook for $hook_cleanup_project_root." >&2
   fi
 }
 
@@ -1939,6 +2263,21 @@ if last:
 PY
 }
 
+hook_extract_exec_prompt() {
+  local -a argv=("$@")
+  local prompt_index=""
+
+  prompt_index="$(find_exec_prompt_index "${argv[@]}")"
+  [[ "$prompt_index" =~ ^-?[0-9]+$ ]] || return 0
+  if (( prompt_index < 0 || prompt_index >= ${#argv[@]} )); then
+    return 0
+  fi
+  if [[ "${argv[$prompt_index]}" == "-" ]]; then
+    return 0
+  fi
+  printf '%s' "${argv[$prompt_index]}"
+}
+
 hook_resolve_session_file() {
   local session_id="$1"
   local sessions_root="${HOME:-}/.codex/sessions"
@@ -1947,6 +2286,252 @@ hook_resolve_session_file() {
   [[ -d "$sessions_root" ]] || return 1
 
   find "$sessions_root" -type f -name "*${session_id}*.jsonl" 2>/dev/null | LC_ALL=C sort | tail -n 1
+}
+
+hook_write_auto_prompt_schema() {
+  local schema_path="$1"
+
+  cat >"$schema_path" <<'EOF'
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["continue_session", "next_prompt", "operator_summary", "reasoning_note"],
+  "properties": {
+    "continue_session": { "type": "boolean" },
+    "next_prompt": { "type": "string" },
+    "operator_summary": { "type": "string" },
+    "reasoning_note": { "type": "string" }
+  }
+}
+EOF
+}
+
+hook_build_auto_prompt_request() {
+  local session_file="$1"
+  local initial_prompt="$2"
+  local current_prompt="$3"
+  local last_msg="$4"
+  local turn="$5"
+  local total="$6"
+  local fallback_prompt="$7"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$session_file" "$initial_prompt" "$current_prompt" "$last_msg" "$turn" "$total" "$fallback_prompt" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+session_file, initial_prompt, current_prompt, last_msg, turn, total, fallback_prompt = sys.argv[1:]
+
+
+def flatten_text(value):
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(" ".join(text.split()))
+        return " ".join(parts)
+    return ""
+
+
+recent_messages = []
+session_path = Path(session_file) if session_file else None
+if session_path and session_path.exists():
+    for raw_line in session_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            payload = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("type") != "event_msg":
+            continue
+        body = payload.get("payload")
+        if not isinstance(body, dict):
+            continue
+        role = body.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        text = flatten_text(body.get("content"))
+        if text:
+            recent_messages.append({"role": role, "text": text})
+
+context = {
+    "initial_goal": " ".join(initial_prompt.split()),
+    "current_prompt": " ".join(current_prompt.split()),
+    "latest_assistant_message": " ".join(last_msg.split()),
+    "turn": int(turn),
+    "budget_total": int(total),
+    "remaining_after_this_turn": max(int(total) - int(turn), 0),
+    "fallback_prompt": " ".join(fallback_prompt.split()),
+    "recent_messages": recent_messages[-6:],
+}
+
+print(
+    "\n".join(
+        [
+            "<task>",
+            "Generate the next prompt for a Codex headless resume loop.",
+            "Return JSON only. The response must match the provided schema exactly.",
+            "",
+            "Rules:",
+            "- Continue the same task instead of restarting it.",
+            "- Avoid meta chatter and supervision language.",
+            "- If the task already looks complete, or no safe next step is obvious, set continue_session to false and next_prompt to an empty string.",
+            "- If continue_session is true, next_prompt must be a short actionable user prompt for the next resume step.",
+            "- operator_summary should be one concise operator-facing sentence.",
+            "- reasoning_note should be one short internal note.",
+            "",
+            "Context JSON:",
+            json.dumps(context, ensure_ascii=False, indent=2),
+            "</task>",
+        ]
+    ).strip()
+)
+PY
+}
+
+hook_normalize_auto_prompt_result() {
+  local raw_text="$1"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$raw_text" <<'PY'
+import json
+import sys
+
+
+def compact(value):
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
+try:
+    payload = json.loads(sys.argv[1])
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"invalid_json:{exc}")
+
+if not isinstance(payload, dict):
+    raise SystemExit("not_object")
+
+continue_session = payload.get("continue_session")
+if not isinstance(continue_session, bool):
+    raise SystemExit("invalid_continue_session")
+
+next_prompt = compact(payload.get("next_prompt", ""))
+operator_summary = compact(payload.get("operator_summary", ""))
+reasoning_note = compact(payload.get("reasoning_note", ""))
+
+if continue_session and not next_prompt:
+    raise SystemExit("missing_next_prompt")
+
+if not continue_session:
+    next_prompt = ""
+
+print(
+    json.dumps(
+        {
+            "continue_session": continue_session,
+            "next_prompt": next_prompt,
+            "operator_summary": operator_summary,
+            "reasoning_note": reasoning_note,
+        },
+        ensure_ascii=False,
+    )
+)
+PY
+}
+
+hook_read_auto_prompt_decision() {
+  local payload_json="$1"
+  local continue_var_name="$2"
+  local next_prompt_var_name="$3"
+  local operator_summary_var_name="$4"
+  local python_bin=""
+  local -a fields=()
+  python_bin="$(hook_python_bin)"
+
+  mapfile -t fields < <("$python_bin" - "$payload_json" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+
+
+def render(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return ""
+
+
+print(render(payload.get("continue_session")))
+print(render(payload.get("next_prompt")))
+print(render(payload.get("operator_summary")))
+PY
+)
+
+  printf -v "$continue_var_name" '%s' "${fields[0]:-}"
+  printf -v "$next_prompt_var_name" '%s' "${fields[1]:-}"
+  printf -v "$operator_summary_var_name" '%s' "${fields[2]:-}"
+}
+
+hook_generate_auto_prompt_result() {
+  local session_id="$1"
+  local initial_prompt="$2"
+  local current_prompt="$3"
+  local last_msg="$4"
+  local turn="$5"
+  local total="$6"
+  local tmpdir="$7"
+  local project_root="${hook_run_project_root:-$PWD}"
+  local session_file=""
+  local schema_path="$tmpdir/auto-prompt-schema.json"
+  local output_path="$tmpdir/auto-prompt-turn-${turn}.json"
+  local prompt_text=""
+  local raw_output=""
+  local normalized_output=""
+  local -a command=()
+
+  session_file="$(hook_resolve_session_file "$session_id" || true)"
+  hook_write_auto_prompt_schema "$schema_path"
+  prompt_text="$(hook_build_auto_prompt_request "$session_file" "$initial_prompt" "$current_prompt" "$last_msg" "$turn" "$total" "$hook_prompt")"
+  command=(
+    "$codex_bin"
+    -c "$config_arg"
+    exec
+    --json
+    --ephemeral
+    --skip-git-repo-check
+    -C "$project_root"
+    -s read-only
+    --dangerously-bypass-approvals-and-sandbox
+    --output-schema "$schema_path"
+    -o "$output_path"
+    -
+  )
+  if command -v timeout >/dev/null 2>&1; then
+    command=(timeout 120 "${command[@]}")
+  fi
+
+  if ! printf '%s' "$prompt_text" | "${command[@]}" >/dev/null 2>&1; then
+    return 1
+  fi
+  [[ -f "$output_path" ]] || return 1
+
+  raw_output="$(<"$output_path")"
+  normalized_output="$(hook_normalize_auto_prompt_result "$raw_output" 2>/dev/null || true)"
+  [[ -n "$normalized_output" ]] || return 1
+  printf '%s' "$normalized_output"
 }
 
 hook_extract_intent_text() {
@@ -1982,6 +2567,137 @@ hook_extract_intent_text() {
   fi
 }
 
+hook_build_last_message_summary_prompt() {
+  local last_msg="$1"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$last_msg" <<'PY'
+import sys
+
+source_message = " ".join(sys.argv[1].split())[:1200]
+print(
+    "\n".join(
+        [
+            "<task>",
+            "Marker: CDX_WP_LAST_MESSAGE_RU3_SUMMARY",
+            "Compress the source assistant message into Russian bullets for a Mattermost stop notification.",
+            "Preserve concrete meaning. Remove filler.",
+            "",
+            "Output contract:",
+            "- exactly 3 lines",
+            "- each line starts with '- '",
+            "- each bullet body contains at most 3 words",
+            "- Russian only",
+            "- no intro or outro",
+            "",
+            "Source assistant message:",
+            "<<<",
+            source_message,
+            ">>>",
+            "</task>",
+        ]
+    ).strip()
+)
+PY
+}
+
+hook_normalize_ru3_summary() {
+  local summary_text="$1"
+  local python_bin=""
+  python_bin="$(hook_python_bin)"
+
+  "$python_bin" - "$summary_text" <<'PY'
+import re
+import sys
+
+lines = [line.strip() for line in sys.argv[1].splitlines() if line.strip()]
+if len(lines) != 3:
+    raise SystemExit(1)
+
+bullets = []
+for line in lines:
+    cleaned = re.sub(r"^\s*(?:[-*•]+|\d+[.)])\s*", "", line)
+    cleaned = " ".join(cleaned.split())
+    words = cleaned.split()
+    if not words:
+        raise SystemExit(1)
+    bullets.append(f"- {' '.join(words[:3])}")
+
+normalized = "\n".join(bullets)
+if not re.search(r"[А-Яа-яЁё]", normalized):
+    raise SystemExit(1)
+
+print(normalized)
+PY
+}
+
+hook_summarize_last_message_ru3() {
+  local last_msg="$1"
+  local prompt_text=""
+  local summary_text=""
+  local normalized_summary=""
+  local tmpdir=""
+  local output_path=""
+  local project_root="${hook_run_project_root:-$PWD}"
+  local -a command=()
+
+  [[ -n "$last_msg" ]] || return 0
+
+  prompt_text="$(hook_build_last_message_summary_prompt "$last_msg")"
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/codex-wp-lastmsg-XXXXXX")" || return 0
+  output_path="$tmpdir/summary.txt"
+  command=(
+    "$codex_bin"
+    -c "$config_arg"
+    exec
+    --json
+    --ephemeral
+    --skip-git-repo-check
+    -C "$project_root"
+    -s read-only
+    --dangerously-bypass-approvals-and-sandbox
+    -o "$output_path"
+    -
+  )
+  if command -v timeout >/dev/null 2>&1; then
+    command=(timeout 90 "${command[@]}")
+  fi
+
+  if printf '%s' "$prompt_text" | "${command[@]}" >/dev/null 2>&1; then
+    if [[ -f "$output_path" ]]; then
+      summary_text="$(<"$output_path")"
+    fi
+    normalized_summary="$(hook_normalize_ru3_summary "$summary_text" 2>/dev/null || true)"
+  fi
+
+  rm -rf "$tmpdir"
+  if [[ -n "$normalized_summary" ]]; then
+    printf '%s' "$normalized_summary"
+  fi
+}
+
+hook_format_last_message_block() {
+  local transport="$1"
+  local last_msg="${2:-}"
+  local summary_text=""
+
+  if [[ -z "$last_msg" ]]; then
+    printf '%s' "💬 —"
+    return 0
+  fi
+
+  if [[ "$transport" == "mattermost" && "$hook_last_message_format" == "ru3" ]]; then
+    summary_text="$(hook_summarize_last_message_ru3 "$last_msg" || true)"
+    if [[ -n "$summary_text" ]]; then
+      printf '💬\n%s' "$summary_text"
+      return 0
+    fi
+  fi
+
+  printf '💬 %s' "$last_msg"
+}
+
 hook_send_notification() {
   local message="$1"
   local -a command=(t2me send)
@@ -1999,6 +2715,53 @@ hook_send_notification() {
   return 0
 }
 
+hook_resolve_mattermost_bin() {
+  local candidate="${MATTERMOST_TO_ME_BIN:-/home/pets/TOOLS/mattermost_to_me_cli/mattermost_to_me}"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  command -v mattermost_to_me || true
+}
+
+hook_send_mattermost() {
+  local message="$1"
+  local mm_bin=""
+  local -a env_args=()
+
+  mm_bin="$(hook_resolve_mattermost_bin)"
+  if [[ -z "$mm_bin" ]]; then
+    printf '%s\n' "codex_wp: hook-loop: mattermost_to_me not found. Set MATTERMOST_TO_ME_BIN or install mattermost_to_me_cli." >&2
+    return 1
+  fi
+
+  if [[ -f "/home/pets/TOOLS/mattermost_to_me_cli/config/credentials.env" ]]; then
+    env_args+=("MATTERMOST_TO_ME_ENV_PATH=/home/pets/TOOLS/mattermost_to_me_cli/config/credentials.env")
+  fi
+  if [[ -d "/home/pets/TOOLS/mattermost_to_me_cli/data" ]]; then
+    env_args+=("MATTERMOST_TO_ME_CACHE_PATH=/home/pets/TOOLS/mattermost_to_me_cli/data/runtime.json")
+  fi
+
+  if ! env "${env_args[@]}" "$mm_bin" --only mattermost "$message" >/dev/null 2>&1; then
+    printf '%s\n' "codex_wp: hook-loop: mattermost_to_me send failed." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+hook_send_mattermost_with_telegram_fallback() {
+  local mattermost_message="$1"
+  local telegram_message="$2"
+
+  if hook_send_mattermost "$mattermost_message"; then
+    return 0
+  fi
+
+  printf '%s\n' "codex_wp: hook-loop: falling back to t2me after mattermost failure." >&2
+  hook_send_notification "$telegram_message"
+}
+
 hook_emit_manager_event() {
   local event="$1"
   local train_id="$2"
@@ -2013,7 +2776,7 @@ hook_emit_manager_event() {
   local supervision=""
 
   python_bin="$(hook_python_bin)"
-  project_name="$(basename "$PWD")"
+  project_name="$(basename "${hook_run_project_root:-$PWD}")"
   supervision="$(hook_effective_supervision)"
 
   "$python_bin" - "$event" "$train_id" "$session_id" "$turn" "$total" "$project_name" "$last_msg" "$intent_text" "$failure_text" "$supervision" <<'PY'
@@ -2053,7 +2816,11 @@ hook_dispatch_delivery() {
   local last_msg="${6:-}"
   local intent_text="${7:-}"
   local failure_text="${8:-}"
-  local notify_text=""
+  local next_prompt="${9:-}"
+  local next_prompt_source="${10:-}"
+  local stop_reason="${11:-}"
+  local telegram_text=""
+  local mattermost_text=""
 
   if [[ "$hook_delivery" == "manager" ]]; then
     hook_emit_manager_event "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "$failure_text"
@@ -2061,11 +2828,25 @@ hook_dispatch_delivery() {
   fi
 
   if [[ "$event" == "error" ]]; then
-    notify_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$total" "$failure_text" "$last_msg")"
+    telegram_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$total" "$failure_text" "$last_msg" "telegram")"
+    mattermost_text="$(hook_build_error_notification "$train_id" "$session_id" "$turn" "$total" "$failure_text" "$last_msg" "mattermost")"
   else
-    notify_text="$(hook_build_notification "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text")"
+    telegram_text="$(hook_build_notification "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "telegram" "$next_prompt" "$next_prompt_source" "$stop_reason")"
+    mattermost_text="$(hook_build_notification "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "mattermost" "$next_prompt" "$next_prompt_source" "$stop_reason")"
   fi
-  hook_send_notification "$notify_text"
+
+  case "$hook_delivery" in
+    telegram)
+      hook_send_notification "$telegram_text" || true
+      ;;
+    mattermost)
+      hook_send_mattermost_with_telegram_fallback "$mattermost_text" "$telegram_text" || true
+      ;;
+    both)
+      hook_send_notification "$telegram_text" || true
+      hook_send_mattermost "$mattermost_text" || true
+      ;;
+  esac
 }
 
 hook_generate_train_id() {
@@ -2084,49 +2865,68 @@ PY
   printf 'TRAIN-%s-%s\n' "$timestamp" "$suffix"
 }
 
+hook_preview_text() {
+  local raw_text="${1:-}"
+  local normalized="${raw_text//$'\n'/ }"
+  normalized="${normalized//$'\r'/ }"
+  normalized="${normalized//$'\t'/ }"
+  normalized="${normalized#"${normalized%%[![:space:]]*}"}"
+  normalized="${normalized%"${normalized##*[![:space:]]}"}"
+  printf '%s' "${normalized:0:120}"
+}
+
 hook_build_notification() {
-  local train_id="$1"
-  local session_id="$2"
-  local turn="$3"
-  local total="$4"
-  local last_msg="$5"
-  local intent_text="${6:-}"
+  local event="$1"
+  local train_id="$2"
+  local session_id="$3"
+  local turn="$4"
+  local total="$5"
+  local last_msg="$6"
+  local intent_text="${7:-}"
+  local transport="${8:-telegram}"
+  local next_prompt="${9:-}"
+  local next_prompt_source="${10:-}"
+  local stop_reason="${11:-}"
   local header=""
   local footer=""
   local bar=""
   local project_name=""
-  local resume_preview=""
   local message=""
+  local msg_block=""
+  local next_prompt_preview=""
 
-  if (( turn < total )); then
-    header="🟡 Codex Exec → Resuming"
-    resume_preview="${hook_prompt//$'\n'/ }"
-    resume_preview="${resume_preview//$'\r'/ }"
-    footer="▶ resume: ${resume_preview:0:120}"
+  if [[ "$event" == "stop" ]]; then
+    header="🟡 Codex Exec Paused -> Continuing"
+    next_prompt_preview="$(hook_preview_text "$next_prompt")"
+    if [[ -n "$next_prompt_source" ]]; then
+      footer="▶ next prompt (${next_prompt_source}): ${next_prompt_preview}"
+    else
+      footer="▶ next prompt: ${next_prompt_preview}"
+    fi
   else
-    header="🏁 Codex Exec Complete"
-    footer="✅ all ${total} iterations complete"
+    header="🏁 Codex Exec Finished"
+    if [[ -n "$stop_reason" ]]; then
+      footer="✅ finished: $stop_reason"
+    else
+      footer="✅ completed all ${total} steps"
+    fi
   fi
 
   bar="$(hook_progress_bar "$turn" "$total")"
-  project_name="$(basename "$PWD")"
+  project_name="$(basename "${hook_run_project_root:-$PWD}")"
+  msg_block="$(hook_format_last_message_block "$transport" "$last_msg")"
 
-  if [[ -z "$last_msg" ]]; then
-    last_msg="—"
-  fi
-
-  message="$(printf '%s\n\n🚆🪪🔟 %s\n🚃 wagon %s/%s\n📁 %s\n🔄 %s · #%03d\n\n📊 %s/%s  %s\n\n💬 %s' \
+  message="$(printf '%s\n\n📁 Project: %s\n🪪 Run ID: %s\n🔁 Step: %s/%s\n🆔 Session: %s\n\n📊 Progress: %s/%s  %s\n\n%s' \
     "$header" \
+    "$project_name" \
     "$train_id" \
     "$turn" \
     "$total" \
-    "$project_name" \
     "$session_id" \
-    "$turn" \
     "$turn" \
     "$total" \
     "$bar" \
-    "$last_msg")"
+    "$msg_block")"
 
   if [[ -n "$intent_text" ]]; then
     message+=$'\n\n'"$intent_text"
@@ -2143,29 +2943,27 @@ hook_build_error_notification() {
   local total="$4"
   local failure_text="$5"
   local last_msg="$6"
+  local transport="${7:-telegram}"
   local bar=""
   local project_name=""
   local message=""
+  local msg_block=""
 
   bar="$(hook_progress_bar "$turn" "$total")"
-  project_name="$(basename "$PWD")"
+  project_name="$(basename "${hook_run_project_root:-$PWD}")"
+  msg_block="$(hook_format_last_message_block "$transport" "$last_msg")"
 
-  if [[ -z "$last_msg" ]]; then
-    last_msg="—"
-  fi
-
-  message="$(printf '🔴 Codex Exec FAILED\n\n🚆🪪🔟 %s\n🚃 wagon %s/%s\n📁 %s\n🔄 %s · #%03d\n\n📊 %s/%s  %s\n\n%s\n💬 %s\n\n🛑 loop aborted at iteration %s of %s' \
+  message="$(printf '🔴 Codex Exec Failed\n\n📁 Project: %s\n🪪 Run ID: %s\n🔁 Step: %s/%s\n🆔 Session: %s\n\n📊 Progress: %s/%s  %s\n\n%s\n%s\n\n🛑 stopped at step %s of %s' \
+    "$project_name" \
     "$train_id" \
     "$turn" \
     "$total" \
-    "$project_name" \
     "$session_id" \
-    "$turn" \
     "$turn" \
     "$total" \
     "$bar" \
     "$failure_text" \
-    "$last_msg" \
+    "$msg_block" \
     "$turn" \
     "$total")"
   printf '%s' "$message"
@@ -2191,10 +2989,21 @@ run_headless_hook_loop() {
   local last_msg=""
   local intent_text=""
   local failure_text=""
+  local initial_prompt=""
+  local current_prompt=""
+  local resolved_next_prompt=""
+  local next_prompt_source=""
+  local auto_prompt_json=""
+  local auto_continue=""
+  local auto_next_prompt=""
+  local auto_operator_summary=""
+  local stop_reason=""
   local exit_code=0
   local turn=0
 
   hook_require_headless_preconditions "${initial_args[@]}"
+  initial_prompt="$(hook_extract_exec_prompt "${initial_args[@]}")"
+  current_prompt="$initial_prompt"
 
   if array_has --skip-git-repo-check "${initial_args[@]}"; then
     skip_git_repo_check=1
@@ -2217,7 +3026,7 @@ run_headless_hook_loop() {
       if (( skip_git_repo_check )); then
         resume_args+=(--skip-git-repo-check)
       fi
-      resume_args+=("$session_id" "$hook_prompt")
+      resume_args+=("$session_id" "$current_prompt")
       if ! hook_run_codex_stream "$output_file" "${resume_args[@]}"; then
         exit_code=${PIPESTATUS[0]}
       fi
@@ -2257,10 +3066,56 @@ run_headless_hook_loop() {
       intent_text="$(hook_extract_intent_text "$session_id" || true)"
     fi
 
+    resolved_next_prompt=""
+    next_prompt_source=""
+    stop_reason=""
+    if (( turn < hook_times )); then
+      case "$hook_prompt_mode" in
+        static)
+          resolved_next_prompt="$hook_prompt"
+          next_prompt_source="static"
+          ;;
+        auto|hybrid)
+          auto_prompt_json="$(hook_generate_auto_prompt_result "$session_id" "$initial_prompt" "$current_prompt" "$last_msg" "$turn" "$hook_times" "$tmpdir" || true)"
+          if [[ -z "$auto_prompt_json" ]]; then
+            if [[ "$hook_prompt_mode" != "hybrid" ]]; then
+              failure_text="❌ failed to generate the next prompt in auto mode"
+              hook_dispatch_delivery "error" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "" "$failure_text" || true
+              rm -rf "$tmpdir"
+              return 1
+            fi
+            resolved_next_prompt="$hook_prompt"
+            next_prompt_source="fallback"
+          else
+            hook_read_auto_prompt_decision "$auto_prompt_json" auto_continue auto_next_prompt auto_operator_summary
+            if [[ "$auto_continue" == "true" ]]; then
+              resolved_next_prompt="$auto_next_prompt"
+              next_prompt_source="auto"
+            elif (( hook_auto_stop_on_complete )); then
+              stop_reason="${auto_operator_summary:-auto prompt marked the task complete}"
+              hook_dispatch_delivery "complete" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" "" "" "$stop_reason" || true
+              rm -rf "$tmpdir"
+              return 0
+            elif [[ "$hook_prompt_mode" == "hybrid" ]]; then
+              resolved_next_prompt="$hook_prompt"
+              next_prompt_source="fallback"
+            else
+              failure_text="❌ auto prompt marked the task complete, but --hook-auto-stop-on-complete is disabled"
+              hook_dispatch_delivery "error" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "" "$failure_text" || true
+              rm -rf "$tmpdir"
+              return 1
+            fi
+          fi
+          ;;
+      esac
+    fi
+
     if (( turn == hook_times )); then
-      hook_dispatch_delivery "complete" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" || true
+      stop_reason="hook budget exhausted"
+      hook_dispatch_delivery "complete" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" "" "" "$stop_reason" || true
     else
-      hook_dispatch_delivery "stop" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" || true
+      hook_dispatch_delivery "stop" "$train_id" "$session_id" "$turn" "$hook_times" "$last_msg" "$intent_text" "" "$resolved_next_prompt" "$next_prompt_source" "" || true
+      current_prompt="$resolved_next_prompt"
     fi
   done
 
@@ -2283,6 +3138,8 @@ base_url="${CLIPROXY_BASE_URL:-}"
 [[ -n "$base_url" ]] || die "codex_wp: missing CLIPROXY_BASE_URL from proxy setup."
 
 config_arg="openai_base_url=\"$base_url\""
+trap 'hook_cleanup_on_exit' EXIT
+hook_run_project_root="$(hook_resolve_project_root_from_args "$@")"
 
 # ── Hook activation ──────────────────────────────────────────────────────────
 if [[ -n "$hook_mode" ]]; then
@@ -2291,18 +3148,32 @@ if [[ -n "$hook_mode" ]]; then
     exit $?
   fi
 
-  if [[ "$hook_delivery" != "telegram" ]]; then
-    if (( hook_supervision_explicit )); then
-      die "codex_wp: --hook-supervision is only supported for headless 'exec --json' hook runs." 2
-    fi
-    die "codex_wp: --hook-delivery manager is only supported for headless 'exec --json' hook runs." 2
+  if [[ "$hook_prompt_mode" != "static" ]]; then
+    die "codex_wp: --hook-prompt-mode auto/hybrid is only supported for headless 'exec --json' hook runs." 2
+  fi
+  if (( hook_auto_stop_on_complete )); then
+    die "codex_wp: --hook-auto-stop-on-complete is only supported for headless 'exec --json' hook runs." 2
   fi
 
-  hook_cli="$(command -v cdx-hook || true)"
+  if (( hook_supervision_explicit )); then
+    die "codex_wp: --hook-supervision is only supported for headless 'exec --json' hook runs." 2
+  fi
+  if [[ "$hook_delivery" == "manager" ]]; then
+    die "codex_wp: --hook-delivery $hook_delivery is only supported for headless 'exec --json' hook runs." 2
+  fi
+
+  hook_cli="$(hook_resolve_cli)"
   [[ -n "$hook_cli" && -x "$hook_cli" ]] || \
     die "codex_wp: cdx-hook not found. Install cdx_hooks_cli." 127
 
-  hook_args=(stop on --project "$PWD" --mode resume --ask "$hook_prompt" --times "$hook_times")
+  hook_disable_project_managed_stop "$hook_run_project_root" || \
+    die "codex_wp: failed to reset existing managed stop hook for $hook_run_project_root." 2
+
+  hook_args=(stop on --project "$hook_run_project_root" --mode resume --ask "$hook_prompt" --times "$hook_times")
+  hook_args+=(--delivery "$hook_delivery")
+  if (( hook_last_message_format_explicit )) || [[ "$hook_last_message_format" != "raw" ]]; then
+    hook_args+=(--last-message-format "$hook_last_message_format")
+  fi
   if [[ -n "$hook_target" ]]; then
     hook_args+=(--target "$hook_target")
   fi
@@ -2312,12 +3183,36 @@ if [[ -n "$hook_mode" ]]; then
 
   printf 'codex_wp: activating hook → %s %s\n' "$hook_cli" "${hook_args[*]}"
   "$hook_cli" "${hook_args[@]}" || die "codex_wp: cdx-hook activation failed." 2
+  hook_cleanup_after_run=1
+  hook_cleanup_project_root="$hook_run_project_root"
+elif (( ! help_requested )) && hook_is_interactive_mode "$@"; then
+  hook_disable_project_managed_stop "$hook_run_project_root" || \
+    die "codex_wp: failed to clear managed stop hook for $hook_run_project_root." 2
 fi
 
 # --no-alt-screen: preserve scrollback inside zellij (codex TUI uses alternate screen by default)
 codex_flags=(--dangerously-bypass-approvals-and-sandbox)
 if [[ -n "${ZELLIJ:-}" ]]; then
   codex_flags+=(--no-alt-screen)
+fi
+
+if (( hook_cleanup_after_run )); then
+  cleanup_status=0
+  if env -u OPENAI_BASE_URL -u OPENAI_API_BASE \
+    "$codex_bin" -c "$config_arg" "${codex_flags[@]}" "$@"; then
+    codex_status=0
+  else
+    codex_status=$?
+  fi
+  if ! hook_disable_project_managed_stop "$hook_cleanup_project_root"; then
+    cleanup_status=$?
+    printf '%s\n' "codex_wp: failed to clean temporary stop hook for $hook_cleanup_project_root." >&2
+  fi
+  hook_cleanup_after_run=0
+  if (( cleanup_status != 0 && codex_status == 0 )); then
+    exit "$cleanup_status"
+  fi
+  exit "$codex_status"
 fi
 
 exec env -u OPENAI_BASE_URL -u OPENAI_API_BASE \

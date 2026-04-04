@@ -65,7 +65,11 @@ cdx stop
 ## codex_wp Supervision
 
 - primary human-facing API: `bin/codex_wp ... --hook-supervision observation|management`
-- low-level transport override: `bin/codex_wp ... --hook-delivery telegram|manager`
+- interactive `bin/codex_wp ... --hook stop` installs a temporary Stop hook for that run only and cleans it after exit
+- plain interactive `bin/codex_wp ...` clears any managed Stop hook before launch so the default session stays hook-free
+- default stop-hook transport: Mattermost for `bin/codex_wp ... --hook stop`
+- low-level transport override: `bin/codex_wp ... --hook-delivery mattermost|telegram|both|manager`
+- Mattermost last-message formatter: `bin/codex_wp ... --hook-last-message-format raw|ru3`
 - canonical contract and examples: `docs/CODEX_WP_SUPERVISION.md`
 
 ## Runtime Files

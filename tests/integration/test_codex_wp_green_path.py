@@ -130,6 +130,13 @@ def parse_workdir(argv: list[str]) -> str | None:
     return None
 
 
+def parse_output_last_message(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg in {{"-o", "--output-last-message"}} and index + 1 < len(argv):
+            return argv[index + 1]
+    return None
+
+
 def final_text(prompt: str) -> str:
     if "Use $auto-commit." in prompt:
         return "Auto-commit shortcut OK"
@@ -256,6 +263,13 @@ def fail(message: str, code: int = 2) -> None:
 def parse_workdir(argv: list[str]) -> str | None:
     for index, arg in enumerate(argv):
         if arg == "-C" and index + 1 < len(argv):
+            return argv[index + 1]
+    return None
+
+
+def parse_output_last_message(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg in {{"-o", "--output-last-message"}} and index + 1 < len(argv):
             return argv[index + 1]
     return None
 
@@ -391,21 +405,47 @@ def main() -> int:
     if "exec" not in argv and "e" not in argv:
         prompt = argv[-1] if argv and not argv[-1].startswith("-") else ""
         append_log({{"mode": "interactive", "argv": argv, "prompt": prompt}})
+        interactive_exit = int(os.environ.get("FAKE_HOOK_CODEX_INTERACTIVE_EXIT", "0"))
+        if interactive_exit != 0:
+            fail(f"forced interactive failure {{interactive_exit}}", code=interactive_exit)
         if prompt:
             print("Interactive OK")
         return 0
 
     json_mode = "--json" in argv
+    output_last_message = parse_output_last_message(argv)
+    prompt = sys.stdin.read() if argv and argv[-1] == "-" else argv[-1]
+    if output_last_message:
+        is_auto_prompt = "--output-schema" in argv
+        mode = "auto_prompt" if is_auto_prompt else "summary"
+        append_log({{"mode": mode, "argv": argv, "prompt": prompt}})
+        exit_var = "FAKE_HOOK_CODEX_AUTO_PROMPT_EXIT" if is_auto_prompt else "FAKE_HOOK_CODEX_SUMMARY_EXIT"
+        output_var = "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT" if is_auto_prompt else "FAKE_HOOK_CODEX_SUMMARY_TEXT"
+        step_exit = int(os.environ.get(exit_var, "0"))
+        if step_exit != 0:
+            fail(f"forced {{mode}} failure {{step_exit}}", code=step_exit)
+        Path(output_last_message).write_text(
+            os.environ.get(
+                output_var,
+                (
+                    '{{"continue_session": true, "next_prompt": "Auto prompt next step", '
+                    '"operator_summary": "Continue with the next concrete step.", '
+                    '"reasoning_note": "Default fake auto prompt."}}'
+                    if is_auto_prompt
+                    else "- краткий план\\n- второй шаг\\n- финал здесь"
+                ),
+            ),
+            encoding="utf-8",
+        )
+        return 0
     if not json_mode:
         fail("expected --json")
 
     is_resume = "resume" in argv
     if is_resume:
         session_id = argv[-2]
-        prompt = argv[-1]
     else:
         session_id = os.environ.get("FAKE_HOOK_CODEX_SESSION_ID", "fake-hook-session-0001")
-        prompt = argv[-1]
 
     session_file = session_file_for(home, session_id)
     turn = next_turn_number(session_file)
@@ -454,9 +494,129 @@ import os
 import sys
 from pathlib import Path
 
+OWNED_CONFIG_TOML = "# Managed by cdx-hook. Remove this file only if you no longer need Codex hooks.\\n[features]\\ncodex_hooks = true\\n"
+
+
+def parse_flag(argv: list[str], flag: str) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg == flag and index + 1 < len(argv):
+            return argv[index + 1]
+    return None
+
+
+def load_hooks(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {{"hooks": {{}}}}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {{"hooks": {{}}}}
+    if not isinstance(payload, dict):
+        return {{"hooks": {{}}}}
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        payload["hooks"] = {{}}
+    return payload
+
+
+def save_hooks(path: Path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+
+
 log_path = Path(os.environ["FAKE_CDX_HOOK_LOG_PATH"])
 with log_path.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+
+argv = sys.argv[1:]
+project_arg = parse_flag(argv, "--project")
+if not project_arg:
+    raise SystemExit(0)
+
+project = Path(project_arg)
+codex_dir = project / ".codex"
+hooks_dir = codex_dir / "hooks"
+config_path = codex_dir / "config.toml"
+hooks_path = codex_dir / "hooks.json"
+settings_path = codex_dir / "cdx-hook.json"
+state_path = codex_dir / "cdx-hook-state.json"
+wrapper_path = hooks_dir / "cdx_hook_stop_handler.py"
+
+if argv[:2] == ["stop", "on"]:
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    owned_config_toml = False
+    if not config_path.exists():
+        config_path.write_text(OWNED_CONFIG_TOML, encoding="utf-8")
+        owned_config_toml = True
+
+    settings = {{
+        "version": 1,
+        "project": str(project.resolve()),
+        "mode": parse_flag(argv, "--mode") or "notify",
+        "ask": parse_flag(argv, "--ask"),
+        "times": int(parse_flag(argv, "--times") or "0") or None,
+        "target": parse_flag(argv, "--target"),
+        "delivery": parse_flag(argv, "--delivery") or "telegram",
+        "last_message_format": parse_flag(argv, "--last-message-format") or "raw",
+        "extract_intent": "--extract-intent" in argv,
+        "review_gate": False,
+        "handler_module": "cdx_hooks_cli.hooks.stop_handler",
+        "python_executable": sys.executable,
+        "owned_config_toml": owned_config_toml,
+        "created_at": "2026-04-03T00:00:00+00:00",
+    }}
+    settings_path.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    wrapper_path.write_text("# fake cdx hook wrapper\\n", encoding="utf-8")
+
+    payload = load_hooks(hooks_path)
+    hooks = payload.setdefault("hooks", {{}})
+    stop_groups = hooks.get("Stop")
+    if not isinstance(stop_groups, list):
+        stop_groups = []
+    stop_groups = [
+        group
+        for group in stop_groups
+        if not (isinstance(group, dict) and group.get("_managed_by") == "cdx-hook")
+    ]
+    stop_groups.append(
+        {{
+            "_managed_by": "cdx-hook",
+            "hooks": [
+                {{
+                    "type": "command",
+                    "command": f"python {{wrapper_path}} --config {{settings_path}}",
+                    "statusMessage": "Running cdx-hook Stop handler",
+                    "timeout": 20,
+                }}
+            ],
+        }}
+    )
+    hooks["Stop"] = stop_groups
+    save_hooks(hooks_path, payload)
+    raise SystemExit(0)
+
+if argv[:2] == ["stop", "off"]:
+    payload = load_hooks(hooks_path)
+    hooks = payload.get("hooks")
+    if isinstance(hooks, dict):
+        stop_groups = hooks.get("Stop")
+        if isinstance(stop_groups, list):
+            filtered = [
+                group
+                for group in stop_groups
+                if not (isinstance(group, dict) and group.get("_managed_by") == "cdx-hook")
+            ]
+            if filtered:
+                hooks["Stop"] = filtered
+            else:
+                hooks.pop("Stop", None)
+            save_hooks(hooks_path, payload)
+
+    for path in (settings_path, state_path, wrapper_path):
+        if path.exists():
+            path.unlink()
+    if config_path.exists() and config_path.read_text(encoding="utf-8") == OWNED_CONFIG_TOML:
+        config_path.unlink()
+    raise SystemExit(0)
 """
     return _write_executable(tmp_path / "cdx-hook", body)
 
@@ -473,6 +633,22 @@ with log_path.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
 """
     return _write_executable(tmp_path / "t2me", body)
+
+
+def _write_fake_mattermost_to_me(tmp_path: Path) -> Path:
+    body = f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+log_path = Path(os.environ["FAKE_MATTERMOST_LOG_PATH"])
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+
+raise SystemExit(int(os.environ.get("FAKE_MATTERMOST_EXIT", "0")))
+"""
+    return _write_executable(tmp_path / "mattermost_to_me", body)
 
 
 def _write_fake_extract_intent(tmp_path: Path) -> Path:
@@ -733,6 +909,73 @@ def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _hooks_payload(project: Path) -> dict[str, Any]:
+    hooks_path = project / ".codex" / "hooks.json"
+    if not hooks_path.exists():
+        return {"hooks": {}}
+    return json.loads(hooks_path.read_text(encoding="utf-8"))
+
+
+def _stop_groups(project: Path) -> list[dict[str, Any]]:
+    payload = _hooks_payload(project)
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return []
+    stop_groups = hooks.get("Stop")
+    if not isinstance(stop_groups, list):
+        return []
+    return [group for group in stop_groups if isinstance(group, dict)]
+
+
+def _assert_managed_stop_hook_removed(project: Path) -> None:
+    stop_groups = _stop_groups(project)
+    assert all(group.get("_managed_by") != "cdx-hook" for group in stop_groups)
+    codex_dir = project / ".codex"
+    assert not (codex_dir / "cdx-hook.json").exists()
+    assert not (codex_dir / "cdx-hook-state.json").exists()
+    assert not (codex_dir / "hooks" / "cdx_hook_stop_handler.py").exists()
+
+
+def _seed_managed_stop_hook(
+    project: Path,
+    hook_bin: Path,
+    hook_log: Path,
+    *,
+    stop_groups: list[dict[str, Any]] | None = None,
+) -> None:
+    codex_dir = project / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    if stop_groups is not None:
+        (codex_dir / "hooks.json").write_text(
+            json.dumps({"hooks": {"Stop": stop_groups}}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    env = os.environ.copy()
+    env["FAKE_CDX_HOOK_LOG_PATH"] = str(hook_log)
+    subprocess.run(
+        [
+            str(hook_bin),
+            "stop",
+            "on",
+            "--project",
+            str(project),
+            "--mode",
+            "resume",
+            "--ask",
+            "resume work",
+            "--times",
+            "2",
+            "--delivery",
+            "mattermost",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+
 def _active_zellij_tab_stdout() -> str:
     return json.dumps(
         [
@@ -851,18 +1094,29 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert (
         "  -S                           run built-in code-simplifier" in result.stdout
     )
+    assert "interactive --hook stop is session-scoped" in result.stdout
+    assert "  --hook-prompt <text>         static resume prompt (required for static; fallback for hybrid)" in result.stdout
     assert "  --hook-times <n>             how many stop events per session (requires --hook stop)" in result.stdout
     assert "  --hook-time <n>              legacy alias for --hook-times" in result.stdout
+    assert "  --hook-max-turns <n>         alias for --hook-times" in result.stdout
+    assert "  --hook-prompt-mode <mode>    next prompt strategy: static|auto|hybrid (default: static)" in result.stdout
+    assert "  --hook-auto-stop-on-complete end early when auto mode says the task is complete" in result.stdout
     assert (
         "  --hook-supervision <mode>    primary supervision API: observation|management"
         in result.stdout
     )
     assert (
-        "  --hook-delivery <mode>       low-level transport override: telegram|manager"
+        "  --hook-delivery <mode>       low-level transport override: mattermost|telegram|both|manager (default: mattermost)"
         in result.stdout
     )
     assert (
-        "  --hook-target <target>       override Telegram target (telegram delivery only)"
+        "  --hook-last-message-format <mode>" in result.stdout
+    )
+    assert (
+        "format last assistant message for Mattermost: raw|ru3" in result.stdout
+    )
+    assert (
+        "  --hook-target <target>       override Telegram target (telegram/both only)"
         in result.stdout
     )
     assert "Proxy companion commands:" in result.stdout
@@ -877,7 +1131,19 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     [
         (
             ["exec", "--json", "hello", "--hook-prompt", "resume"],
-            "--hook-prompt, --hook-times, --hook-target, --hook-delivery, --hook-supervision, and --hook-extract-intent require --hook stop.",
+            "--hook-prompt, --hook-times, --hook-prompt-mode, --hook-auto-stop-on-complete, --hook-target, --hook-delivery, --hook-last-message-format, --hook-supervision, and --hook-extract-intent require --hook stop.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook-last-message-format", "ru3"],
+            "--hook-prompt, --hook-times, --hook-prompt-mode, --hook-auto-stop-on-complete, --hook-target, --hook-delivery, --hook-last-message-format, --hook-supervision, and --hook-extract-intent require --hook stop.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook-prompt-mode", "auto"],
+            "--hook-prompt, --hook-times, --hook-prompt-mode, --hook-auto-stop-on-complete, --hook-target, --hook-delivery, --hook-last-message-format, --hook-supervision, and --hook-extract-intent require --hook stop.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook-auto-stop-on-complete"],
+            "--hook-prompt, --hook-times, --hook-prompt-mode, --hook-auto-stop-on-complete, --hook-target, --hook-delivery, --hook-last-message-format, --hook-supervision, and --hook-extract-intent require --hook stop.",
         ),
         (
             ["exec", "--json", "hello", "--hook", "resume"],
@@ -885,7 +1151,15 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
         ),
         (
             ["exec", "--json", "hello", "--hook", "stop", "--hook-delivery", "email"],
-            "--hook-delivery only supports 'telegram' or 'manager'.",
+            "--hook-delivery only supports 'telegram', 'mattermost', 'both', or 'manager'.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-last-message-format", "wide"],
+            "--hook-last-message-format only supports 'raw' or 'ru3'.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt-mode", "wander"],
+            "--hook-prompt-mode only supports 'static', 'auto', or 'hybrid'.",
         ),
         (
             ["exec", "--json", "hello", "--hook", "stop", "--hook-supervision", "mystery mode"],
@@ -918,8 +1192,36 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
             "--hook stop requires --hook-times.",
         ),
         (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt-mode", "hybrid", "--hook-times", "2"],
+            "--hook-prompt-mode hybrid requires --hook-prompt for fallback.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt-mode", "auto", "--hook-prompt", "resume", "--hook-times", "2"],
+            "--hook-prompt-mode auto does not use --hook-prompt. Remove it or use --hook-prompt-mode hybrid.",
+        ),
+        (
+            ["exec", "--json", "hello", "--hook", "stop", "--hook-auto-stop-on-complete", "--hook-times", "2"],
+            "--hook-auto-stop-on-complete requires --hook-prompt-mode auto or hybrid.",
+        ),
+        (
             ["exec", "--json", "hello", "--hook", "stop", "--hook-prompt", "resume", "--hook-times", "0"],
             "--hook-times must be a positive integer.",
+        ),
+        (
+            [
+                "exec",
+                "--json",
+                "hello",
+                "--hook",
+                "stop",
+                "--hook-prompt",
+                "resume",
+                "--hook-times",
+                "1",
+                "--hook-target",
+                "@ops",
+            ],
+            "--hook-target requires telegram delivery (use telegram or both).",
         ),
         (
             [
@@ -937,7 +1239,7 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
                 "--hook-target",
                 "@ops",
             ],
-            "--hook-target is only supported with --hook-delivery telegram.",
+            "--hook-target is only supported with --hook-delivery telegram or both.",
         ),
         (
             [
@@ -978,6 +1280,14 @@ def test_codex_wp_hook_validation_fails_early(
         (
             ["--hook-supervision", "codex_wp under observation"],
             "--hook-supervision is only supported for headless 'exec --json' hook runs.",
+        ),
+        (
+            ["--hook-prompt-mode", "auto"],
+            "--hook-prompt-mode auto/hybrid is only supported for headless 'exec --json' hook runs.",
+        ),
+        (
+            ["--hook-auto-stop-on-complete"],
+            "--hook-auto-stop-on-complete is only supported for headless 'exec --json' hook runs.",
         ),
     ],
 )
@@ -1111,6 +1421,8 @@ def test_codex_wp_interactive_hook_activation_forwards_expected_args(
         "resume work",
         "--hook-times",
         "2",
+        "--hook-delivery",
+        "both",
         "--hook-target",
         "@ops",
     ]
@@ -1121,16 +1433,220 @@ def test_codex_wp_interactive_hook_activation_forwards_expected_args(
 
     assert result.returncode == 0, result.stderr
     records = _read_jsonl_records(hook_log)
-    assert len(records) == 1
-    argv = list(records[0]["argv"])
-    assert argv[:2] == ["stop", "on"]
-    assert "--project" in argv
-    assert str(project) in argv
-    assert "--mode" in argv and "resume" in argv
-    assert "--ask" in argv and "resume work" in argv
-    assert "--times" in argv and "2" in argv
-    assert "--target" in argv and "@ops" in argv
-    assert ("--extract-intent" in argv) is extract_intent
+    assert len(records) == 2
+    activation_argv = list(records[0]["argv"])
+    cleanup_argv = list(records[1]["argv"])
+    assert activation_argv[:2] == ["stop", "on"]
+    assert "--project" in activation_argv
+    assert str(project) in activation_argv
+    assert "--mode" in activation_argv and "resume" in activation_argv
+    assert "--ask" in activation_argv and "resume work" in activation_argv
+    assert "--times" in activation_argv and "2" in activation_argv
+    assert "--delivery" in activation_argv and "both" in activation_argv
+    assert "--target" in activation_argv and "@ops" in activation_argv
+    assert ("--extract-intent" in activation_argv) is extract_intent
+    assert cleanup_argv[:2] == ["stop", "off"]
+    assert cleanup_argv[-2:] == ["--project", str(project)]
+    _assert_managed_stop_hook_removed(project)
+
+
+def test_codex_wp_interactive_hook_defaults_to_mattermost_delivery(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    hook_log = tmp_path / "cdx-hook.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_cdx_hook(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_CDX_HOOK_LOG_PATH": str(hook_log),
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "hello interactive",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume work",
+            "--hook-times",
+            "2",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    records = _read_jsonl_records(hook_log)
+    assert len(records) == 2
+    activation_argv = list(records[0]["argv"])
+    cleanup_argv = list(records[1]["argv"])
+    assert "--delivery" in activation_argv and "mattermost" in activation_argv
+    assert cleanup_argv[:2] == ["stop", "off"]
+    _assert_managed_stop_hook_removed(project)
+
+
+def test_codex_wp_interactive_hook_forwards_last_message_format(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    hook_log = tmp_path / "cdx-hook.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_cdx_hook(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_CDX_HOOK_LOG_PATH": str(hook_log),
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "hello interactive",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume work",
+            "--hook-times",
+            "2",
+            "--hook-last-message-format",
+            "ru3",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    records = _read_jsonl_records(hook_log)
+    activation_argv = list(records[0]["argv"])
+    assert "--last-message-format" in activation_argv
+    assert "ru3" in activation_argv
+
+
+def test_codex_wp_interactive_hook_cleanup_runs_on_nonzero_exit(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    hook_log = tmp_path / "cdx-hook.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_cdx_hook(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_CDX_HOOK_LOG_PATH": str(hook_log),
+            "FAKE_HOOK_CODEX_INTERACTIVE_EXIT": "7",
+            "HOME": str(tmp_path / "home"),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "hello interactive",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume work",
+            "--hook-times",
+            "2",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 7
+    assert "forced interactive failure 7" in result.stderr
+    records = _read_jsonl_records(hook_log)
+    assert [list(record["argv"][:2]) for record in records] == [
+        ["stop", "on"],
+        ["stop", "off"],
+    ]
+    _assert_managed_stop_hook_removed(project)
+
+
+def test_codex_wp_plain_interactive_run_clears_stale_managed_stop_hook_without_cdx_hook_cli(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    hook_log = tmp_path / "cdx-hook.jsonl"
+    codex_log = tmp_path / "codex.jsonl"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    fake_hook = _write_fake_cdx_hook(tmp_path)
+    user_stop_group = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": "echo keep-user-stop-hook",
+                "timeout": 5,
+            }
+        ]
+    }
+    _seed_managed_stop_hook(project, fake_hook, hook_log, stop_groups=[user_stop_group])
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": "/usr/bin:/bin",
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "HOME": str(home),
+        }
+    )
+
+    result = _run_codex_wp_args(["hello interactive"], env, cwd=project)
+
+    assert result.returncode == 0, result.stderr
+    assert _read_jsonl_records(hook_log) == [
+        {
+            "argv": [
+                "stop",
+                "on",
+                "--project",
+                str(project),
+                "--mode",
+                "resume",
+                "--ask",
+                "resume work",
+                "--times",
+                "2",
+                "--delivery",
+                "mattermost",
+            ]
+        }
+    ]
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 1
+    assert codex_records[0]["mode"] == "interactive"
+    _assert_managed_stop_hook_removed(project)
+    assert _stop_groups(project) == [user_stop_group]
+    assert not (project / ".codex" / "config.toml").exists()
 
 
 def test_codex_wp_headless_hook_loop_runs_and_notifies(
@@ -1176,6 +1692,8 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
             "resume again",
             "--hook-times",
             "3",
+            "--hook-delivery",
+            "telegram",
             "--hook-target",
             "@ops",
             "--hook-extract-intent",
@@ -1200,17 +1718,17 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
     for record in notification_records:
         assert record["argv"][:3] == ["send", "--target", "@ops"]
     messages = [str(record["argv"][-1]) for record in notification_records]
-    assert "🚆🪪🔟 TRAIN-" in messages[0]
-    assert "🚃 wagon 1/3" in messages[0]
-    assert "🚃 wagon 2/3" in messages[1]
-    assert "🚃 wagon 3/3" in messages[2]
-    assert "1/3" in messages[0]
-    assert "2/3" in messages[1]
-    assert "3/3" in messages[2]
+    assert "🪪 Run ID: TRAIN-" in messages[0]
+    assert "🔁 Step: 1/3" in messages[0]
+    assert "🔁 Step: 2/3" in messages[1]
+    assert "🔁 Step: 3/3" in messages[2]
+    assert "📊 Progress: 1/3" in messages[0]
+    assert "📊 Progress: 2/3" in messages[1]
+    assert "📊 Progress: 3/3" in messages[2]
     assert "🧭 Intent" in messages[0]
-    assert "▶ resume: resume again" in messages[0]
-    assert "🏁 Codex Exec Complete" in messages[2]
-    assert "✅ all 3 iterations complete" in messages[2]
+    assert "▶ next prompt (static): resume again" in messages[0]
+    assert "🏁 Codex Exec Finished" in messages[2]
+    assert "✅ finished: hook budget exhausted" in messages[2]
     session_id = next(iter(session_ids))
     for message in messages:
         assert session_id in message
@@ -1231,6 +1749,504 @@ def test_codex_wp_headless_hook_loop_runs_and_notifies(
     assert session_id in session_text
     assert "turn_context" in session_text
     assert not (tmp_path / "cdx-hook.jsonl").exists()
+
+
+def test_codex_wp_headless_hook_auto_mode_generates_next_prompt(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT": (
+                '{"continue_session": true, "next_prompt": "Inspect the remaining edge cases.", '
+                '"operator_summary": "Continue with the next concrete step.", '
+                '"reasoning_note": "Fake auto prompt."}'
+            ),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt-mode",
+            "auto",
+            "--hook-times",
+            "3",
+            "--hook-delivery",
+            "telegram",
+            "--hook-target",
+            "@ops",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    codex_records = _read_jsonl_records(codex_log)
+    assert [record["mode"] for record in codex_records] == [
+        "exec",
+        "auto_prompt",
+        "resume",
+        "auto_prompt",
+        "resume",
+    ]
+    assert codex_records[2]["prompt"] == "Inspect the remaining edge cases."
+    assert codex_records[4]["prompt"] == "Inspect the remaining edge cases."
+
+    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(t2me_log)]
+    assert len(messages) == 3
+    assert "▶ next prompt (auto): Inspect the remaining edge cases." in messages[0]
+    assert "▶ next prompt (auto): Inspect the remaining edge cases." in messages[1]
+    assert "✅ finished: hook budget exhausted" in messages[2]
+
+
+def test_codex_wp_headless_hook_hybrid_mode_falls_back_to_static_prompt(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT": "not valid json",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "fallback resume",
+            "--hook-prompt-mode",
+            "hybrid",
+            "--hook-times",
+            "2",
+            "--hook-delivery",
+            "telegram",
+            "--hook-target",
+            "@ops",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    codex_records = _read_jsonl_records(codex_log)
+    assert [record["mode"] for record in codex_records] == [
+        "exec",
+        "auto_prompt",
+        "resume",
+    ]
+    assert codex_records[2]["prompt"] == "fallback resume"
+
+    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(t2me_log)]
+    assert len(messages) == 2
+    assert "▶ next prompt (fallback): fallback resume" in messages[0]
+    assert "✅ finished: hook budget exhausted" in messages[1]
+
+
+def test_codex_wp_headless_hook_auto_stop_on_complete_exits_early(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT": (
+                '{"continue_session": false, "next_prompt": "", '
+                '"operator_summary": "Task already complete.", '
+                '"reasoning_note": "No further work."}'
+            ),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt-mode",
+            "auto",
+            "--hook-auto-stop-on-complete",
+            "--hook-times",
+            "5",
+            "--hook-delivery",
+            "telegram",
+            "--hook-target",
+            "@ops",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    codex_records = _read_jsonl_records(codex_log)
+    assert [record["mode"] for record in codex_records] == ["exec", "auto_prompt"]
+
+    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(t2me_log)]
+    assert len(messages) == 1
+    assert "🏁 Codex Exec Finished" in messages[0]
+    assert "✅ finished: Task already complete." in messages[0]
+    assert "next prompt" not in messages[0]
+
+
+def test_codex_wp_headless_hook_auto_mode_fails_when_generation_is_invalid(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT": "not valid json",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt-mode",
+            "auto",
+            "--hook-times",
+            "3",
+            "--hook-delivery",
+            "telegram",
+            "--hook-target",
+            "@ops",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 1
+    codex_records = _read_jsonl_records(codex_log)
+    assert [record["mode"] for record in codex_records] == ["exec", "auto_prompt"]
+
+    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(t2me_log)]
+    assert len(messages) == 1
+    assert "🔴 Codex Exec Failed" in messages[0]
+    assert "❌ failed to generate the next prompt in auto mode" in messages[0]
+
+
+def test_codex_wp_headless_hook_loop_defaults_to_mattermost(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+    mattermost_log = tmp_path / "mattermost.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+    fake_mattermost = _write_fake_mattermost_to_me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_MATTERMOST_LOG_PATH": str(mattermost_log),
+            "MATTERMOST_TO_ME_BIN": str(fake_mattermost),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "2",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert len(_read_jsonl_records(codex_log)) == 2
+    assert len(_read_jsonl_records(mattermost_log)) == 2
+    assert _read_jsonl_records(t2me_log) == []
+
+
+def test_codex_wp_headless_hook_ru3_formats_only_mattermost(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+    mattermost_log = tmp_path / "mattermost.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+    fake_mattermost = _write_fake_mattermost_to_me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_MATTERMOST_LOG_PATH": str(mattermost_log),
+            "MATTERMOST_TO_ME_BIN": str(fake_mattermost),
+            "FAKE_HOOK_CODEX_SUMMARY_TEXT": "- краткий план\n- второй шаг\n- финал здесь",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "2",
+            "--hook-delivery",
+            "both",
+            "--hook-target",
+            "@ops",
+            "--hook-last-message-format",
+            "ru3",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 4
+    assert [record["mode"] for record in codex_records] == [
+        "exec",
+        "summary",
+        "resume",
+        "summary",
+    ]
+    telegram_messages = [str(record["argv"][-1]) for record in _read_jsonl_records(t2me_log)]
+    mattermost_messages = [str(record["argv"][-1]) for record in _read_jsonl_records(mattermost_log)]
+    assert len(telegram_messages) == 2
+    assert len(mattermost_messages) == 2
+    assert "💬 Hook reply 1: first headless prompt" in telegram_messages[0]
+    assert "💬\n- краткий план\n- второй шаг\n- финал здесь" in mattermost_messages[0]
+    assert "Hook reply 1: first headless prompt" not in mattermost_messages[0]
+
+
+def test_codex_wp_headless_hook_ru3_falls_back_to_raw_when_summary_invalid(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    mattermost_log = tmp_path / "mattermost.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    fake_mattermost = _write_fake_mattermost_to_me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_MATTERMOST_LOG_PATH": str(mattermost_log),
+            "MATTERMOST_TO_ME_BIN": str(fake_mattermost),
+            "FAKE_HOOK_CODEX_SUMMARY_TEXT": "not russian summary",
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "1",
+            "--hook-last-message-format",
+            "ru3",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(mattermost_log)]
+    assert len(messages) == 1
+    assert "💬 Hook reply 1: first headless prompt" in messages[0]
+
+
+def test_codex_wp_headless_hook_loop_falls_back_to_telegram_when_mattermost_fails(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_log = tmp_path / "hook-codex.jsonl"
+    t2me_log = tmp_path / "t2me.jsonl"
+    mattermost_log = tmp_path / "mattermost.jsonl"
+
+    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
+    fake_codex = _write_fake_hook_codex(tmp_path)
+    _write_fake_t2me(tmp_path)
+    fake_mattermost = _write_fake_mattermost_to_me(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "FAKE_T2ME_LOG_PATH": str(t2me_log),
+            "FAKE_MATTERMOST_LOG_PATH": str(mattermost_log),
+            "FAKE_MATTERMOST_EXIT": "1",
+            "MATTERMOST_TO_ME_BIN": str(fake_mattermost),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(
+        [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "first headless prompt",
+            "--hook",
+            "stop",
+            "--hook-prompt",
+            "resume again",
+            "--hook-times",
+            "2",
+        ],
+        env,
+        cwd=project,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert len(_read_jsonl_records(codex_log)) == 2
+    assert len(_read_jsonl_records(mattermost_log)) == 2
+    assert len(_read_jsonl_records(t2me_log)) == 2
 
 
 def test_codex_wp_headless_hook_loop_emits_manager_events(
@@ -1471,8 +2487,10 @@ def test_codex_wp_headless_hook_loop_tolerates_non_dict_json_variants(
             "stop",
             "--hook-prompt",
             "resume again",
-            "--hook-time",
+            "--hook-max-turns",
             "2",
+            "--hook-delivery",
+            "telegram",
             "--hook-target",
             "@ops",
         ],
@@ -1490,9 +2508,9 @@ def test_codex_wp_headless_hook_loop_tolerates_non_dict_json_variants(
     notification_records = _read_jsonl_records(t2me_log)
     assert len(notification_records) == 2
     messages = [str(record["argv"][-1]) for record in notification_records]
-    assert "🚆🪪🔟 TRAIN-" in messages[0]
-    assert "🚃 wagon 1/2" in messages[0]
-    assert "🚃 wagon 2/2" in messages[1]
+    assert "🪪 Run ID: TRAIN-" in messages[0]
+    assert "🔁 Step: 1/2" in messages[0]
+    assert "🔁 Step: 2/2" in messages[1]
     assert "Hook reply 1: first headless prompt" in messages[0]
     assert "Hook reply 2: resume again" in messages[1]
     session_id = next(iter(session_ids))
@@ -1540,6 +2558,8 @@ def test_codex_wp_headless_hook_loop_aborts_on_resume_failure(
             "resume again",
             "--hook-times",
             "3",
+            "--hook-delivery",
+            "telegram",
         ],
         env,
         cwd=project,
@@ -1555,12 +2575,12 @@ def test_codex_wp_headless_hook_loop_aborts_on_resume_failure(
     assert len(notification_records) == 2
     first_message = str(notification_records[0]["argv"][-1])
     second_message = str(notification_records[1]["argv"][-1])
-    assert "🚆🪪🔟 TRAIN-" in first_message
-    assert "🚃 wagon 1/3" in first_message
-    assert "🚃 wagon 2/3" in second_message
-    assert "1/3" in first_message
-    assert "Codex Exec FAILED" in second_message
-    assert "iteration 2 of 3" in second_message
+    assert "🪪 Run ID: TRAIN-" in first_message
+    assert "🔁 Step: 1/3" in first_message
+    assert "🔁 Step: 2/3" in second_message
+    assert "📊 Progress: 1/3" in first_message
+    assert "Codex Exec Failed" in second_message
+    assert "step 2 of 3" in second_message
 
 
 def test_codex_wp_headless_hook_loop_emits_manager_error_event(
