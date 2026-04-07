@@ -153,6 +153,32 @@ def test_build_collective_payload_marks_current_by_email(monkeypatch) -> None:
     assert "account_id" not in accounts[0]
 
 
+def test_build_collective_payload_threads_prefer_keyring_flag(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_snapshot(**kwargs):
+        captured.update(kwargs)
+        return {"accounts": []}
+
+    monkeypatch.setattr(
+        "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",
+        fake_snapshot,
+    )
+
+    payload = build_collective_payload(
+        auths_dir="~/.codex/_auths",
+        base_url="https://chatgpt.com/backend-api",
+        warn_at=70,
+        cooldown_at=90,
+        timeout=8,
+        only="both",
+        prefer_keyring=False,
+    )
+
+    assert payload["accounts"] == []
+    assert captured["prefer_keyring"] is False
+
+
 def test_build_collective_payload_marks_current_by_account_id(monkeypatch) -> None:
     monkeypatch.setattr(
         "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",

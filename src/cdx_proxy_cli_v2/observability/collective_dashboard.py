@@ -207,6 +207,7 @@ def build_collective_payload(
     cooldown_at: int,
     timeout: int,
     only: str,
+    prefer_keyring: bool = True,
     current_access_token: Optional[str] = None,
     current_file: Optional[str] = None,
     current_email: Optional[str] = None,
@@ -219,6 +220,7 @@ def build_collective_payload(
         cooldown_at=cooldown_at,
         timeout=timeout,
         only=only,
+        prefer_keyring=prefer_keyring,
     )
     return build_collective_payload_from_accounts(
         accounts=snapshot.get("accounts", []),

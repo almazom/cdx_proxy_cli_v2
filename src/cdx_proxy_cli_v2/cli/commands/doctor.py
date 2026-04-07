@@ -43,32 +43,59 @@ def handle_doctor(args: argparse.Namespace) -> int:
                 timeout=float(timeout) + 5.0,
             )
         except Exception as exc:
-            print(f"Probe failed: {exc}", file=sys.stderr)
+            message = f"Probe failed: {exc}"
+            if bool(args.json):
+                output = _doctor_payload(
+                    base_url=base_url,
+                    accounts=[],
+                    policy=DOCTOR_POLICY,
+                    probe_ok=False,
+                    health_ok=False,
+                    error=message,
+                )
+                print(json.dumps(output, ensure_ascii=False, indent=2))
+                return 1
+            print(message, file=sys.stderr)
             return 1
 
         _render_probe_results(probe_payload, json_mode=bool(args.json))
-
-        if bool(args.json):
-            try:
-                accounts = _fetch_health_accounts(
-                    base_url=base_url,
-                    headers=headers,
-                    timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
-                )
-            except Exception as exc:
-                print(
-                    f"Doctor failed to read /health after probe: {exc}", file=sys.stderr
-                )
-                return 1
-
-            output = _doctor_payload(
+        try:
+            accounts = _fetch_health_accounts(
                 base_url=base_url,
-                accounts=accounts,
-                policy=DOCTOR_POLICY,
-                probe=probe_payload,
+                headers=headers,
+                timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
             )
-            print(json.dumps(output, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            message = f"Doctor failed to read /health after probe: {exc}"
+            if bool(args.json):
+                output = _doctor_payload(
+                    base_url=base_url,
+                    accounts=[],
+                    policy=DOCTOR_POLICY,
+                    probe=probe_payload,
+                    probe_ok=True,
+                    health_ok=False,
+                    error=message,
+                )
+                print(json.dumps(output, ensure_ascii=False, indent=2))
+                return 0
+            print(message, file=sys.stderr)
             return 0
+
+        payload = _doctor_payload(
+            base_url=base_url,
+            accounts=accounts,
+            policy=DOCTOR_POLICY,
+            probe=probe_payload,
+            probe_ok=True,
+            health_ok=True,
+        )
+        if bool(args.json):
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+
+        _render_doctor_table(accounts, payload["summary"])
+        return 0
 
     # Regular doctor flow
     try:
@@ -78,11 +105,25 @@ def handle_doctor(args: argparse.Namespace) -> int:
             timeout=DOCTOR_HEALTH_TIMEOUT_SECONDS,
         )
     except Exception as exc:
-        print(f"Doctor failed to read /health: {exc}", file=sys.stderr)
+        message = f"Doctor failed to read /health: {exc}"
+        if bool(args.json):
+            payload = _doctor_payload(
+                base_url=base_url,
+                accounts=[],
+                policy=DOCTOR_POLICY,
+                health_ok=False,
+                error=message,
+            )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 1
+        print(message, file=sys.stderr)
         return 1
 
     payload = _doctor_payload(
-        base_url=base_url, accounts=accounts, policy=DOCTOR_POLICY
+        base_url=base_url,
+        accounts=accounts,
+        policy=DOCTOR_POLICY,
+        health_ok=True,
     )
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))

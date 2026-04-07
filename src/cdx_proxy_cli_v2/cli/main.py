@@ -7,6 +7,7 @@ This module owns only argparse wiring and the main entry point.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from typing import Optional
 
@@ -68,6 +69,18 @@ _PUBLIC_COMMANDS = (
 _PUBLIC_COMMANDS_METAVAR = "{" + ",".join(_PUBLIC_COMMANDS) + "}"
 
 
+class _RootArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        if "invalid choice:" in message and "run-server" in message:
+            public_choices = ", ".join(repr(command) for command in _PUBLIC_COMMANDS)
+            message = re.sub(
+                r"\(choose from [^)]+\)",
+                f"(choose from {public_choices})",
+                message,
+            )
+        super().error(message)
+
+
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auth-dir", default=None)
     parser.add_argument("--host", default=None)
@@ -85,7 +98,7 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         "--limit-min-remaining-percent",
         type=float,
         default=None,
-        help="preemptive limit guardrail; quarantine keys when a limit window has less remaining percent than this",
+        help="selection floor for limit headroom; prefer keys above this remaining percent and fall back to lower-headroom keys only when needed",
     )
     parser.add_argument(
         "--max-in-flight-requests",
@@ -147,7 +160,8 @@ def _hide_subparser_from_help(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _RootArgumentParser(
+        prog="cdx",
         description="cdx proxy cli v2",
         formatter_class=argparse.RawTextHelpFormatter,
     )

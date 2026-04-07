@@ -375,7 +375,9 @@ def test_reset_ignores_limit_only_cooldown(monkeypatch) -> None:
     assert snapshot["reason"] == "limit_5h"
 
 
-def test_nearly_exhausted_limit_window_temporarily_leaves_rotation(monkeypatch) -> None:
+def test_nearly_exhausted_limit_window_stays_available_as_degraded_fallback(
+    monkeypatch,
+) -> None:
     now = 6100.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
@@ -398,18 +400,162 @@ def test_nearly_exhausted_limit_window_temporarily_leaves_rotation(monkeypatch) 
                 }
             }
         },
-        min_remaining_percent=15.0,
+        min_remaining_percent=30.0,
     )
 
-    assert pool.pick() is None
-    snapshot = pool.health_snapshot()[0]
-    assert snapshot["status"] == "COOLDOWN"
-    assert snapshot["reason"] == "limit_5h_guardrail"
+    preview = pool.preview_next_pick()
+    assert preview is not None
+    assert preview["selection_source"] == "degraded"
+    assert preview["selection_remaining_percent"] == 10.5
 
-    now = now + 121.0
-    recovered = pool.pick()
-    assert recovered is not None
-    assert recovered.record.name == "a.json"
+    picked = pool.pick()
+    assert picked is not None
+    assert picked.record.name == "a.json"
+
+
+def test_prefers_limit_headroom_above_floor_when_available(monkeypatch) -> None:
+    now = 6150.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="degraded.json",
+                path="/tmp/degraded.json",
+                token="tok-degraded",
+                email="degraded@example.com",
+            ),
+            AuthRecord(
+                name="healthy.json",
+                path="/tmp/healthy.json",
+                token="tok-healthy",
+                email="healthy@example.com",
+            ),
+        ]
+    )
+
+    pool.apply_limit_health(
+        {
+            "degraded.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 89.5,
+                    "reset_after_seconds": 120,
+                }
+            },
+            "healthy.json": {
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20.0,
+                    "reset_after_seconds": 120,
+                }
+            },
+        },
+        min_remaining_percent=30.0,
+    )
+
+    preview = pool.preview_next_pick()
+    assert preview is not None
+    assert preview["file"] == "healthy.json"
+    assert preview["selection_source"] == "preferred"
+
+    picked = pool.pick()
+    assert picked is not None
+    assert picked.record.name == "healthy.json"
+
+
+def test_preferred_key_beats_degraded_stable_key_even_when_on_probation(
+    monkeypatch,
+) -> None:
+    now = 6175.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)
+    pool.load(
+        [
+            AuthRecord(name="probing.json", path="/tmp/probing.json", token="tok-probing"),
+            AuthRecord(name="stable.json", path="/tmp/stable.json", token="tok-stable"),
+        ]
+    )
+
+    pool.mark_result("probing.json", status=401, error_code="token_invalid")
+    now = now + float(DEFAULT_BLACKLIST_SECONDS) + 1.0
+
+    pool.apply_limit_health(
+        {
+            "probing.json": {
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20.0,
+                    "reset_after_seconds": 120,
+                }
+            },
+            "stable.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 89.5,
+                    "reset_after_seconds": 120,
+                }
+            },
+        },
+        min_remaining_percent=30.0,
+    )
+
+    picked = pool.pick()
+    assert picked is not None
+    assert picked.record.name == "probing.json"
+
+
+def test_all_degraded_keys_pick_best_remaining_then_reset_then_name(monkeypatch) -> None:
+    now = 6200.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(name="c.json", path="/tmp/c.json", token="tok-c"),
+            AuthRecord(name="b.json", path="/tmp/b.json", token="tok-b"),
+            AuthRecord(name="a.json", path="/tmp/a.json", token="tok-a"),
+        ]
+    )
+
+    pool.apply_limit_health(
+        {
+            "a.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 85.0,
+                    "reset_after_seconds": 400,
+                }
+            },
+            "b.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 82.0,
+                    "reset_after_seconds": 180,
+                }
+            },
+            "c.json": {
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 82.0,
+                    "reset_after_seconds": 180,
+                }
+            },
+        },
+        min_remaining_percent=30.0,
+    )
+
+    preview = pool.preview_next_pick()
+    assert preview is not None
+    assert preview["file"] == "b.json"
+    assert preview["selection_source"] == "degraded"
+    assert preview["selection_remaining_percent"] == 18.0
+
+    picked = pool.pick()
+    assert picked is not None
+    assert picked.record.name == "b.json"
 
 
 def test_non_auth_4xx_does_not_penalize_key(monkeypatch) -> None:

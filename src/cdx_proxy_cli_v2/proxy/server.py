@@ -167,6 +167,23 @@ class ProxyRuntime:
         error = snapshot.get("error")
         if isinstance(error, str) and error.strip():
             self._latest_limits_error = error.strip()
+        if self._limits_snapshot_stale(now=time.time()):
+            return
+        accounts = snapshot.get("accounts")
+        if not isinstance(accounts, list):
+            return
+        limit_health_cache: Dict[str, Dict[str, Any]] = {}
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            auth_file = str(account.get("file") or "").strip()
+            if not auth_file:
+                continue
+            limit_health_cache[auth_file] = dict(account)
+        if limit_health_cache:
+            self._limit_health_cache = limit_health_cache
+            if self._latest_limits_fetched_at > 0:
+                self._limit_health_cache_at = self._latest_limits_fetched_at
 
     def _trace_recently_polled(self, *, now: Optional[float] = None) -> bool:
         now_ts = float(now if now is not None else time.time())
@@ -217,10 +234,9 @@ class ProxyRuntime:
             "fetched_at": snapshot_fetched_at or None,
             "stale": stale,
             "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
-            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "accounts": accounts,
         }
+        payload.update(self._next_auth_fields(next_pick))
         return payload
 
     def _store_limits_snapshot(
@@ -685,6 +701,25 @@ class ProxyRuntime:
                 indexed[auth_file] = account
         return indexed
 
+    @staticmethod
+    def _next_auth_fields(next_pick: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
+            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
+            "next_auth_selection_source": str(next_pick.get("selection_source") or "")
+            .strip()
+            or None,
+            "next_auth_selection_known": bool(next_pick.get("selection_limit_known")),
+            "next_auth_selection_preferred": bool(
+                next_pick.get("selection_preferred")
+            ),
+            "next_auth_remaining_percent": next_pick.get("selection_remaining_percent"),
+            "next_auth_reset_after_seconds": next_pick.get(
+                "selection_reset_after_seconds"
+            ),
+            "next_auth_floor_percent": next_pick.get("selection_floor_percent"),
+        }
+
     def _increment_metric(self, key: str, amount: int = 1) -> None:
         with self._metrics_lock:
             self._metrics[key] = int(self._metrics.get(key, 0)) + int(amount)
@@ -704,6 +739,11 @@ class ProxyRuntime:
         allowed_auth_names = self.allowed_auth_names_for_route(route or "")
         if allowed_auth_names is not None and not allowed_auth_names:
             return None
+        if self._limit_health_cache:
+            self.auth_pool.apply_limit_health(
+                self._limit_health_cache,
+                min_remaining_percent=self.settings.limit_min_remaining_percent,
+            )
         next_pick = self.auth_pool.preview_next_pick(allowed_names=allowed_auth_names)
         if not isinstance(next_pick, dict):
             return None
@@ -713,17 +753,18 @@ class ProxyRuntime:
         normalized_route = str(route or "").strip().lower()
         if normalized_route != "compact":
             return None
-        allowed: set[str] = set()
+        degraded_allowed: set[str] = set()
+        preferred_allowed: set[str] = set()
         for account in self._merged_accounts(limit_health=self._limit_health_cache):
             auth_file = str(account.get("file") or "").strip()
-            status = str(account.get("status") or "UNKNOWN").upper()
-            if (
-                auth_file
-                and bool(account.get("eligible_now"))
-                and status == "OK"
+            if not auth_file or not bool(account.get("eligible_now")):
+                continue
+            degraded_allowed.add(auth_file)
+            if bool(account.get("selection_known")) and bool(
+                account.get("selection_preferred")
             ):
-                allowed.add(auth_file)
-        return allowed
+                preferred_allowed.add(auth_file)
+        return preferred_allowed or degraded_allowed
 
     def _emit_auth_transitions(
         self,
@@ -875,19 +916,19 @@ class ProxyRuntime:
         self._refresh_limit_health(force=refresh, persist_snapshot=refresh)
         accounts = self._merged_accounts(limit_health=self._limit_health_cache)
         next_pick = self.next_auth_payload() or {}
-        return {
+        payload = {
             "ok": merged_ok(accounts),
-            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
-            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "accounts": accounts,
         }
+        payload.update(self._next_auth_fields(next_pick))
+        return payload
 
     def trace_events(self, limit: int) -> List[Dict[str, Any]]:
         return self.trace_store.list(limit=limit)
 
     def debug_payload(self, host: str, port: int) -> Dict[str, Any]:
         next_pick = self.next_auth_payload() or {}
-        return {
+        payload = {
             "status": "running",
             "host": host,
             "port": port,
@@ -910,12 +951,12 @@ class ProxyRuntime:
             "limit_sampler_trace_active": self._trace_recently_polled(),
             "limits_fetched_at": self._latest_limits_fetched_at or None,
             "limits_stale": self._limits_snapshot_stale(),
-            "next_auth_file": str(next_pick.get("file") or "").strip() or None,
-            "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "pid": os.getpid(),
             "event_log_file": str(self.logger.path),
             "metrics": self.metrics_snapshot(),
         }
+        payload.update(self._next_auth_fields(next_pick))
+        return payload
 
     def record_attempt(
         self,

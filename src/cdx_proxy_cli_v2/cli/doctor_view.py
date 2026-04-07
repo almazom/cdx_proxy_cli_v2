@@ -50,17 +50,29 @@ def _summarize_accounts(accounts: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _doctor_payload(
-    *, base_url: str, accounts: List[Dict[str, Any]], policy: Dict[str, Any], probe: Optional[Dict[str, Any]] = None
+    *,
+    base_url: str,
+    accounts: List[Dict[str, Any]],
+    policy: Dict[str, Any],
+    probe: Optional[Dict[str, Any]] = None,
+    probe_ok: Optional[bool] = None,
+    health_ok: bool = True,
+    error: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "ok": True,
+        "ok": health_ok and (probe_ok is not False),
         "base_url": base_url,
         "policy": dict(policy),
         "summary": _summarize_accounts(accounts),
         "accounts": accounts,
+        "health_ok": health_ok,
     }
     if probe is not None:
         payload["probe"] = probe
+    if probe_ok is not None:
+        payload["probe_ok"] = probe_ok
+    if error:
+        payload["error"] = error
     return payload
 
 

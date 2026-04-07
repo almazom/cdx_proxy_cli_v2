@@ -4,7 +4,11 @@ import threading
 import time
 from typing import List, Optional
 
-from cdx_proxy_cli_v2.auth.eligibility import limit_block_details
+from cdx_proxy_cli_v2.auth.eligibility import (
+    credits_block_details,
+    limit_block_details,
+    selection_preference_details,
+)
 from cdx_proxy_cli_v2.auth.models import AuthRecord, AuthState
 
 DEFAULT_COOLDOWN_SECONDS = 30
@@ -80,6 +84,15 @@ class RoundRobinAuthPool:
                         state.cooldown_until = prev.cooldown_until
                         state.limit_until = prev.limit_until
                         state.limit_reason = prev.limit_reason
+                        state.selection_limit_known = prev.selection_limit_known
+                        state.selection_preferred = prev.selection_preferred
+                        state.selection_remaining_percent = (
+                            prev.selection_remaining_percent
+                        )
+                        state.selection_reset_after_seconds = (
+                            prev.selection_reset_after_seconds
+                        )
+                        state.selection_floor_percent = prev.selection_floor_percent
                         state.blacklist_until = prev.blacklist_until
                         state.blacklist_reason = prev.blacklist_reason
                         state.probation_successes = prev.probation_successes
@@ -115,31 +128,11 @@ class RoundRobinAuthPool:
         with self._lock:
             now = time.time()
             self._restore_stable_state_after_cooldown(now, self._states)
-            allowed = self._normalize_allowed_names(allowed_names)
-            available = [
-                state
-                for state in self._states
-                if state.available(now)
-                and (allowed is None or state.record.name in allowed)
-            ]
-
-            if not available:
-                return None
-
-            # Latency-first policy: when at least one stable key exists,
-            # avoid sending foreground traffic through previously hard-failed keys.
-            preferred = [state for state in available if self._is_stable(state)]
-            pool = preferred or available
-            pool_ids = {id(candidate) for candidate in pool}
-            state: Optional[AuthState] = None
-            for offset in range(len(self._states)):
-                idx = (self._index + offset) % len(self._states)
-                candidate = self._states[idx]
-                if id(candidate) not in pool_ids:
-                    continue
-                state = candidate
-                self._index = (idx + 1) % len(self._states)
-                break
+            state = self._select_candidate(
+                now=now,
+                allowed_names=allowed_names,
+                advance_index=True,
+            )
             if state is None:
                 return None
             state.used += 1
@@ -158,29 +151,23 @@ class RoundRobinAuthPool:
         with self._lock:
             now = time.time()
             self._restore_stable_state_after_cooldown(now, self._states)
-            allowed = self._normalize_allowed_names(allowed_names)
-            available = [
-                state
-                for state in self._states
-                if state.available(now)
-                and (allowed is None or state.record.name in allowed)
-            ]
-            if not available:
+            state = self._select_candidate(
+                now=now,
+                allowed_names=allowed_names,
+                advance_index=False,
+            )
+            if state is None:
                 return None
-
-            preferred = [state for state in available if self._is_stable(state)]
-            pool = preferred or available
-            pool_ids = {id(candidate) for candidate in pool}
-            for offset in range(len(self._states)):
-                idx = (self._index + offset) % len(self._states)
-                candidate = self._states[idx]
-                if id(candidate) not in pool_ids:
-                    continue
-                return {
-                    "file": candidate.record.name,
-                    "email": candidate.record.email,
-                }
-            return None
+            return {
+                "file": state.record.name,
+                "email": state.record.email,
+                "selection_source": self._selection_source(state),
+                "selection_limit_known": state.selection_limit_known,
+                "selection_preferred": state.selection_preferred,
+                "selection_remaining_percent": state.selection_remaining_percent,
+                "selection_reset_after_seconds": state.selection_reset_after_seconds,
+                "selection_floor_percent": state.selection_floor_percent,
+            }
 
     def mark_cooldown(
         self, auth_name: str, seconds: int = DEFAULT_COOLDOWN_SECONDS
@@ -395,16 +382,100 @@ class RoundRobinAuthPool:
         with self._lock:
             for state in self._states:
                 limit_health = limit_health_by_file.get(state.record.name) or {}
-                block = limit_block_details(
+                selection = selection_preference_details(
                     limit_health,
                     min_remaining_percent=min_remaining_percent,
                 )
-                if not block:
+                state.selection_limit_known = bool(selection["known"])
+                state.selection_preferred = bool(selection["preferred"])
+                state.selection_remaining_percent = selection["remaining_percent"]
+                state.selection_reset_after_seconds = selection["reset_after_seconds"]
+                state.selection_floor_percent = float(min_remaining_percent)
+
+                blocks = [
+                    block
+                    for block in (
+                        limit_block_details(
+                            limit_health,
+                            min_remaining_percent=min_remaining_percent,
+                            include_guardrails=False,
+                        ),
+                        credits_block_details(limit_health),
+                    )
+                    if isinstance(block, dict)
+                ]
+                if not blocks:
                     state.limit_until = 0.0
                     state.limit_reason = None
                     continue
+                block = max(blocks, key=lambda item: float(item["until"]))
                 state.limit_until = float(block["until"])
                 state.limit_reason = str(block["reason"])
+
+    def _select_candidate(
+        self,
+        *,
+        now: float,
+        allowed_names: Optional[set[str]],
+        advance_index: bool,
+    ) -> Optional[AuthState]:
+        allowed = self._normalize_allowed_names(allowed_names)
+        available = [
+            state
+            for state in self._states
+            if state.available(now)
+            and (allowed is None or state.record.name in allowed)
+        ]
+        if not available:
+            return None
+
+        best_rank = min(self._selection_rank(state) for state in available)
+        pool = [state for state in available if self._selection_rank(state) == best_rank]
+        stable_available = [state for state in pool if self._is_stable(state)]
+        pool = stable_available or pool
+        if best_rank == 2:
+            candidate = min(pool, key=self._degraded_sort_key)
+            if advance_index:
+                idx = self._states.index(candidate)
+                self._index = (idx + 1) % len(self._states)
+            return candidate
+
+        pool_ids = {id(candidate) for candidate in pool}
+        for offset in range(len(self._states)):
+            idx = (self._index + offset) % len(self._states)
+            candidate = self._states[idx]
+            if id(candidate) not in pool_ids:
+                continue
+            if advance_index:
+                self._index = (idx + 1) % len(self._states)
+            return candidate
+        return None
+
+    @staticmethod
+    def _selection_rank(state: AuthState) -> int:
+        if state.selection_limit_known:
+            return 0 if state.selection_preferred else 2
+        return 1
+
+    @staticmethod
+    def _selection_source(state: AuthState) -> str:
+        if not state.selection_limit_known:
+            return "unknown"
+        return "preferred" if state.selection_preferred else "degraded"
+
+    @staticmethod
+    def _degraded_sort_key(state: AuthState) -> tuple[float, int, str]:
+        remaining = state.selection_remaining_percent
+        remaining_sort = (
+            -float(remaining) if isinstance(remaining, (int, float)) else 1.0
+        )
+        reset_after = state.selection_reset_after_seconds
+        reset_sort = (
+            int(reset_after)
+            if isinstance(reset_after, int) and reset_after > 0
+            else 10**9
+        )
+        return (remaining_sort, reset_sort, state.record.name)
 
     @staticmethod
     def _restore_stable_state_after_cooldown(

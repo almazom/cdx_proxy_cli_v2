@@ -65,6 +65,89 @@ def window_summary(
     }
 
 
+def _numeric_value(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _message_estimates(value: Any) -> Optional[List[int]]:
+    if not isinstance(value, list):
+        return None
+    result: List[int] = []
+    for item in value:
+        numeric = _numeric_value(item)
+        if numeric is None:
+            continue
+        result.append(int(numeric))
+    return result
+
+
+def _message_estimates_have_remaining(value: Any) -> Optional[bool]:
+    estimates = _message_estimates(value)
+    if estimates is None:
+        return None
+    return any(item > 0 for item in estimates)
+
+
+def credits_summary(credits: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(credits, dict):
+        return None
+
+    has_credits_raw = credits.get("has_credits")
+    has_credits = (
+        bool(has_credits_raw) if isinstance(has_credits_raw, bool) else None
+    )
+    unlimited = bool(credits.get("unlimited"))
+    balance = _numeric_value(credits.get("balance"))
+    approx_local_messages = _message_estimates(credits.get("approx_local_messages"))
+    approx_cloud_messages = _message_estimates(credits.get("approx_cloud_messages"))
+
+    status = "UNKNOWN"
+    if unlimited:
+        status = "OK"
+    else:
+        signals: List[bool] = []
+        if has_credits is not None:
+            signals.append(has_credits)
+        if balance is not None:
+            signals.append(balance > 0.0)
+        local_remaining = _message_estimates_have_remaining(
+            credits.get("approx_local_messages")
+        )
+        if local_remaining is not None:
+            signals.append(local_remaining)
+        cloud_remaining = _message_estimates_have_remaining(
+            credits.get("approx_cloud_messages")
+        )
+        if cloud_remaining is not None:
+            signals.append(cloud_remaining)
+
+        if any(signals):
+            status = "OK"
+        elif signals:
+            status = "EXHAUSTED"
+
+    return {
+        "status": status,
+        "has_credits": has_credits,
+        "unlimited": unlimited,
+        "balance": balance,
+        "approx_local_messages": approx_local_messages,
+        "approx_cloud_messages": approx_cloud_messages,
+    }
+
+
 def live_usage_url(url: str) -> str:
     parsed = urlsplit(url)
     pairs = [
@@ -162,6 +245,11 @@ def collective_health_snapshot(
 
         entry["status"] = overall_status(statuses) if statuses else "UNKNOWN"
         entry["plan_type"] = usage.get("plan_type") if isinstance(usage, dict) else None
+        credit_health = (
+            credits_summary(usage.get("credits")) if isinstance(usage, dict) else None
+        )
+        if credit_health is not None:
+            entry["credits"] = credit_health
         entry["error"] = None
         accounts.append(entry)
 

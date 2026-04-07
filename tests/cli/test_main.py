@@ -30,6 +30,7 @@ from cdx_proxy_cli_v2.cli.main import (
     format_shell_exports,
     main,
 )
+from cdx_proxy_cli_v2 import __version__
 from cdx_proxy_cli_v2.observability.limits_history import (
     append_limits_history,
     write_latest_limits_snapshot,
@@ -206,6 +207,18 @@ class TestLoadCodexAuthIdentity:
 
 
 class TestModuleEntrypoint:
+    def test_build_parser_help_uses_canonical_prog_name(self) -> None:
+        help_text = build_parser().format_help()
+
+        assert help_text.startswith("usage: cdx ")
+
+    def test_build_parser_version_uses_canonical_prog_name(self, capsys) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            build_parser().parse_args(["--version"])
+
+        assert exc_info.value.code == 0
+        assert capsys.readouterr().out.strip() == f"cdx {__version__}"
+
     def test_python_m_cli_main_help_is_clean(self, tmp_path: Path) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         env = os.environ.copy()
@@ -222,6 +235,7 @@ class TestModuleEntrypoint:
 
         assert result.returncode == 0
         assert "usage:" in result.stdout.lower()
+        assert result.stdout.startswith("usage: cdx ")
         assert "RuntimeWarning" not in result.stderr
 
 
@@ -641,6 +655,125 @@ class TestDoctorResetPreflight:
         assert "cdx doctor | probe findings" in captured.out
         assert "Probe outcomes" not in captured.err
 
+    def test_handle_doctor_probe_warns_but_succeeds_when_health_fails(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            probe=True,
+            probe_timeout=7,
+            json=False,
+        )
+
+        with (
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._healthy_base_url_or_none"
+            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.doctor.fetch_json") as mock_fetch,
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._fetch_health_accounts"
+            ) as mock_health_accounts,
+        ):
+            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_fetch.return_value = {"probed": 1, "results": []}
+            mock_health_accounts.side_effect = RuntimeError("timed out")
+
+            result = handle_doctor(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Probed 1 auth key(s)" in captured.out
+        assert "Doctor failed to read /health after probe: timed out" in captured.err
+
+    def test_handle_doctor_probe_json_keeps_probe_results_when_health_fails(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            probe=True,
+            probe_timeout=7,
+            json=True,
+        )
+
+        with (
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._healthy_base_url_or_none"
+            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.doctor.fetch_json") as mock_fetch,
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._fetch_health_accounts"
+            ) as mock_health_accounts,
+        ):
+            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_fetch.return_value = {"probed": 1, "results": []}
+            mock_health_accounts.side_effect = RuntimeError("timed out")
+
+            result = handle_doctor(args)
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert result == 0
+        assert payload["probe_ok"] is True
+        assert payload["health_ok"] is False
+        assert payload["ok"] is False
+        assert payload["probe"]["probed"] == 1
+        assert payload["accounts"] == []
+        assert "timed out" in payload["error"]
+        assert captured.err == ""
+
+    def test_handle_doctor_json_emits_failure_payload_when_health_fails(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            probe=False,
+            json=True,
+        )
+
+        with (
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._healthy_base_url_or_none"
+            ) as mock_base_url,
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.doctor._fetch_health_accounts"
+            ) as mock_health_accounts,
+        ):
+            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_health_accounts.side_effect = RuntimeError("timed out")
+
+            result = handle_doctor(args)
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert result == 1
+        assert payload["health_ok"] is False
+        assert payload["ok"] is False
+        assert payload["accounts"] == []
+        assert "timed out" in payload["error"]
+        assert "probe_ok" not in payload
+        assert captured.err == ""
+
 
 def test_state_bucket_treats_warn_as_whitelist():
     assert _state_bucket("WARN") == "whitelist"
@@ -704,6 +837,45 @@ class TestHandleAll:
         assert payload["aggregate"]["counts"]["blacklist"] == 1
         assert payload["availability"]["available_now"] == 1
         assert any(item["status"] == "BLACKLIST" for item in payload["accounts"])
+
+    def test_handle_all_offline_fallback_skips_keyring_preference(
+        self, capsys, temp_auth_dir
+    ):
+        args = argparse.Namespace(
+            auth_dir=temp_auth_dir,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key="mgmt-secret",
+            allow_non_loopback=None,
+            trace_max=None,
+            request_timeout=None,
+            warn_at=70,
+            cooldown_at=90,
+            timeout=8,
+            only="both",
+            json=True,
+        )
+
+        with (
+            patch("cdx_proxy_cli_v2.cli.commands.all.service_status") as mock_status,
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.all.build_collective_payload"
+            ) as mock_fallback,
+            patch(
+                "cdx_proxy_cli_v2.cli.commands.all._load_codex_auth_identity"
+            ) as mock_identity,
+        ):
+            mock_status.return_value = {"healthy": False}
+            mock_fallback.return_value = {"accounts": []}
+            mock_identity.return_value = (None, None, None)
+
+            result = handle_all(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert json.loads(captured.out) == {"accounts": []}
+        assert mock_fallback.call_args.kwargs["prefer_keyring"] is False
 
 
 class TestSettingsFromArgs:
@@ -1127,3 +1299,13 @@ class TestMainHelp:
 
         assert args.command == "run-server"
         assert callable(args.handler)
+
+    def test_build_parser_invalid_choice_hides_hidden_commands(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            build_parser().parse_args(["nope"])
+
+        assert exc_info.value.code == 2
+        stderr = capsys.readouterr().err
+        assert "run-server" not in stderr
+        assert "run-codex-broker" not in stderr
+        assert "proxy" in stderr

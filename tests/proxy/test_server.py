@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import time
 from io import BytesIO
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,7 @@ from cdx_proxy_cli_v2.config.settings import Settings
 from cdx_proxy_cli_v2.observability.limits_history import (
     latest_limits_path,
     limits_history_path,
+    write_latest_limits_snapshot,
 )
 from cdx_proxy_cli_v2.proxy.server import (
     CHATGPT_ACCOUNT_MODEL_FALLBACK,
@@ -834,8 +836,10 @@ class TestMergedHealth:
         assert payload["events"][0]["path"] == "/responses"
         assert payload["limits"]["accounts"][0]["file"] == sample_auth_record.name
         assert payload["limits"]["accounts"][0]["five_hour"]["used_percent"] == 89.5
+        assert payload["limits"]["accounts"][0]["selection_source"] == "degraded"
         assert payload["limits"]["fetched_at"] is not None
-        assert payload["limits"]["next_auth_file"] is None
+        assert payload["limits"]["next_auth_file"] == sample_auth_record.name
+        assert payload["limits"]["next_auth_selection_source"] == "degraded"
         assert latest_limits_path(test_settings.auth_dir).exists()
 
         history_lines = limits_history_path(test_settings.auth_dir).read_text().splitlines()
@@ -1055,9 +1059,117 @@ class TestRuntimeTransitionsAndOverload:
 
         next_auth = runtime.next_auth_payload(route="compact")
 
-        assert next_auth == {"file": ok_auth.name, "email": ok_auth.email}
+        assert next_auth is not None
+        assert next_auth["file"] == ok_auth.name
+        assert next_auth["email"] == ok_auth.email
+        assert next_auth["selection_source"] == "preferred"
 
-    def test_response_limit_feedback_quarantines_key_immediately(
+    def test_compact_route_falls_back_to_degraded_auths_when_needed(
+        self,
+        test_settings,
+    ):
+        hotter_auth = AuthRecord(
+            name="hotter.json",
+            path="/tmp/hotter.json",
+            token="tok-hotter",
+            email="hotter@example.com",
+        )
+        cooler_auth = AuthRecord(
+            name="cooler.json",
+            path="/tmp/cooler.json",
+            token="tok-cooler",
+            email="cooler@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([hotter_auth, cooler_auth])
+        runtime._limit_health_cache = {
+            hotter_auth.name: {
+                "file": hotter_auth.name,
+                "email": hotter_auth.email,
+                "status": "WARN",
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 89.5,
+                    "reset_after_seconds": 1800,
+                },
+            },
+            cooler_auth.name: {
+                "file": cooler_auth.name,
+                "email": cooler_auth.email,
+                "status": "WARN",
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 82.0,
+                    "reset_after_seconds": 900,
+                },
+            },
+        }
+
+        next_auth = runtime.next_auth_payload(route="compact")
+
+        assert next_auth is not None
+        assert next_auth["file"] == cooler_auth.name
+        assert next_auth["selection_source"] == "degraded"
+
+    def test_next_auth_payload_uses_fresh_persisted_limits_snapshot_on_startup(
+        self,
+        test_settings,
+    ):
+        now = time.time()
+        write_latest_limits_snapshot(
+            test_settings.auth_dir,
+            {
+                "fetched_at": now,
+                "stale": False,
+                "accounts": [
+                    {
+                        "file": "degraded.json",
+                        "email": "degraded@example.com",
+                        "status": "WARN",
+                        "five_hour": {
+                            "status": "WARN",
+                            "used_percent": 89.5,
+                            "reset_after_seconds": 1800,
+                        },
+                    },
+                    {
+                        "file": "healthy.json",
+                        "email": "healthy@example.com",
+                        "status": "OK",
+                        "five_hour": {
+                            "status": "OK",
+                            "used_percent": 20.0,
+                            "reset_after_seconds": 1800,
+                        },
+                    },
+                ],
+            },
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load(
+            [
+                AuthRecord(
+                    name="degraded.json",
+                    path="/tmp/degraded.json",
+                    token="tok-degraded",
+                    email="degraded@example.com",
+                ),
+                AuthRecord(
+                    name="healthy.json",
+                    path="/tmp/healthy.json",
+                    token="tok-healthy",
+                    email="healthy@example.com",
+                ),
+            ]
+        )
+
+        next_auth = runtime.next_auth_payload(route="compact")
+
+        assert next_auth is not None
+        assert next_auth["file"] == "healthy.json"
+        assert next_auth["selection_source"] == "preferred"
+
+    def test_response_limit_feedback_degrades_key_instead_of_quarantining_it(
         self, test_settings, sample_auth_record
     ):
         runtime = _build_runtime(test_settings, sample_auth_record)
@@ -1076,7 +1188,7 @@ class TestRuntimeTransitionsAndOverload:
                     {
                         "rate_limits": {
                             "secondary": {
-                                "used_percent": 91.0,
+                                "used_percent": 88.0,
                                 "window_minutes": 10080,
                                 "reset_after_seconds": 1800,
                             }
@@ -1090,11 +1202,11 @@ class TestRuntimeTransitionsAndOverload:
 
         merged_account = runtime._merged_accounts(limit_health=runtime._limit_health_cache)[0]
         events = runtime.trace_store.list(limit=20)
-        assert merged_account["status"] == "COOLDOWN"
-        assert merged_account["reason"] == "limit_weekly"
-        assert merged_account["eligible_now"] is False
-        assert runtime.auth_pool.pick() is None
-        assert any(event.get("event") == "auth.limit_blocked" for event in events)
+        assert merged_account["status"] == "WARN"
+        assert merged_account["eligible_now"] is True
+        assert merged_account["selection_source"] == "degraded"
+        assert runtime.auth_pool.pick() is not None
+        assert not any(event.get("event") == "auth.limit_blocked" for event in events)
 
     def test_proxy_request_logs_auth_ejected_transition_at_threshold(
         self,
@@ -1147,6 +1259,7 @@ class TestRuntimeTransitionsAndOverload:
         assert metrics["in_flight_requests"] == 0
         assert payload["next_auth_file"] == sample_auth_record.name
         assert payload["next_auth_email"] == sample_auth_record.email
+        assert payload["next_auth_selection_source"] == "unknown"
 
 
 class TestProbeBehavior:
