@@ -1,6 +1,6 @@
 # codex_wp Auto-Prompt Hook API
 
-**Last verified:** 2026-04-04
+**Last verified:** 2026-04-05
 **Status:** OK
 
 ## Purpose
@@ -86,6 +86,12 @@ The important change is step 3:
 - `--hook-last-message-format raw|ru3`
 - `--hook-supervision observation|management`
 - `--hook-extract-intent`
+
+When `--hook-extract-intent` is enabled, `codex_wp` keeps the richer hook-side
+budget by default (`30s` preflight + `300s` runtime) because the wrapper treats
+the intent summary as part of the notification contract. Operators can override
+that budget via `CDX_HOOK_EXTRACT_INTENT_PREFLIGHT_TIMEOUT` and
+`CDX_HOOK_EXTRACT_INTENT_RUNTIME_TIMEOUT` when faster fallback is preferable.
 
 `--hook-supervision` remains the preferred human-facing API when a parent
 manager consumes JSON hook events. It resolves to manager delivery internally
@@ -218,9 +224,15 @@ Failure notifications can include:
 - `failed to parse session_id from codex JSON output`
 - `codex exec failed (exit N)`
 
-When `--hook-supervision` is used, manager JSON event shape stays the same.
-Auto-prompt mode changes how the next prompt is resolved, not the outer manager
-event contract.
+When `--hook-supervision` or `--hook-delivery manager` is used, manager JSON
+events now surface the resolved loop decision too:
+
+- stop events can include `next_prompt` and `next_prompt_source`
+- complete events can include `stop_reason`
+- error events can include `failure_text`
+
+This lets an outer manager or bundle-local notifier forward the exact generated
+resume prompt as a separate operator-facing message.
 
 ## Operator Examples
 

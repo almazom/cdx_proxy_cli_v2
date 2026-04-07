@@ -56,6 +56,26 @@ git_worktree_has_changes() {
   [[ -n "$status_output" ]]
 }
 
+positive_int_env_or_default() {
+  local name="$1"
+  local default_value="$2"
+  local raw="${!name-}"
+
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$default_value"
+    return 0
+  fi
+
+  if [[ "$raw" =~ ^[0-9]+$ ]] && (( raw > 0 )); then
+    printf '%s\n' "$raw"
+    return 0
+  fi
+
+  printf '%s\n' "$default_value"
+}
+
 fixed_shortcut_error() {
   local shortcut_flag="$1"
   die "codex_wp: ${shortcut_flag} does not accept additional arguments. Use only 'codex_wp ${shortcut_flag}'." 2
@@ -238,8 +258,12 @@ find_exec_prompt_index() {
         ((index++))
         break
         ;;
-      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message)
+      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message|--ask-for-approval)
         ((index+=2))
+        continue
+        ;;
+      --sandbox=*|--ask-for-approval=*)
+        ((index++))
         continue
         ;;
       --oss|--full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|-h|--help|-V|--version)
@@ -290,8 +314,12 @@ find_first_passthrough_token() {
         ((index++))
         break
         ;;
-      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message)
+      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message|--ask-for-approval)
         ((index+=2))
+        continue
+        ;;
+      --sandbox=*|--ask-for-approval=*)
+        ((index++))
         continue
         ;;
       --oss|--full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|-h|--help|-V|--version)
@@ -323,6 +351,58 @@ find_first_passthrough_token() {
   done
 
   printf '\n'
+}
+
+find_exec_subcommand_index() {
+  local argv=("$@")
+  local index=0
+  local arg
+
+  while (( index < ${#argv[@]} )); do
+    arg="${argv[$index]}"
+    case "$arg" in
+      --)
+        break
+        ;;
+      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-s|--sandbox|-p|--profile|-C|--cd|--add-dir|--output-schema|--color|-o|--output-last-message|--ask-for-approval)
+        ((index+=2))
+        continue
+        ;;
+      --sandbox=*|--ask-for-approval=*)
+        ((index++))
+        continue
+        ;;
+      --oss|--full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|-h|--help|-V|--version)
+        ((index++))
+        continue
+        ;;
+      exec|e)
+        printf '%s\n' "$index"
+        return 0
+        ;;
+      *)
+        printf '%s\n' "-1"
+        return 0
+        ;;
+    esac
+  done
+
+  printf '%s\n' "-1"
+}
+
+has_explicit_execution_policy() {
+  local argv=("$@")
+  local arg
+
+  for arg in "${argv[@]}"; do
+    case "$arg" in
+      --dangerously-bypass-approvals-and-sandbox|--full-auto|--sandbox|--sandbox=*|--ask-for-approval|--ask-for-approval=*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
 }
 
 normalize_hook_supervision() {
@@ -785,16 +865,23 @@ if (( ! help_requested )); then
     set -- "${args[@]}"
   fi
 
-  # Prepend file references to exec prompt if files were specified
-  if (( ! zellij_pair_mode )) && [[ ${#files_to_include[@]} -gt 0 && $# -ge 1 && "$1" == "exec" ]]; then
-    shift
+  # Prepend file references to exec prompt if files were specified.
+  # Root-level Codex options may legally appear before `exec`, so locate the subcommand first.
+  if (( ! zellij_pair_mode )) && [[ ${#files_to_include[@]} -gt 0 ]]; then
+    exec_subcommand_index="$(find_exec_subcommand_index "$@")"
+  else
+    exec_subcommand_index="-1"
+  fi
+  if (( ! zellij_pair_mode )) && [[ "$exec_subcommand_index" != "-1" ]]; then
     file_refs="$(build_file_refs "${files_to_include[@]}")"
-    exec_args=("$@")
+    all_args=("$@")
+    exec_prefix=("${all_args[@]:0:$((exec_subcommand_index + 1))}")
+    exec_args=("${all_args[@]:$((exec_subcommand_index + 1))}")
     prompt_index="$(find_exec_prompt_index "${exec_args[@]}")"
     if [[ "$prompt_index" != "-1" ]]; then
       exec_args[$prompt_index]="${file_refs}${exec_args[$prompt_index]}"
     fi
-    set -- "exec" "${exec_args[@]}"
+    set -- "${exec_prefix[@]}" "${exec_args[@]}"
   fi
 else
   set -- "${args[@]}"
@@ -809,7 +896,32 @@ resolve_bin() {
     return 0
   fi
 
-  command -v "$fallback_name" || true
+  command -v "$fallback_name"
+}
+
+resolve_explicit_bin() {
+  local candidate="$1"
+
+  [[ -n "$candidate" && -x "$candidate" ]] || return 1
+  printf '%s\n' "$candidate"
+}
+
+resolve_codex_bin() {
+  if [[ -n "${CODEX_BIN:-}" ]]; then
+    resolve_explicit_bin "${CODEX_BIN}"
+    return $?
+  fi
+
+  command -v codex
+}
+
+resolve_cdx_bin() {
+  if [[ -n "${CDX_BIN:-}" ]]; then
+    resolve_explicit_bin "${CDX_BIN}"
+    return $?
+  fi
+
+  resolve_bin "$repo_root/.venv/bin/cdx" "cdx"
 }
 
 print_codex_wp_wrapper_help() {
@@ -838,7 +950,7 @@ Hook flags (interactive --hook stop is session-scoped; headless exec uses a wrap
   --hook-max-turns <n>         alias for --hook-times
   --hook-prompt-mode <mode>    next prompt strategy: static|auto|hybrid (default: static)
   --hook-auto-stop-on-complete end early when auto mode says the task is complete
-  --hook-supervision <mode>    primary supervision API: observation|management
+  --hook-supervision <mode>    headless exec --json only; manager delivery only; observation|management
   --hook-delivery <mode>       low-level transport override: mattermost|telegram|both|manager (default: mattermost)
   --hook-last-message-format <mode>
                                format last assistant message for Mattermost: raw|ru3
@@ -873,15 +985,15 @@ Proxy companion commands:
   cdx logs --lines 50          tail proxy service logs
   cdx limits --tail 10         show persisted limits history
 
+Zellij scrollback note:
+  Inside Zellij, codex_wp automatically adds upstream `--no-alt-screen`.
+  This keeps Codex in inline mode so pane scrollback keeps working.
+
 Help is side-effect free. Wrapper help prints first, then upstream codex help.
 EOF
 }
 
 if (( help_requested )); then
-  codex_bin="$(resolve_bin "${CODEX_BIN:-}" "codex")"
-  [[ -n "$codex_bin" && -x "$codex_bin" ]] || \
-    die "codex_wp: codex not found. Install it or set CODEX_BIN." 127
-
   if [[ $# -gt 0 && "$1" == "--" ]]; then
     shift
   fi
@@ -889,20 +1001,34 @@ if (( help_requested )); then
 
   print_codex_wp_wrapper_help
   printf '\n'
+  if ! codex_bin="$(resolve_codex_bin)"; then
+    if [[ -n "${CODEX_BIN:-}" ]]; then
+      die "codex_wp: CODEX_BIN is set but not executable: ${CODEX_BIN}" 127
+    fi
+    die "codex_wp: codex not found. Install it or set CODEX_BIN." 127
+  fi
   exec "$codex_bin" "$@"
 fi
 
 resolve_python_bin() {
-  resolve_bin "${PYTHON_BIN:-$repo_root/.venv/bin/python3}" "python3"
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    resolve_explicit_bin "${PYTHON_BIN}"
+    return $?
+  fi
+
+  resolve_bin "$repo_root/.venv/bin/python3" "python3"
 }
 
 load_codex_wp_config_defaults() {
   local pythonpath
   local -a config_lines
 
-  codex_wp_python_bin="$(resolve_python_bin)"
-  [[ -n "$codex_wp_python_bin" && -x "$codex_wp_python_bin" ]] || \
+  if ! codex_wp_python_bin="$(resolve_python_bin)"; then
+    if [[ -n "${PYTHON_BIN:-}" ]]; then
+      die "codex_wp: PYTHON_BIN is set but not executable: ${PYTHON_BIN}" 127
+    fi
     die "codex_wp: python3 not found. Install it or set PYTHON_BIN." 127
+  fi
 
   pythonpath="$repo_root/src"
   if [[ -n "${PYTHONPATH:-}" ]]; then
@@ -1970,7 +2096,12 @@ hook_resolve_project_root_from_args() {
 
 hook_python_bin() {
   if [[ -z "$codex_wp_python_bin" ]]; then
-    codex_wp_python_bin="$(resolve_python_bin)"
+    if ! codex_wp_python_bin="$(resolve_python_bin)"; then
+      if [[ -n "${PYTHON_BIN:-}" ]]; then
+        die "codex_wp: PYTHON_BIN is set but not executable: ${PYTHON_BIN}" 127
+      fi
+      die "codex_wp: python3 not found. Install it or set PYTHON_BIN." 127
+    fi
   fi
   [[ -n "$codex_wp_python_bin" && -x "$codex_wp_python_bin" ]] || \
     die "codex_wp: python3 not found. Install it or set PYTHON_BIN." 127
@@ -2257,9 +2388,9 @@ with open(sys.argv[1], encoding="utf-8") as handle:
                 if text.strip():
                     last = text.strip()
 
-last = " ".join(last.split())
+last = last.strip()
 if last:
-    print(last[:400])
+    print(last)
 PY
 }
 
@@ -2540,12 +2671,16 @@ hook_extract_intent_text() {
   local intent_text=""
   local -a command=()
   local processing_provider="pi"
-  local preflight_timeout=30
-  local runtime_timeout=300
-  local timeout_seconds=$(( preflight_timeout + runtime_timeout + 5 ))
+  local preflight_timeout=0
+  local runtime_timeout=0
+  local timeout_seconds=0
 
   session_file="$(hook_resolve_session_file "$session_id")" || true
   [[ -n "$session_file" ]] || return 0
+
+  preflight_timeout="$(positive_int_env_or_default CDX_HOOK_EXTRACT_INTENT_PREFLIGHT_TIMEOUT 30)"
+  runtime_timeout="$(positive_int_env_or_default CDX_HOOK_EXTRACT_INTENT_RUNTIME_TIMEOUT 300)"
+  timeout_seconds=$(( preflight_timeout + runtime_timeout + 5 ))
 
   command=(
     extract-intent_cli
@@ -2771,6 +2906,9 @@ hook_emit_manager_event() {
   local last_msg="${6:-}"
   local intent_text="${7:-}"
   local failure_text="${8:-}"
+  local next_prompt="${9:-}"
+  local next_prompt_source="${10:-}"
+  local stop_reason="${11:-}"
   local python_bin=""
   local project_name=""
   local supervision=""
@@ -2779,11 +2917,11 @@ hook_emit_manager_event() {
   project_name="$(basename "${hook_run_project_root:-$PWD}")"
   supervision="$(hook_effective_supervision)"
 
-  "$python_bin" - "$event" "$train_id" "$session_id" "$turn" "$total" "$project_name" "$last_msg" "$intent_text" "$failure_text" "$supervision" <<'PY'
+  "$python_bin" - "$event" "$train_id" "$session_id" "$turn" "$total" "$project_name" "$last_msg" "$intent_text" "$failure_text" "$supervision" "$next_prompt" "$next_prompt_source" "$stop_reason" <<'PY'
 import json
 import sys
 
-event, train_id, session_id, turn, total, project_name, last_msg, intent_text, failure_text, supervision = sys.argv[1:]
+event, train_id, session_id, turn, total, project_name, last_msg, intent_text, failure_text, supervision, next_prompt, next_prompt_source, stop_reason = sys.argv[1:]
 
 payload = {
     "type": "hook.delivery",
@@ -2802,6 +2940,12 @@ if intent_text:
     payload["intent_text"] = intent_text
 if failure_text:
     payload["failure_text"] = failure_text
+if next_prompt:
+    payload["next_prompt"] = next_prompt
+if next_prompt_source:
+    payload["next_prompt_source"] = next_prompt_source
+if stop_reason:
+    payload["stop_reason"] = stop_reason
 
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -2823,7 +2967,7 @@ hook_dispatch_delivery() {
   local mattermost_text=""
 
   if [[ "$hook_delivery" == "manager" ]]; then
-    hook_emit_manager_event "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "$failure_text"
+    hook_emit_manager_event "$event" "$train_id" "$session_id" "$turn" "$total" "$last_msg" "$intent_text" "$failure_text" "$next_prompt" "$next_prompt_source" "$stop_reason"
     return 0
   fi
 
@@ -2897,11 +3041,19 @@ hook_build_notification() {
 
   if [[ "$event" == "stop" ]]; then
     header="🟡 Codex Exec Paused -> Continuing"
-    next_prompt_preview="$(hook_preview_text "$next_prompt")"
-    if [[ -n "$next_prompt_source" ]]; then
-      footer="▶ next prompt (${next_prompt_source}): ${next_prompt_preview}"
+    if [[ "$transport" == "mattermost" ]]; then
+      if [[ -n "$next_prompt_source" ]]; then
+        footer="$(printf '▶ next prompt (%s):\n%s' "$next_prompt_source" "$next_prompt")"
+      else
+        footer="$(printf '▶ next prompt:\n%s' "$next_prompt")"
+      fi
     else
-      footer="▶ next prompt: ${next_prompt_preview}"
+      next_prompt_preview="$(hook_preview_text "$next_prompt")"
+      if [[ -n "$next_prompt_source" ]]; then
+        footer="▶ next prompt (${next_prompt_source}): ${next_prompt_preview}"
+      else
+        footer="▶ next prompt: ${next_prompt_preview}"
+      fi
     fi
   else
     header="🏁 Codex Exec Finished"
@@ -3123,13 +3275,19 @@ run_headless_hook_loop() {
   return 0
 }
 
-cdx_bin="$(resolve_bin "${CDX_BIN:-$repo_root/.venv/bin/cdx}" "cdx")"
-[[ -n "$cdx_bin" && -x "$cdx_bin" ]] || \
+if ! cdx_bin="$(resolve_cdx_bin)"; then
+  if [[ -n "${CDX_BIN:-}" ]]; then
+    die "codex_wp: CDX_BIN is set but not executable: ${CDX_BIN}" 127
+  fi
   die "codex_wp: cdx not found. Install it or set CDX_BIN." 127
+fi
 
-codex_bin="$(resolve_bin "${CODEX_BIN:-}" "codex")"
-[[ -n "$codex_bin" && -x "$codex_bin" ]] || \
+if ! codex_bin="$(resolve_codex_bin)"; then
+  if [[ -n "${CODEX_BIN:-}" ]]; then
+    die "codex_wp: CODEX_BIN is set but not executable: ${CODEX_BIN}" 127
+  fi
   die "codex_wp: codex not found. Install it or set CODEX_BIN." 127
+fi
 
 proxy_setup="$("$cdx_bin" proxy --print-env-only)"
 eval "$proxy_setup"
@@ -3190,8 +3348,12 @@ elif (( ! help_requested )) && hook_is_interactive_mode "$@"; then
     die "codex_wp: failed to clear managed stop hook for $hook_run_project_root." 2
 fi
 
-# --no-alt-screen: preserve scrollback inside zellij (codex TUI uses alternate screen by default)
-codex_flags=(--dangerously-bypass-approvals-and-sandbox)
+# Preserve legacy bypass mode only when the caller did not choose an execution policy.
+# --no-alt-screen keeps scrollback working inside Zellij regardless of that policy.
+codex_flags=()
+if ! has_explicit_execution_policy "$@"; then
+  codex_flags=(--dangerously-bypass-approvals-and-sandbox)
+fi
 if [[ -n "${ZELLIJ:-}" ]]; then
   codex_flags+=(--no-alt-screen)
 fi

@@ -70,6 +70,7 @@ cdx stop
 - default stop-hook transport: Mattermost for `bin/codex_wp ... --hook stop`
 - low-level transport override: `bin/codex_wp ... --hook-delivery mattermost|telegram|both|manager`
 - Mattermost last-message formatter: `bin/codex_wp ... --hook-last-message-format raw|ru3`
+- hook-side `extract-intent` keeps the richer default budget (`30s` preflight + `300s` runtime); override with `CDX_HOOK_EXTRACT_INTENT_PREFLIGHT_TIMEOUT` and `CDX_HOOK_EXTRACT_INTENT_RUNTIME_TIMEOUT` when faster fallback is preferable
 - canonical contract and examples: `docs/CODEX_WP_SUPERVISION.md`
 
 ## Runtime Files
