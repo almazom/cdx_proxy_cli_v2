@@ -33,8 +33,10 @@ runs/*/reports/execution/simplification_step.md
 Thumbs.db
 .tox/
 .venv/
+.venv.bak.*/
 venv/
 # Virtual environments
 .vscode/
 docs/envoy_doc/
 docs/flow_artefacts/
+bin/*.bak.*
