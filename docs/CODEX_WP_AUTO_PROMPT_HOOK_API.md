@@ -1,6 +1,6 @@
 # codex_wp Auto-Prompt Hook API
 
-**Last verified:** 2026-04-05
+**Last verified:** 2026-04-04
 **Status:** OK
 
 ## Purpose
@@ -224,15 +224,9 @@ Failure notifications can include:
 - `failed to parse session_id from codex JSON output`
 - `codex exec failed (exit N)`
 
-When `--hook-supervision` or `--hook-delivery manager` is used, manager JSON
-events now surface the resolved loop decision too:
-
-- stop events can include `next_prompt` and `next_prompt_source`
-- complete events can include `stop_reason`
-- error events can include `failure_text`
-
-This lets an outer manager or bundle-local notifier forward the exact generated
-resume prompt as a separate operator-facing message.
+When `--hook-supervision` is used, manager JSON event shape stays the same.
+Auto-prompt mode changes how the next prompt is resolved, not the outer manager
+event contract.
 
 ## Operator Examples
 

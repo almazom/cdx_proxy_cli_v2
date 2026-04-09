@@ -137,6 +137,17 @@ def parse_output_last_message(argv: list[str]) -> str | None:
     return None
 
 
+def parse_config(argv: list[str], key: str) -> str | None:
+    prefix = f"{{key}}="
+    for index, arg in enumerate(argv):
+        if arg != "-c" or index + 1 >= len(argv):
+            continue
+        payload = argv[index + 1]
+        if payload.startswith(prefix):
+            return payload.split("=", 1)[1]
+    return None
+
+
 def final_text(prompt: str) -> str:
     if "Use $auto-commit." in prompt:
         return "Auto-commit shortcut OK"
@@ -158,6 +169,14 @@ def final_text(prompt: str) -> str:
 def main() -> int:
     argv = sys.argv[1:]
     json_mode = "--json" in argv
+    log_path = os.environ.get("FAKE_CODEX_LOG_PATH", "")
+
+    def append_log(payload: dict[str, object]) -> None:
+        if not log_path:
+            return
+        with Path(log_path).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\\n")
+
     if "--help" in argv or (argv and argv[0] == "help"):
         if "review" in argv:
             print("Fake Codex Review Help")
@@ -171,31 +190,29 @@ def main() -> int:
         print("  -p, --profile <CONFIG_PROFILE>")
         return 0
 
+    if "review" in argv:
+        append_log({{"mode": "review", "argv": argv}})
+        parse_base_url(argv)
+        if parse_config(argv, "approval_policy") != '"never"':
+            fail("missing review approval policy config")
+        if parse_config(argv, "sandbox_mode") != '"danger-full-access"':
+            fail("missing review sandbox config")
+        if "--dangerously-bypass-approvals-and-sandbox" not in argv:
+            fail("missing bypass flag")
+        print("Fake review output")
+        return 0
+
     if "exec" not in argv:
         fail("expected exec subcommand")
     prompt = argv[-1]
-    log_path = os.environ.get("FAKE_CODEX_LOG_PATH", "")
-    if log_path:
-        with Path(log_path).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({{"prompt": prompt, "argv": argv}}) + "\\n")
+    append_log({{"mode": "exec", "argv": argv, "prompt": prompt}})
     is_fixed_shortcut_prompt = (
         "Use $auto-commit." in prompt or "Use $code-simplifier." in prompt
     )
     if not is_fixed_shortcut_prompt and not json_mode:
         fail("expected --json")
-    explicit_policy = any(
-        arg in {{
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--full-auto",
-            "--sandbox",
-            "--ask-for-approval",
-        }}
-        or arg.startswith("--sandbox=")
-        or arg.startswith("--ask-for-approval=")
-        for arg in argv
-    )
-    if not explicit_policy:
-        fail("missing execution policy")
+    if "--dangerously-bypass-approvals-and-sandbox" not in argv:
+        fail("missing bypass flag")
     if "OPENAI_BASE_URL" in os.environ:
         fail("OPENAI_BASE_URL should be unset")
     if "OPENAI_API_BASE" in os.environ:
@@ -910,16 +927,6 @@ def _read_fake_codex_prompts(path: Path) -> list[str]:
     ]
 
 
-def _read_fake_codex_records(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
 def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -1123,7 +1130,7 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert "  --hook-prompt-mode <mode>    next prompt strategy: static|auto|hybrid (default: static)" in result.stdout
     assert "  --hook-auto-stop-on-complete end early when auto mode says the task is complete" in result.stdout
     assert (
-        "  --hook-supervision <mode>    headless exec --json only; manager delivery only; observation|management"
+        "  --hook-supervision <mode>    primary supervision API: observation|management"
         in result.stdout
     )
     assert (
@@ -1143,178 +1150,37 @@ def test_codex_wp_help_is_side_effect_free_and_includes_wrapper_help(
     assert "Proxy companion commands:" in result.stdout
     assert "codex_wp auto-boots cdx proxy" in result.stdout
     assert "cdx doctor --probe           probe auth keys and classify health" in result.stdout
-    assert "Zellij scrollback note:" in result.stdout
-    assert (
-        "Inside Zellij, codex_wp automatically adds upstream `--no-alt-screen`."
-        in result.stdout
-    )
-    assert (
-        "This keeps Codex in inline mode so pane scrollback keeps working."
-        in result.stdout
-    )
     assert expected_usage in result.stdout
     assert _read_fake_zellij_calls(capture_path) == []
 
 
-def test_codex_wp_help_prints_wrapper_help_when_upstream_codex_is_missing(
-    tmp_path: Path,
-) -> None:
-    env = os.environ.copy()
-    env["PATH"] = f"{tmp_path}{os.pathsep}/usr/bin:/bin"
-    env.pop("CODEX_BIN", None)
-
-    result = _run_codex_wp_args(["--help"], env)
-
-    assert result.returncode == 127
-    assert "codex_wp wrapper flags" in result.stdout
-    assert "Help is side-effect free." in result.stdout
-    assert "Fake Codex CLI Help" not in result.stdout
-    assert "codex_wp: codex not found. Install it or set CODEX_BIN." in result.stderr
-
-
-def test_codex_wp_help_fails_fast_for_invalid_explicit_codex_bin(tmp_path: Path) -> None:
-    fake_codex = _write_fake_codex(tmp_path)
-    _write_executable(tmp_path / "codex", fake_codex.read_text(encoding="utf-8"))
-    env = os.environ.copy()
-    env["PATH"] = f"{tmp_path}{os.pathsep}/usr/bin:/bin"
-    env["CODEX_BIN"] = str(tmp_path / "missing-codex")
-
-    result = _run_codex_wp_args(["--help"], env)
-
-    assert result.returncode == 127
-    assert "codex_wp wrapper flags" in result.stdout
-    assert "Fake Codex CLI Help" not in result.stdout
-    assert (
-        f"codex_wp: CODEX_BIN is set but not executable: {env['CODEX_BIN']}"
-        in result.stderr
-    )
-
-
-def test_codex_wp_exec_without_explicit_policy_keeps_legacy_bypass(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    _init_git_repo(project)
-    prompt_log_path = tmp_path / "fake_codex.jsonl"
-
+def test_codex_wp_review_injects_review_safe_proxy_config(tmp_path: Path) -> None:
     fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
     fake_codex = _write_fake_codex(tmp_path)
+    log_path = tmp_path / "fake_codex.jsonl"
 
     env = _path_env(
         tmp_path,
         extra_env={
             "CDX_BIN": str(fake_cdx),
             "CODEX_BIN": str(fake_codex),
-            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
+            "FAKE_CODEX_LOG_PATH": str(log_path),
         },
     )
 
-    result = _run_codex_wp_args(
-        [
-            "exec",
-            "--json",
-            "-C",
-            str(project),
-            _fixed_shortcut_prompt("code_simplifier"),
-        ],
-        env,
-        cwd=project,
-    )
+    result = _run_codex_wp_args(["review", "--uncommitted"], env)
 
     assert result.returncode == 0, result.stderr
-    records = _read_fake_codex_records(prompt_log_path)
+    assert "Fake review output" in result.stdout
+    records = _read_jsonl_records(log_path)
     assert len(records) == 1
-    assert "--dangerously-bypass-approvals-and-sandbox" in list(records[0]["argv"])
-
-
-def test_codex_wp_exec_full_auto_does_not_add_legacy_bypass(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    _init_git_repo(project)
-    prompt_log_path = tmp_path / "fake_codex.jsonl"
-
-    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
-    fake_codex = _write_fake_codex(tmp_path)
-
-    env = _path_env(
-        tmp_path,
-        extra_env={
-            "CDX_BIN": str(fake_cdx),
-            "CODEX_BIN": str(fake_codex),
-            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
-        },
-    )
-
-    result = _run_codex_wp_args(
-        [
-            "exec",
-            "--json",
-            "--full-auto",
-            "-C",
-            str(project),
-            _fixed_shortcut_prompt("code_simplifier"),
-        ],
-        env,
-        cwd=project,
-    )
-
-    assert result.returncode == 0, result.stderr
-    records = _read_fake_codex_records(prompt_log_path)
-    assert len(records) == 1
+    assert records[0]["mode"] == "review"
     argv = list(records[0]["argv"])
-    assert "--full-auto" in argv
-    assert "--dangerously-bypass-approvals-and-sandbox" not in argv
-
-
-def test_codex_wp_exec_explicit_sandbox_and_approval_keep_prompt_injection_and_no_bypass(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    _init_git_repo(project)
-    context_file = tmp_path / "context.md"
-    context_file.write_text("# plan\n", encoding="utf-8")
-    prompt_log_path = tmp_path / "fake_codex.jsonl"
-
-    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
-    fake_codex = _write_fake_codex(tmp_path)
-
-    env = _path_env(
-        tmp_path,
-        extra_env={
-            "CDX_BIN": str(fake_cdx),
-            "CODEX_BIN": str(fake_codex),
-            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
-        },
-    )
-
-    result = _run_codex_wp_args(
-        [
-            "-f",
-            str(context_file),
-            "--sandbox",
-            "danger-full-access",
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--json",
-            "-C",
-            str(project),
-            _fixed_shortcut_prompt("code_simplifier"),
-        ],
-        env,
-        cwd=project,
-    )
-
-    assert result.returncode == 0, result.stderr
-    records = _read_fake_codex_records(prompt_log_path)
-    assert len(records) == 1
-    argv = list(records[0]["argv"])
-    assert "--sandbox" in argv
-    assert argv[argv.index("--sandbox") + 1] == "danger-full-access"
-    assert "--ask-for-approval" in argv
-    assert argv[argv.index("--ask-for-approval") + 1] == "never"
-    assert "--dangerously-bypass-approvals-and-sandbox" not in argv
-    assert str(records[0]["prompt"]).startswith(f"@{context_file} ")
+    assert argv[:2] == ["-c", 'openai_base_url="http://127.0.0.1:43123"']
+    assert 'approval_policy="never"' in argv
+    assert 'sandbox_mode="danger-full-access"' in argv
+    assert "--dangerously-bypass-approvals-and-sandbox" in argv
+    assert argv[-2:] == ["review", "--uncommitted"]
 
 
 @pytest.mark.parametrize(
@@ -2076,64 +1942,6 @@ def test_codex_wp_headless_hook_auto_mode_generates_next_prompt(
     assert "✅ finished: hook budget exhausted" in messages[2]
 
 
-def test_codex_wp_headless_hook_auto_mode_emits_manager_next_prompt_fields(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    codex_log = tmp_path / "hook-codex.jsonl"
-
-    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
-    fake_codex = _write_fake_hook_codex(tmp_path)
-
-    env = _path_env(
-        tmp_path,
-        extra_env={
-            "CDX_BIN": str(fake_cdx),
-            "CODEX_BIN": str(fake_codex),
-            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
-            "FAKE_HOOK_CODEX_AUTO_PROMPT_TEXT": (
-                '{"continue_session": true, "next_prompt": "Inspect the remaining edge cases.", '
-                '"operator_summary": "Continue with the next concrete step.", '
-                '"reasoning_note": "Fake auto prompt."}'
-            ),
-            "HOME": str(home),
-        },
-    )
-
-    result = _run_codex_wp_args(
-        [
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-            "-C",
-            str(project),
-            "first headless prompt",
-            "--hook",
-            "stop",
-            "--hook-prompt-mode",
-            "auto",
-            "--hook-times",
-            "2",
-            "--hook-delivery",
-            "manager",
-        ],
-        env,
-        cwd=project,
-    )
-
-    assert result.returncode == 0, result.stderr
-    manager_events = _manager_events(result.stdout)
-    assert [record["event"] for record in manager_events] == ["stop", "complete"]
-    assert manager_events[0]["next_prompt"] == "Inspect the remaining edge cases."
-    assert manager_events[0]["next_prompt_source"] == "auto"
-    assert "stop_reason" not in manager_events[0]
-    assert manager_events[1]["stop_reason"] == "hook budget exhausted"
-    assert "next_prompt" not in manager_events[1]
-
-
 def test_codex_wp_headless_hook_hybrid_mode_falls_back_to_static_prompt(
     tmp_path: Path,
 ) -> None:
@@ -2376,63 +2184,6 @@ def test_codex_wp_headless_hook_loop_defaults_to_mattermost(
     assert len(_read_jsonl_records(codex_log)) == 2
     assert len(_read_jsonl_records(mattermost_log)) == 2
     assert _read_jsonl_records(t2me_log) == []
-
-
-def test_codex_wp_headless_hook_loop_mattermost_keeps_full_long_messages(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    codex_log = tmp_path / "hook-codex.jsonl"
-    mattermost_log = tmp_path / "mattermost.jsonl"
-
-    first_prompt = "first headless prompt\n```text\n" + ("alpha-" * 120) + "\n```"
-    resume_prompt = "resume again\n```text\n" + ("beta-" * 120) + "\n```"
-
-    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
-    fake_codex = _write_fake_hook_codex(tmp_path)
-    fake_mattermost = _write_fake_mattermost_to_me(tmp_path)
-
-    env = _path_env(
-        tmp_path,
-        extra_env={
-            "CDX_BIN": str(fake_cdx),
-            "CODEX_BIN": str(fake_codex),
-            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
-            "FAKE_MATTERMOST_LOG_PATH": str(mattermost_log),
-            "MATTERMOST_TO_ME_BIN": str(fake_mattermost),
-            "HOME": str(home),
-        },
-    )
-
-    result = _run_codex_wp_args(
-        [
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-            "-C",
-            str(project),
-            first_prompt,
-            "--hook",
-            "stop",
-            "--hook-prompt",
-            resume_prompt,
-            "--hook-times",
-            "2",
-        ],
-        env,
-        cwd=project,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-    messages = [str(record["argv"][-1]) for record in _read_jsonl_records(mattermost_log)]
-    assert len(messages) == 2
-    assert first_prompt[-300:] in messages[0]
-    assert resume_prompt[-300:] in messages[0]
-    assert "```text\n" in messages[0]
 
 
 def test_codex_wp_headless_hook_ru3_formats_only_mattermost(
@@ -2686,12 +2437,6 @@ def test_codex_wp_headless_hook_loop_emits_manager_events(
         assert str(record["last_assistant_message"]).startswith(f"Hook reply {index}:")
         assert record["train_id"].startswith("TRAIN-")
         assert str(record["intent_text"]).replace("\\n", "\n") == "🧭 Intent\n① fake step"
-    assert manager_events[0]["next_prompt"] == "resume again"
-    assert manager_events[0]["next_prompt_source"] == "static"
-    assert manager_events[1]["next_prompt"] == "resume again"
-    assert manager_events[1]["next_prompt_source"] == "static"
-    assert manager_events[2]["stop_reason"] == "hook budget exhausted"
-    assert "next_prompt" not in manager_events[2]
 
     assert _read_jsonl_records(t2me_log) == []
 
@@ -2754,11 +2499,6 @@ def test_codex_wp_headless_manager_delivery_tolerates_missing_t2me_and_stderr_no
     assert manager_events[0]["last_assistant_message"] == "Pilot 1: first headless prompt"
     assert manager_events[1]["last_assistant_message"] == "Pilot 2: resume again"
     assert manager_events[2]["last_assistant_message"] == "Pilot 3: resume again"
-    assert manager_events[0]["next_prompt"] == "resume again"
-    assert manager_events[0]["next_prompt_source"] == "static"
-    assert manager_events[1]["next_prompt"] == "resume again"
-    assert manager_events[1]["next_prompt_source"] == "static"
-    assert manager_events[2]["stop_reason"] == "hook budget exhausted"
 
 
 @pytest.mark.parametrize(
@@ -3916,51 +3656,6 @@ def test_codex_wp_zellij_floating_launch_derives_x_from_right_padding(
         "terminal_11",
         "cdx: REQ1 Check",
     ]
-
-
-def test_codex_wp_zellij_full_auto_keeps_no_alt_screen_without_legacy_bypass(
-    tmp_path: Path,
-) -> None:
-    _write_fake_zellij(tmp_path)
-    capture_path = tmp_path / "fake_zellij.jsonl"
-    prompt_log_path = tmp_path / "fake_codex.jsonl"
-
-    fake_cdx = _write_fake_proxy_env_cdx(tmp_path)
-    fake_codex = _write_fake_codex(tmp_path)
-
-    env = _zellij_env(
-        tmp_path,
-        capture_path,
-        extra_env={
-            "CDX_BIN": str(fake_cdx),
-            "CODEX_BIN": str(fake_codex),
-            "FAKE_CODEX_LOG_PATH": str(prompt_log_path),
-            "FAKE_ZELLIJ_LIST_TABS_STDOUT": _active_zellij_tab_stdout(),
-            "FAKE_ZELLIJ_RUN_EXECUTE": "1",
-            "ZELLIJ": "fake-session",
-            "HOME": str(tmp_path / "home"),
-        },
-    )
-
-    result = _run_codex_wp_args(
-        [
-            "--zellij-floating",
-            "exec",
-            "--json",
-            "--full-auto",
-            _fixed_shortcut_prompt("code_simplifier"),
-        ],
-        env,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "terminal_11"
-    records = _read_fake_codex_records(prompt_log_path)
-    assert len(records) == 1
-    argv = list(records[0]["argv"])
-    assert "--full-auto" in argv
-    assert "--no-alt-screen" in argv
-    assert "--dangerously-bypass-approvals-and-sandbox" not in argv
 
 
 def test_codex_wp_zellij_floating_close_on_exit_is_explicit(
