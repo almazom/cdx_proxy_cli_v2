@@ -78,6 +78,7 @@ def status_level_emoji(status: str) -> str:
         "PROBATION": "🟠",
         "COOLDOWN": "🔴",
         "BLACKLIST": "⛔",
+        "EXPIRED": "💎",
         "UNKNOWN": "⚪",
     }.get(status, "⚪")
 
@@ -93,9 +94,10 @@ def status_rank(status: str) -> int:
         "PROBATION": 2,
         "COOLDOWN": 3,
         "BLACKLIST": 4,
-        "UNKNOWN": 5,
+        "EXPIRED": 5,
+        "UNKNOWN": 6,
     }
-    return order.get(status, 6)
+    return order.get(status, 7)
 
 
 def account_best_left(entry: Dict[str, Any]) -> Optional[float]:
@@ -207,7 +209,6 @@ def build_collective_payload(
     cooldown_at: int,
     timeout: int,
     only: str,
-    prefer_keyring: bool = True,
     current_access_token: Optional[str] = None,
     current_file: Optional[str] = None,
     current_email: Optional[str] = None,
@@ -220,7 +221,6 @@ def build_collective_payload(
         cooldown_at=cooldown_at,
         timeout=timeout,
         only=only,
-        prefer_keyring=prefer_keyring,
     )
     return build_collective_payload_from_accounts(
         accounts=snapshot.get("accounts", []),
@@ -245,15 +245,14 @@ def build_collective_payload_from_accounts(
     current_email: Optional[str] = None,
     current_account_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    normalized_accounts = [
-        dict(entry) for entry in accounts if isinstance(entry, dict)
-    ]
+    normalized_accounts = [dict(entry) for entry in accounts if isinstance(entry, dict)]
     counts = {
         "ok": 0,
         "warn": 0,
         "probation": 0,
         "cooldown": 0,
         "blacklist": 0,
+        "expired": 0,
         "unknown": 0,
     }
     max_used = None
@@ -275,6 +274,8 @@ def build_collective_payload_from_accounts(
             counts["cooldown"] += 1
         elif status == "BLACKLIST":
             counts["blacklist"] += 1
+        elif status == "EXPIRED":
+            counts["expired"] += 1
         else:
             counts["unknown"] += 1
         if account_is_available(entry):
@@ -331,7 +332,9 @@ def build_collective_payload_from_accounts(
     def _pick_current_candidates() -> list[Dict[str, Any]]:
         if current_file:
             matched = [
-                entry for entry in normalized_accounts if entry.get("file") == current_file
+                entry
+                for entry in normalized_accounts
+                if entry.get("file") == current_file
             ]
             if matched:
                 return matched

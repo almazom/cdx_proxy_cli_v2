@@ -10,9 +10,10 @@ DEFAULT_LIMIT_WARN_AT = 70
 DEFAULT_LIMIT_COOLDOWN_AT = 90
 DEFAULT_LIMIT_TIMEOUT = 8
 DEFAULT_LIMIT_RECHECK_SECONDS = 60
-DEFAULT_LIMIT_MIN_REMAINING_PERCENT = 30.0
+DEFAULT_LIMIT_MIN_REMAINING_PERCENT = 15.0
 DEFAULT_USAGE_BASE_URL = "https://chatgpt.com/backend-api"
 ELIGIBLE_ACCOUNT_STATUSES = {"OK", "WARN"}
+EXPIRED_REASONS = {"plan_expired", "subscription_expired", "free_plan"}
 
 
 def usage_base_url() -> str:
@@ -90,59 +91,11 @@ def _window_is_preemptive_limit_cooldown(
     return remaining_percent < max(0.0, float(min_remaining_percent))
 
 
-def selection_preference_details(
-    limit_health: Optional[Dict[str, Any]],
-    *,
-    min_remaining_percent: float = DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
-) -> Dict[str, Any]:
-    if not isinstance(limit_health, dict):
-        return {
-            "known": False,
-            "preferred": False,
-            "source": "unknown",
-            "remaining_percent": None,
-            "reset_after_seconds": None,
-        }
-
-    remaining_candidates: List[float] = []
-    reset_candidates: List[int] = []
-    for key in ("five_hour", "weekly"):
-        window = limit_health.get(key)
-        used_percent = _window_used_percent(window)
-        if used_percent is None:
-            continue
-        remaining_candidates.append(max(0.0, 100.0 - used_percent))
-        reset_after = _window_reset_after_seconds(window)
-        if reset_after is not None and reset_after > 0:
-            reset_candidates.append(reset_after)
-
-    if not remaining_candidates:
-        return {
-            "known": False,
-            "preferred": False,
-            "source": "unknown",
-            "remaining_percent": None,
-            "reset_after_seconds": None,
-        }
-
-    remaining_percent = min(remaining_candidates)
-    preferred = remaining_percent >= max(0.0, float(min_remaining_percent))
-    reset_after_seconds = min(reset_candidates) if reset_candidates else None
-    return {
-        "known": True,
-        "preferred": preferred,
-        "source": "preferred" if preferred else "degraded",
-        "remaining_percent": remaining_percent,
-        "reset_after_seconds": reset_after_seconds,
-    }
-
-
 def limit_block_details(
     limit_health: Optional[Dict[str, Any]],
     *,
     now: Optional[float] = None,
     min_remaining_percent: float = DEFAULT_LIMIT_MIN_REMAINING_PERCENT,
-    include_guardrails: bool = True,
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(limit_health, dict):
         return None
@@ -162,14 +115,14 @@ def limit_block_details(
             continue
         if window_status == "COOLDOWN":
             cooldown_keys.append(key)
-        elif include_guardrails:
+        else:
             guardrail_keys.append(key)
         reset_after = _window_reset_after_seconds(window)
         if reset_after is None or reset_after <= 0:
             has_unknown_reset = True
             continue
         cooldown_seconds.append(reset_after)
-    effective_keys = cooldown_keys or (guardrail_keys if include_guardrails else [])
+    effective_keys = cooldown_keys or guardrail_keys
     if not effective_keys:
         return None
     if has_unknown_reset:
@@ -183,7 +136,7 @@ def limit_block_details(
     else:
         reason = "limit_5h"
     reason_origin = "limit"
-    if include_guardrails and not cooldown_keys and guardrail_keys:
+    if not cooldown_keys and guardrail_keys:
         reason = f"{reason}_guardrail"
         reason_origin = "limit_guardrail"
     return {
@@ -191,28 +144,6 @@ def limit_block_details(
         "reason_origin": reason_origin,
         "cooldown_seconds": reset_after_seconds,
         "until": now_ts + reset_after_seconds,
-    }
-
-
-def credits_block_details(
-    limit_health: Optional[Dict[str, Any]],
-    *,
-    now: Optional[float] = None,
-) -> Optional[Dict[str, Any]]:
-    if not isinstance(limit_health, dict):
-        return None
-    credits = limit_health.get("credits")
-    if not isinstance(credits, dict):
-        return None
-    if str(credits.get("status") or "").upper() != "EXHAUSTED":
-        return None
-    now_ts = float(now if now is not None else time.time())
-    cooldown_seconds = DEFAULT_LIMIT_RECHECK_SECONDS
-    return {
-        "reason": "credits_exhausted",
-        "reason_origin": "credits",
-        "cooldown_seconds": cooldown_seconds,
-        "until": now_ts + cooldown_seconds,
     }
 
 
@@ -242,26 +173,27 @@ def merged_account_state(
     runtime_until = runtime_item.get("until")
 
     limit_has_data = has_limit_window_data(limit_item)
-    selection = selection_preference_details(
-        limit_item,
-        min_remaining_percent=min_remaining_percent,
-    )
     limit_block = limit_block_details(
         limit_item,
         min_remaining_percent=min_remaining_percent,
-        include_guardrails=False,
     )
-    credit_block = credits_block_details(limit_item)
     limit_status = str(limit_item.get("status") or "UNKNOWN").upper()
+
+    plan_expired = bool(limit_item.get("plan_expired"))
+    limit_error = str(limit_item.get("error") or "").strip().lower()
+    if not plan_expired and "subscription" in limit_error:
+        plan_expired = True
 
     status = runtime_status
     if runtime_status in {"BLACKLIST", "PROBATION", "COOLDOWN"}:
         status = runtime_status
+    elif plan_expired and not limit_has_data:
+        status = "EXPIRED"
     elif runtime_status == "UNKNOWN":
-        status = "COOLDOWN" if (limit_block or credit_block) else "UNKNOWN"
+        status = "COOLDOWN" if limit_block else "UNKNOWN"
     elif limit_snapshot_known and not limit_has_data:
-        status = "COOLDOWN" if credit_block else "UNKNOWN"
-    elif limit_block or credit_block:
+        status = "UNKNOWN"
+    elif limit_block:
         status = "COOLDOWN"
     elif limit_status == "WARN":
         status = "WARN"
@@ -269,12 +201,6 @@ def merged_account_state(
         status = "UNKNOWN"
 
     item["status"] = status
-    item["selection_known"] = bool(selection["known"])
-    item["selection_preferred"] = bool(selection["preferred"])
-    item["selection_source"] = str(selection["source"])
-    item["selection_remaining_percent"] = selection["remaining_percent"]
-    item["selection_reset_after_seconds"] = selection["reset_after_seconds"]
-    item["selection_floor_percent"] = float(min_remaining_percent)
     item["eligible_now"] = bool(
         runtime_eligible
         and runtime_status in ELIGIBLE_ACCOUNT_STATUSES
@@ -283,7 +209,6 @@ def merged_account_state(
             or (
                 limit_has_data
                 and limit_block is None
-                and credit_block is None
                 and limit_status in ELIGIBLE_ACCOUNT_STATUSES
             )
         )
@@ -292,12 +217,12 @@ def merged_account_state(
     if runtime_reason:
         item["reason"] = runtime_reason
         item["reason_origin"] = runtime_origin or "runtime"
+    elif plan_expired and not limit_has_data and status == "EXPIRED":
+        item["reason"] = "plan_expired"
+        item["reason_origin"] = "subscription"
     elif limit_block and status == "COOLDOWN":
         item["reason"] = limit_block["reason"]
         item["reason_origin"] = limit_block["reason_origin"]
-    elif credit_block and status == "COOLDOWN":
-        item["reason"] = credit_block["reason"]
-        item["reason_origin"] = credit_block["reason_origin"]
     elif runtime_status == "UNKNOWN":
         item["reason"] = "runtime_unavailable"
         item["reason_origin"] = "runtime"
@@ -307,23 +232,21 @@ def merged_account_state(
         item["reason"] = "limit_unavailable"
         item["reason_origin"] = "limit"
 
-    if status == "COOLDOWN":
-        until_candidates: List[float] = []
-        if isinstance(runtime_until, (int, float)):
-            until_candidates.append(float(runtime_until))
-        cooldown_candidates: List[int] = []
+    if limit_block and status == "COOLDOWN":
+        item["until"] = max(
+            float(runtime_until) if isinstance(runtime_until, (int, float)) else 0.0,
+            float(limit_block["until"]),
+        )
         runtime_cooldown = runtime_item.get("cooldown_seconds")
-        if isinstance(runtime_cooldown, (int, float)):
-            cooldown_candidates.append(int(runtime_cooldown))
-        for block in (limit_block, credit_block):
-            if not isinstance(block, dict):
-                continue
-            until_candidates.append(float(block["until"]))
-            cooldown_candidates.append(int(block["cooldown_seconds"]))
-        if until_candidates:
-            item["until"] = max(until_candidates)
-        if cooldown_candidates:
-            item["cooldown_seconds"] = max(cooldown_candidates) or None
+        item["cooldown_seconds"] = (
+            max(
+                int(runtime_cooldown)
+                if isinstance(runtime_cooldown, (int, float))
+                else 0,
+                int(limit_block["cooldown_seconds"]),
+            )
+            or None
+        )
     elif isinstance(runtime_until, (int, float)):
         item["until"] = float(runtime_until)
 

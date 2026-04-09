@@ -112,31 +112,15 @@ def _format_remaining_percent(window: object) -> str:
     return f"{remaining:.1f}% left"
 
 
-def _guarded_windows_label(account: Dict[str, Any]) -> str:
-    floor = account.get("selection_floor_percent")
-    floor_value = float(floor) if isinstance(floor, (int, float)) else None
-    labels: list[str] = []
-    for key, label in (("five_hour", "5h"), ("weekly", "weekly")):
-        window = account.get(key)
-        if not isinstance(window, dict):
-            continue
-        used = window.get("used_percent")
-        if not isinstance(used, (int, float)):
-            continue
-        remaining = max(0.0, 100.0 - float(used))
-        if floor_value is not None and remaining < floor_value:
-            labels.append(label)
-    return "+".join(labels)
-
-
 def _limit_reason_label(account: Dict[str, Any]) -> str:
     reason = str(account.get("reason") or "").strip().lower()
     origin = str(account.get("reason_origin") or "").strip().lower()
     if not reason:
-        if str(account.get("selection_source") or "").strip().lower() == "degraded":
-            guard = _guarded_windows_label(account)
-            return f"{guard} guard" if guard else "guard"
         return "-"
+    if reason == "plan_expired":
+        return "free / expired"
+    if reason == "subscription_expired":
+        return "subscription expired"
     if reason == "runtime_unavailable":
         return "runtime"
     if reason == "limit_unavailable":
@@ -165,6 +149,8 @@ def _limit_state_label(account: Dict[str, Any]) -> str:
         return "available"
     if status == "WARN":
         return "hot"
+    if status == "EXPIRED":
+        return "expired"
     if status == "COOLDOWN":
         if origin == "limit_guardrail":
             return "guarded"
@@ -175,6 +161,8 @@ def _limit_state_label(account: Dict[str, Any]) -> str:
         return "probing"
     if status == "BLACKLIST":
         return "blacklisted"
+    if reason == "subscription_expired":
+        return "expired"
     if reason == "runtime_unavailable":
         return "runtime"
     return "unknown"
@@ -213,7 +201,9 @@ def _limit_window_summary(window: object) -> str:
     return f"{remaining} / {reset}"
 
 
-def _limits_summary_line(accounts: List[Dict[str, Any]], *, fetched_at: Optional[float]) -> Text:
+def _limits_summary_line(
+    accounts: List[Dict[str, Any]], *, fetched_at: Optional[float]
+) -> Text:
     total = len(accounts)
     if total <= 0:
         return Text("No limit snapshots loaded.", style="dim")
@@ -221,6 +211,7 @@ def _limits_summary_line(accounts: List[Dict[str, Any]], *, fetched_at: Optional
     warn = 0
     cooldown = 0
     blacklist = 0
+    expired = 0
     unknown = 0
     five_hour_remaining: List[float] = []
     weekly_remaining: List[float] = []
@@ -235,6 +226,8 @@ def _limits_summary_line(accounts: List[Dict[str, Any]], *, fetched_at: Optional
             cooldown += 1
         elif status == "BLACKLIST":
             blacklist += 1
+        elif status == "EXPIRED":
+            expired += 1
         else:
             unknown += 1
         if status not in {"OK", "WARN"}:
@@ -275,6 +268,7 @@ def _limits_summary_line(accounts: List[Dict[str, Any]], *, fetched_at: Optional
                 f"WARN {warn}",
                 f"COOLDOWN {cooldown}",
                 f"BLACKLIST {blacklist}",
+                f"EXPIRED {expired}",
                 f"UNKNOWN {unknown}",
                 f"Next key {next_key}",
                 f"Avg 5H left {avg_5h}",
@@ -333,7 +327,12 @@ def _is_next_limit_account(
 
 
 def _limit_sort_key(
-    account: Dict[str, Any], *, current_auth_file: str, current_auth_email: str, next_auth_file: str = "", next_auth_email: str = ""
+    account: Dict[str, Any],
+    *,
+    current_auth_file: str,
+    current_auth_email: str,
+    next_auth_file: str = "",
+    next_auth_email: str = "",
 ) -> Tuple[int, int, str]:
     is_current = _is_current_limit_account(
         account,
@@ -355,7 +354,11 @@ def _limit_sort_key(
         return (2, state_rank, str(account.get("email") or account.get("file") or ""))
     return_seconds = _limit_return_seconds(account)
     if return_seconds is not None and return_seconds > 0:
-        return (3, return_seconds, str(account.get("email") or account.get("file") or ""))
+        return (
+            3,
+            return_seconds,
+            str(account.get("email") or account.get("file") or ""),
+        )
     return (4, 0, str(account.get("email") or account.get("file") or ""))
 
 
@@ -481,7 +484,11 @@ def _build_limits_panel(
     next_auth_file = str(limits.get("next_auth_file") or "").strip()
     next_auth_email = str(limits.get("next_auth_email") or "").strip()
     accounts_raw = limits.get("accounts")
-    accounts = [item for item in accounts_raw if isinstance(item, dict)] if isinstance(accounts_raw, list) else []
+    accounts = (
+        [item for item in accounts_raw if isinstance(item, dict)]
+        if isinstance(accounts_raw, list)
+        else []
+    )
 
     title = "LIMITS"
     if stale:
@@ -520,6 +527,8 @@ def _build_limits_panel(
                 state_style = "yellow"
             elif state in {"guarded", "limited", "cooling", "blacklisted"}:
                 state_style = "red"
+            elif state == "expired":
+                state_style = "magenta"
             table.add_row(
                 _limit_account_label(
                     account,

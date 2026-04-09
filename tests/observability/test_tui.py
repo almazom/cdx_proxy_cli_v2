@@ -64,17 +64,6 @@ def test_trace_tui_marks_limit_reason_source() -> None:
     assert _limit_reason_label(account) == "5h+weekly guard"
 
 
-def test_trace_tui_marks_degraded_selection_without_cooldown_reason() -> None:
-    account = {
-        "status": "WARN",
-        "selection_source": "degraded",
-        "selection_floor_percent": 30.0,
-        "five_hour": {"used_percent": 89.5, "reset_after_seconds": 1800},
-        "weekly": {"used_percent": 41.0, "reset_after_seconds": 250000},
-    }
-    assert _limit_reason_label(account) == "5h guard"
-
-
 def test_trace_tui_formats_limit_row() -> None:
     row = _limit_row(
         {

@@ -27,6 +27,15 @@ CHATGPT_ACCOUNT_INCOMPATIBLE_MARKERS = (
     "not supported when using codex with a chatgpt account",
     "not supported for codex with a chatgpt account",
 )
+SUBSCRIPTION_EXPIRED_MARKERS = (
+    "subscription required",
+    "plan expired",
+    "billing required",
+    "subscription has expired",
+    "no active subscription",
+    "free plan",
+    "upgrade required",
+)
 VALID_REASONING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 REASONING_LEVEL_ALIASES = {
     "standard": "medium",
@@ -62,10 +71,13 @@ def _extract_error_code(
     raw_body: bytes, *, status: Optional[int] = None
 ) -> Optional[str]:
     texts = _extract_error_strings(raw_body)
+    haystack = " ".join(texts).lower()
     if int(status or 0) == 400:
-        haystack = " ".join(texts).lower()
         if any(marker in haystack for marker in CHATGPT_ACCOUNT_INCOMPATIBLE_MARKERS):
             return CHATGPT_ACCOUNT_INCOMPATIBLE_ERROR_CODE
+    if int(status or 0) in {401, 402, 403}:
+        if any(marker in haystack for marker in SUBSCRIPTION_EXPIRED_MARKERS):
+            return "subscription_expired"
     for value in texts:
         if value and " " not in value:
             return value
@@ -136,7 +148,11 @@ def _normalize_chatgpt_request_body(body: bytes, headers: Dict[str, str]) -> byt
     if isinstance(text, dict):
         supported_verbosity = _chatgpt_supported_verbosity(rewritten_model)
         raw_verbosity = str(text.get("verbosity") or "").strip().lower()
-        if raw_verbosity and supported_verbosity and raw_verbosity not in supported_verbosity:
+        if (
+            raw_verbosity
+            and supported_verbosity
+            and raw_verbosity not in supported_verbosity
+        ):
             text["verbosity"] = _chatgpt_default_verbosity(rewritten_model)
     return json.dumps(payload).encode("utf-8")
 
@@ -219,7 +235,9 @@ def _normalize_reasoning_level(value: Any) -> Optional[str]:
 
 
 def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
-    normalized_existing = _normalize_reasoning_level(item.get("default_reasoning_level"))
+    normalized_existing = _normalize_reasoning_level(
+        item.get("default_reasoning_level")
+    )
     if normalized_existing:
         return normalized_existing
     supported = item.get("supported_reasoning_levels")
@@ -239,7 +257,9 @@ def _normalize_model_default_reasoning_level(item: dict[str, Any]) -> str:
     return "low"
 
 
-def _normalize_model_supported_reasoning_levels(item: dict[str, Any]) -> list[dict[str, str]]:
+def _normalize_model_supported_reasoning_levels(
+    item: dict[str, Any],
+) -> list[dict[str, str]]:
     existing = item.get("supported_reasoning_levels")
     normalized: list[dict[str, str]] = []
     seen_efforts: set[str] = set()
@@ -356,7 +376,10 @@ def _normalize_models_response_body(body: bytes, *, request_path: str) -> bytes:
                 normalized_reasoning_levels = (
                     _normalize_model_supported_reasoning_levels(item)
                 )
-                if item.get("supported_reasoning_levels") != normalized_reasoning_levels:
+                if (
+                    item.get("supported_reasoning_levels")
+                    != normalized_reasoning_levels
+                ):
                     item["supported_reasoning_levels"] = normalized_reasoning_levels
                     changed = True
                 if (

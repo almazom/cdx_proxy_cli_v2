@@ -53,27 +53,7 @@ def _format_limit_age(ts: object) -> str:
     return f"{delta // 86400}d ago"
 
 
-def _guarded_windows_label(account: Dict[str, Any]) -> str:
-    floor = account.get("selection_floor_percent")
-    floor_value = float(floor) if isinstance(floor, (int, float)) else None
-    labels: list[str] = []
-    for key, label in (("five_hour", "5h"), ("weekly", "weekly")):
-        window = account.get(key)
-        if not isinstance(window, dict):
-            continue
-        used = window.get("used_percent")
-        if not isinstance(used, (int, float)):
-            continue
-        remaining = max(0.0, 100.0 - float(used))
-        if floor_value is not None and remaining < floor_value:
-            labels.append(label)
-    return "+".join(labels)
-
-
 def _limit_guard_label(account: Dict[str, Any]) -> str:
-    if str(account.get("selection_source") or "").strip().lower() == "degraded":
-        label = _guarded_windows_label(account)
-        return label or "guard"
     if str(account.get("reason_origin") or "").strip() != "limit_guardrail":
         return "-"
     reason = str(account.get("reason") or "").strip().lower()

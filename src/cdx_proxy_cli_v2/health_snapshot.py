@@ -65,89 +65,6 @@ def window_summary(
     }
 
 
-def _numeric_value(value: Any) -> Optional[float]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if not isinstance(value, str):
-        return None
-    raw = value.strip()
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
-def _message_estimates(value: Any) -> Optional[List[int]]:
-    if not isinstance(value, list):
-        return None
-    result: List[int] = []
-    for item in value:
-        numeric = _numeric_value(item)
-        if numeric is None:
-            continue
-        result.append(int(numeric))
-    return result
-
-
-def _message_estimates_have_remaining(value: Any) -> Optional[bool]:
-    estimates = _message_estimates(value)
-    if estimates is None:
-        return None
-    return any(item > 0 for item in estimates)
-
-
-def credits_summary(credits: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not isinstance(credits, dict):
-        return None
-
-    has_credits_raw = credits.get("has_credits")
-    has_credits = (
-        bool(has_credits_raw) if isinstance(has_credits_raw, bool) else None
-    )
-    unlimited = bool(credits.get("unlimited"))
-    balance = _numeric_value(credits.get("balance"))
-    approx_local_messages = _message_estimates(credits.get("approx_local_messages"))
-    approx_cloud_messages = _message_estimates(credits.get("approx_cloud_messages"))
-
-    status = "UNKNOWN"
-    if unlimited:
-        status = "OK"
-    else:
-        signals: List[bool] = []
-        if has_credits is not None:
-            signals.append(has_credits)
-        if balance is not None:
-            signals.append(balance > 0.0)
-        local_remaining = _message_estimates_have_remaining(
-            credits.get("approx_local_messages")
-        )
-        if local_remaining is not None:
-            signals.append(local_remaining)
-        cloud_remaining = _message_estimates_have_remaining(
-            credits.get("approx_cloud_messages")
-        )
-        if cloud_remaining is not None:
-            signals.append(cloud_remaining)
-
-        if any(signals):
-            status = "OK"
-        elif signals:
-            status = "EXHAUSTED"
-
-    return {
-        "status": status,
-        "has_credits": has_credits,
-        "unlimited": unlimited,
-        "balance": balance,
-        "approx_local_messages": approx_local_messages,
-        "approx_cloud_messages": approx_cloud_messages,
-    }
-
-
 def live_usage_url(url: str) -> str:
     parsed = urlsplit(url)
     pairs = [
@@ -211,6 +128,10 @@ def collective_health_snapshot(
             usage = fetch_usage(usage_endpoint, headers, timeout)
         except Exception as exc:  # noqa: BLE001
             entry["error"] = f"usage fetch failed: {exc}"
+            err_str = str(exc).lower()
+            if "401" in err_str or "403" in err_str:
+                entry["plan_expired"] = True
+                entry["status"] = "EXPIRED"
             accounts.append(entry)
             continue
 
@@ -245,12 +166,21 @@ def collective_health_snapshot(
 
         entry["status"] = overall_status(statuses) if statuses else "UNKNOWN"
         entry["plan_type"] = usage.get("plan_type") if isinstance(usage, dict) else None
-        credit_health = (
-            credits_summary(usage.get("credits")) if isinstance(usage, dict) else None
-        )
-        if credit_health is not None:
-            entry["credits"] = credit_health
         entry["error"] = None
+
+        has_limits = bool(rate_limit and isinstance(rate_limit, dict))
+        if not has_limits and isinstance(usage, dict):
+            has_limits = any(
+                usage.get(k) is not None
+                for k in ("rate_limit", "primary_window", "secondary_window")
+            )
+        if not has_limits:
+            plan = usage.get("plan_type") if isinstance(usage, dict) else None
+            if plan is None or str(plan).strip().lower() in ("", "free", "none"):
+                entry["plan_expired"] = True
+                if not statuses:
+                    entry["status"] = "EXPIRED"
+
         accounts.append(entry)
 
     return {"accounts": accounts}

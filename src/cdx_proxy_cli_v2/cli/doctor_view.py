@@ -25,6 +25,8 @@ def _state_bucket(status: object) -> str:
         return "cooldown"
     if normalized == "BLACKLIST":
         return "blacklist"
+    if normalized == "EXPIRED":
+        return "expired"
     return "unknown"
 
 
@@ -41,6 +43,7 @@ def _summarize_accounts(accounts: List[Dict[str, Any]]) -> Dict[str, int]:
         "probation": 0,
         "cooldown": 0,
         "blacklist": 0,
+        "expired": 0,
         "unknown": 0,
         "total": len(accounts),
     }
@@ -55,24 +58,16 @@ def _doctor_payload(
     accounts: List[Dict[str, Any]],
     policy: Dict[str, Any],
     probe: Optional[Dict[str, Any]] = None,
-    probe_ok: Optional[bool] = None,
-    health_ok: bool = True,
-    error: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "ok": health_ok and (probe_ok is not False),
+        "ok": True,
         "base_url": base_url,
         "policy": dict(policy),
         "summary": _summarize_accounts(accounts),
         "accounts": accounts,
-        "health_ok": health_ok,
     }
     if probe is not None:
         payload["probe"] = probe
-    if probe_ok is not None:
-        payload["probe_ok"] = probe_ok
-    if error:
-        payload["error"] = error
     return payload
 
 
@@ -124,7 +119,9 @@ def _render_probe_results(probe_payload: Dict[str, Any], *, json_mode: bool) -> 
     print()
 
 
-def _render_doctor_table(accounts: List[Dict[str, Any]], summary: Dict[str, int]) -> None:
+def _render_doctor_table(
+    accounts: List[Dict[str, Any]], summary: Dict[str, int]
+) -> None:
     table = Table(title="cdx doctor | auth rotation state")
     table.add_column("File")
     table.add_column("Status")
@@ -151,8 +148,13 @@ def _render_doctor_table(accounts: List[Dict[str, Any]], summary: Dict[str, int]
     print(
         "Summary: "
         f"white={summary['whitelist']} probation={summary['probation']} "
-        f"cooldown={summary['cooldown']} black={summary['blacklist']} unknown={summary['unknown']}"
+        f"cooldown={summary['cooldown']} black={summary['blacklist']} "
+        f"expired={summary['expired']} unknown={summary['unknown']}"
     )
     print(
         "Policy: 401/403 -> blacklist, 429 -> exponential cooldown, re-entry via probation"
     )
+    if summary.get("expired", 0) > 0:
+        print(
+            "ACTION: expired accounts need subscription renewal before they can be used"
+        )

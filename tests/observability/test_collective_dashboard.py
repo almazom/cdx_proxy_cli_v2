@@ -36,8 +36,9 @@ def test_status_rank_order() -> None:
     assert status_rank("PROBATION") == 2
     assert status_rank("COOLDOWN") == 3
     assert status_rank("BLACKLIST") == 4
-    assert status_rank("UNKNOWN") == 5
-    assert status_rank("invalid") == 6
+    assert status_rank("EXPIRED") == 5
+    assert status_rank("UNKNOWN") == 6
+    assert status_rank("invalid") == 7
 
 
 def test_account_has_data() -> None:
@@ -153,32 +154,6 @@ def test_build_collective_payload_marks_current_by_email(monkeypatch) -> None:
     assert "account_id" not in accounts[0]
 
 
-def test_build_collective_payload_threads_prefer_keyring_flag(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_snapshot(**kwargs):
-        captured.update(kwargs)
-        return {"accounts": []}
-
-    monkeypatch.setattr(
-        "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",
-        fake_snapshot,
-    )
-
-    payload = build_collective_payload(
-        auths_dir="~/.codex/_auths",
-        base_url="https://chatgpt.com/backend-api",
-        warn_at=70,
-        cooldown_at=90,
-        timeout=8,
-        only="both",
-        prefer_keyring=False,
-    )
-
-    assert payload["accounts"] == []
-    assert captured["prefer_keyring"] is False
-
-
 def test_build_collective_payload_marks_current_by_account_id(monkeypatch) -> None:
     monkeypatch.setattr(
         "cdx_proxy_cli_v2.observability.collective_dashboard.collective_health_snapshot",
@@ -260,7 +235,11 @@ def test_build_collective_payload_from_accounts_preserves_runtime_blacklist() ->
                 "email": "healthy@example.com",
                 "status": "OK",
                 "eligible_now": True,
-                "five_hour": {"status": "OK", "used_percent": 20, "reset_after_seconds": 300},
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20,
+                    "reset_after_seconds": 300,
+                },
             },
             {
                 "file": "blocked.json",
@@ -279,5 +258,7 @@ def test_build_collective_payload_from_accounts_preserves_runtime_blacklist() ->
     assert payload["aggregate"]["counts"]["ok"] == 1
     assert payload["aggregate"]["counts"]["blacklist"] == 1
     assert payload["availability"]["available_now"] == 1
-    blocked = next(item for item in payload["accounts"] if item["file"] == "blocked.json")
+    blocked = next(
+        item for item in payload["accounts"] if item["file"] == "blocked.json"
+    )
     assert blocked["status"] == "BLACKLIST"

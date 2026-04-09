@@ -166,24 +166,6 @@ def test_load_auth_records_runtime_path_keeps_keyring_backed_auth_metadata(
     assert records[0].email == "keyring@example.com"
 
 
-def test_load_auth_records_ignores_keyring_runtime_errors(tmp_path, monkeypatch):
-    """Keyring backend failures should not crash runtime callers."""
-    auth_file = tmp_path / "broken_keyring_auth.json"
-    auth_file.write_text('{"email": "broken@example.com"}')
-
-    class BrokenKeyring:
-        @staticmethod
-        def get_password(_service, _name):
-            raise RuntimeError("PromptDismissed")
-
-    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.KEYRING_AVAILABLE", True)
-    monkeypatch.setattr("cdx_proxy_cli_v2.auth.store.keyring", BrokenKeyring)
-
-    records = load_auth_records(str(tmp_path), prefer_keyring=False)
-
-    assert records == []
-
-
 def test_save_auth_record_falls_back_to_file_without_keyring(tmp_path):
     """Saving should persist the token in the JSON file when keyring is unavailable."""
     record = AuthRecord(

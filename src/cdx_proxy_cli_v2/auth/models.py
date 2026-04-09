@@ -19,11 +19,6 @@ class AuthState:
     cooldown_until: float = 0.0
     limit_until: float = 0.0
     limit_reason: Optional[str] = None
-    selection_limit_known: bool = False
-    selection_preferred: bool = False
-    selection_remaining_percent: Optional[float] = None
-    selection_reset_after_seconds: Optional[int] = None
-    selection_floor_percent: Optional[float] = None
     blacklist_until: float = 0.0
     blacklist_reason: Optional[str] = None
     probation_successes: int = 2

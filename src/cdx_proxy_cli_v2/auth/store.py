@@ -10,10 +10,13 @@ from cdx_proxy_cli_v2.limits_domain import decode_jwt_payload
 
 try:
     import keyring
+    from keyring.errors import KeyringError, NoKeyringError
 
     KEYRING_AVAILABLE = True
 except ImportError:
     keyring = None  # type: ignore
+    KeyringError = Exception  # type: ignore
+    NoKeyringError = Exception  # type: ignore
     KEYRING_AVAILABLE = False
 
 SERVICE_NAME = "cdx_proxy_cli_v2"
@@ -132,7 +135,7 @@ def load_auth_records(
                 keyring_token = keyring.get_password(SERVICE_NAME, path.stem)
                 if keyring_token:
                     token = keyring_token
-            except Exception:
+            except KeyringError:
                 pass  # Fall back to file-based token
 
         # Skip if still no token
