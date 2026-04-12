@@ -183,7 +183,9 @@ class TestAutoHealProbeTransport:
 
         try:
             with patch("http.client.HTTPConnection", return_value=mock_connection):
-                assert runtime._perform_auto_heal_check({"file": "test.json"}) is True
+                result = runtime._perform_auto_heal_check({"file": "test.json"})
+                assert result["success"] is True
+                assert result["http_status"] == 200
         finally:
             runtime.shutdown()
 
@@ -251,7 +253,15 @@ class TestAutoHealProbationCycle:
             }
             assert snapshot["a.json"]["status"] == "PROBATION"
 
-            runtime._perform_auto_heal_check = MagicMock(return_value=True)
+            runtime._perform_auto_heal_check = MagicMock(
+                return_value={
+                    "file": "a.json",
+                    "success": True,
+                    "http_status": 200,
+                    "error_code": None,
+                    "latency_ms": 1,
+                }
+            )
 
             runtime._run_auto_heal_cycle(now=now)
             now = now + 2.0

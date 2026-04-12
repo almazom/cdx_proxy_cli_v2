@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import List, Optional
@@ -21,6 +22,7 @@ HARD_AUTH_BLACKLIST_REASONS = {
     "forbidden",
     "subscription_expired",
 } | AUTH_INCOMPATIBLE_ERROR_CODES
+logger = logging.getLogger(__name__)
 
 
 def is_auth_incompatible_error(status: int, error_code: Optional[str] = None) -> bool:
@@ -346,6 +348,27 @@ class RoundRobinAuthPool:
             self._mark_blacklist(state, now, reason="rate_limited_persistent")
 
     def _mark_blacklist(self, state: AuthState, now: float, *, reason: str) -> None:
+        total_count = len(self._states)
+        max_ejection_ratio = max(0, int(self.max_ejection_percent)) / 100.0
+        blacklisted_count = sum(1 for item in self._states if item.blacklist_until > now)
+        if (
+            total_count > 1
+            and max_ejection_ratio < 1.0
+            and state.blacklist_until <= now
+            and ((blacklisted_count + 1) / total_count) > max_ejection_ratio
+        ):
+            state.errors += 1
+            state.consecutive_errors = 0
+            state.cooldown_until = max(
+                state.cooldown_until, now + DEFAULT_TRANSIENT_COOLDOWN_SECONDS
+            )
+            logger.warning(
+                "Skipping blacklist for %s: max_ejection_percent=%s would be exceeded",
+                state.record.name,
+                self.max_ejection_percent,
+            )
+            return
+
         state.errors += 1
         state.hard_failures += 1
         ttl_power = min(max(state.hard_failures - 1, 0), 4)

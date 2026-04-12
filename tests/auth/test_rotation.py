@@ -210,7 +210,35 @@ def test_hard_auth_failures_are_not_force_restored_by_max_ejection() -> None:
         pool.mark_result(auth_name, status=401, error_code="token_invalid")
 
     assert pool.pick() is None
-    assert pool.stats()["blacklist"] == 3
+    assert pool.stats()["blacklist"] == 1
+    assert pool.stats()["cooldown"] == 2
+
+
+def test_max_ejection_percent_prevents_blacklist_when_threshold_exceeded(
+    monkeypatch,
+) -> None:
+    now = 3200.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(max_ejection_percent=50, consecutive_error_threshold=1)
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    pool.mark_result("a.json", status=401, error_code="token_invalid")
+    pool.mark_result("b.json", status=401, error_code="token_invalid")
+
+    snapshot = {item["file"]: item for item in pool.health_snapshot()}
+    assert snapshot["a.json"]["status"] == "BLACKLIST"
+    assert snapshot["b.json"]["status"] == "COOLDOWN"
+    assert snapshot["b.json"]["blacklist_seconds"] is None
 
 
 def test_consecutive_error_threshold_delays_blacklist(monkeypatch) -> None:
@@ -290,8 +318,8 @@ def test_persistently_rate_limited_keys_are_not_force_restored() -> None:
     assert pool.pick() is None
     snapshot = {item["file"]: item for item in pool.health_snapshot()}
     assert snapshot["a.json"]["status"] == "BLACKLIST"
-    assert snapshot["b.json"]["status"] == "BLACKLIST"
-    assert snapshot["c.json"]["status"] == "BLACKLIST"
+    assert snapshot["b.json"]["status"] == "COOLDOWN"
+    assert snapshot["c.json"]["status"] == "COOLDOWN"
 
 
 def test_round_robin_keeps_next_healthy_auth_in_order(monkeypatch) -> None:

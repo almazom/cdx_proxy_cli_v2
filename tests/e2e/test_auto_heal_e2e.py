@@ -219,6 +219,40 @@ def running_proxy(
     runtime.shutdown()
 
 
+def _stop_auto_heal_thread(runtime: ProxyRuntime) -> None:
+    runtime._auto_heal_stop.set()
+    if runtime._auto_heal_thread is not None:
+        runtime._auto_heal_thread.join(timeout=2)
+
+
+def _install_fake_runtime_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    start: Optional[float] = None,
+) -> Dict[str, float]:
+    clock = {"now": float(time.time() if start is None else start)}
+
+    monkeypatch.setattr(
+        "cdx_proxy_cli_v2.proxy.server.time.time", lambda: clock["now"]
+    )
+    monkeypatch.setattr(
+        "cdx_proxy_cli_v2.auth.rotation.time.time", lambda: clock["now"]
+    )
+    return clock
+
+
+def _advance_auto_heal_cycles(
+    runtime: ProxyRuntime,
+    clock: Dict[str, float],
+    *,
+    cycles: int,
+) -> None:
+    step = float(runtime.auth_pool.auto_heal_interval) + 0.1
+    for _ in range(cycles):
+        runtime._run_auto_heal_cycle(now=clock["now"])
+        clock["now"] += step
+
+
 def make_proxy_request(
     base_url: str,
     path: str = "/v1/chat/completions",
@@ -264,10 +298,13 @@ class TestAutoHealE2E:
         self,
         running_proxy: Dict[str, Any],
         mock_upstream_server: HTTPServer,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """E2E: Blacklisted key should be restored after successful health checks."""
         runtime = running_proxy["runtime"]
         base_url = running_proxy["base_url"]
+        _stop_auto_heal_thread(runtime)
+        clock = _install_fake_runtime_clock(monkeypatch)
 
         # Step 1: Trigger blacklist with consecutive 401 errors
         # Use max_ejection_percent=100 to allow all keys to be blacklisted for this test
@@ -278,7 +315,6 @@ class TestAutoHealE2E:
 
         for _ in range(3):
             make_proxy_request(base_url)
-            time.sleep(0.1)  # Small delay between requests
 
         # Verify at least one key is blacklisted
         snapshot = runtime.auth_pool.health_snapshot()
@@ -290,9 +326,8 @@ class TestAutoHealE2E:
         # Step 2: Mock upstream recovers (health checks will succeed)
         # Health checks always succeed by default in MockUpstreamHandler
 
-        # Step 3: Wait for auto-heal to run (interval is 1s in tests)
-        # Need to wait for: health check + mark success + second health check + mark success
-        time.sleep(3.5)
+        # Step 3: Manually advance two deterministic auto-heal cycles.
+        _advance_auto_heal_cycles(runtime, clock, cycles=2)
 
         # Step 4: Verify keys are restored
         snapshot = runtime.auth_pool.health_snapshot()
@@ -310,12 +345,17 @@ class TestAutoHealE2E:
         self,
         running_proxy: Dict[str, Any],
         mock_upstream_server: HTTPServer,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """E2E: Failed health checks should extend blacklist TTL."""
         runtime = running_proxy["runtime"]
         base_url = running_proxy["base_url"]
+        _stop_auto_heal_thread(runtime)
+        clock = _install_fake_runtime_clock(monkeypatch)
 
         # Step 1: Trigger blacklist
+        runtime.auth_pool.max_ejection_percent = 100
+        runtime.auth_pool.consecutive_error_threshold = 1
         MockUpstreamHandler.set_response_sequence([401, 401, 401])
 
         for _ in range(3):
@@ -333,10 +373,11 @@ class TestAutoHealE2E:
         )
 
         # Step 2: Mock upstream still failing (health checks will fail)
-        MockUpstreamHandler.set_response_sequence([401] * 30)
+        MockUpstreamHandler.health_check_always_success = False
+        MockUpstreamHandler.set_response_sequence([401] * 9)
 
-        # Step 3: Wait for multiple auto-heal attempts
-        time.sleep(4)
+        # Step 3: Advance enough cycles to trip auto-heal failure extension.
+        _advance_auto_heal_cycles(runtime, clock, cycles=3)
 
         # Step 4: Verify blacklist was extended
         snapshot = runtime.auth_pool.health_snapshot()
@@ -349,8 +390,7 @@ class TestAutoHealE2E:
             0,
         )
 
-        # TTL should have been extended (or at least not decreased significantly)
-        assert extended_ttl >= initial_ttl * 0.5  # Allow some time decay
+        assert extended_ttl > initial_ttl
 
 
 # ============================================================================
@@ -467,7 +507,9 @@ class TestMaxEjectionPercent:
 
         snapshot = runtime.auth_pool.health_snapshot()
         blacklisted = [acc for acc in snapshot if acc["status"] == "BLACKLIST"]
-        assert len(blacklisted) == 3
+        cooldown = [acc for acc in snapshot if acc["status"] == "COOLDOWN"]
+        assert len(blacklisted) == 1
+        assert len(cooldown) == 2
 
 
 # ============================================================================
@@ -558,10 +600,13 @@ class TestEventNotifications:
         self,
         running_proxy: Dict[str, Any],
         mock_upstream_server: HTTPServer,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """E2E: Auto-heal events should be logged."""
         runtime = running_proxy["runtime"]
         base_url = running_proxy["base_url"]
+        _stop_auto_heal_thread(runtime)
+        clock = _install_fake_runtime_clock(monkeypatch)
 
         # Configure for testing
         runtime.auth_pool.consecutive_error_threshold = 1
@@ -575,8 +620,8 @@ class TestEventNotifications:
         # Mock recovery - health checks always succeed by default
         MockUpstreamHandler.set_response_sequence([200, 200, 200, 200])
 
-        # Wait for auto-heal
-        time.sleep(2.5)
+        # Drive two deterministic heal cycles instead of sleeping.
+        _advance_auto_heal_cycles(runtime, clock, cycles=2)
 
         # Check trace events for any auto-heal or recovery events
         events = runtime.trace_store.list(limit=50)
