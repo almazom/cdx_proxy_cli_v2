@@ -190,7 +190,9 @@ def _codex_cli_static_model_fields(model_name: Any = None) -> dict[str, Any]:
         "supports_image_detail_original": True,
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
-        "prefer_websockets": True,
+        # Keep interactive traffic on inspectable HTTP paths so proxy rotation
+        # can react to upstream limit signals instead of tunneling them blindly.
+        "prefer_websockets": False,
     }
 
 

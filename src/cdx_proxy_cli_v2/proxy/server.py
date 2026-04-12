@@ -44,6 +44,17 @@ from cdx_proxy_cli_v2.auth.rotation import (
     is_auth_incompatible_error,
     is_retryable_auth_failure,
 )
+from cdx_proxy_cli_v2.proxy.failure_types import (
+    FAILURE_ORIGIN_DOWNSTREAM_DISCONNECT,
+    FAILURE_ORIGIN_HARD_AUTH,
+    FAILURE_ORIGIN_PROBE_TRANSPORT,
+    FAILURE_ORIGIN_QUOTA,
+    FAILURE_ORIGIN_UPSTREAM_TRANSIENT,
+    POOL_STATE_DEGRADED,
+    POOL_STATE_FULL_OUTAGE,
+    POOL_STATE_HEALTHY,
+    POOL_STATE_PARTIAL_OUTAGE,
+)
 from cdx_proxy_cli_v2.proxy.upstream import (
     UpstreamAttemptResult,
     _is_websocket_upgrade_request as is_websocket_upgrade_request,
@@ -71,6 +82,13 @@ LIMIT_TRACE_STALE_SECONDS = 5 * 60
 LIMIT_TRACE_ACTIVE_SECONDS = 90
 LIMIT_SAMPLER_ACTIVE_INTERVAL_SECONDS = 5 * 60
 LIMIT_SAMPLER_IDLE_INTERVAL_SECONDS = 15 * 60
+INTERACTIVE_AUTH_ROUTES = {"responses", "compact"}
+INTERACTIVE_MAX_ATTEMPTS = 3
+REVIEW_INVOCATION_HEADER = "X-Review-Invocation-Id"
+INTERACTIVE_POOL_WEAK_PAYLOAD = {
+    "error": "interactive auth pool unavailable",
+    "reason": "interactive_pool_weak",
+}
 
 @dataclass
 class ProxyRequestContext:
@@ -78,6 +96,7 @@ class ProxyRequestContext:
     host: str
     port: int
     route: str
+    review_invocation_id: Optional[str]
     rewritten_path: str
     full_path: str
     body: bytes
@@ -128,6 +147,12 @@ class ProxyRuntime:
     _latest_limits_fetched_at: float = field(default=0.0, init=False, repr=False)
     _latest_limits_error: Optional[str] = field(default=None, init=False, repr=False)
     _last_trace_poll_at: float = field(default=0.0, init=False, repr=False)
+    # Refresh metadata fields tracking staleness / partial results
+    _limits_refresh_error: Optional[str] = field(
+        default=None, init=False, repr=False
+    )
+    _limits_partial: bool = field(default=False, init=False, repr=False)
+    _limits_stale_flag: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.trace_store = TraceStore(max_size=self.settings.trace_max)
@@ -141,6 +166,7 @@ class ProxyRuntime:
             "upstream_errors_total": 0,
             "auth_ejections_total": 0,
             "auth_restores_total": 0,
+            "downstream_disconnects_total": 0,
         }
         self._auto_heal_last_check: Dict[str, float] = {}
         # Initialize auth pool with settings
@@ -240,10 +266,26 @@ class ProxyRuntime:
             append_limits_history(self.settings.auth_dir, payload)
         return payload
 
+    # Timeout for bounded lock acquisition in _refresh_limit_health
+    _REFRESH_LOCK_TIMEOUT_SECONDS: float = 5.0
+
     def _refresh_limit_health(
         self, *, force: bool = False, persist_snapshot: bool = True
     ) -> Dict[str, Dict[str, Any]]:
-        with self._limit_health_lock:
+        acquired = self._limit_health_lock.acquire(
+            timeout=self._REFRESH_LOCK_TIMEOUT_SECONDS
+        )
+        if not acquired:
+            # Lock is contended — return whatever cache we have with stale markers
+            self._limits_stale_flag = True
+            self._limits_refresh_error = "lock_timeout"
+            if persist_snapshot and not self._latest_limits_snapshot:
+                self._store_limits_snapshot(
+                    error="lock_timeout",
+                    fetched_at=self._limit_health_cache_at or None,
+                )
+            return self._limit_health_cache
+        try:
             now = time.time()
             before_accounts = self._merged_accounts(limit_health=self._limit_health_cache)
             if (
@@ -251,6 +293,9 @@ class ProxyRuntime:
                 and self._limit_health_cache
                 and (now - self._limit_health_cache_at) < 60.0
             ):
+                self._limits_stale_flag = False
+                self._limits_refresh_error = None
+                self._limits_partial = False
                 if persist_snapshot and not self._latest_limits_snapshot:
                     self._store_limits_snapshot(
                         error=self._latest_limits_error,
@@ -276,6 +321,16 @@ class ProxyRuntime:
             except Exception as exc:
                 fetch_error = str(exc)
 
+            # Track partial / stale metadata
+            if fetch_error:
+                self._limits_refresh_error = fetch_error
+                self._limits_partial = True
+                self._limits_stale_flag = not fetched
+            else:
+                self._limits_refresh_error = None
+                self._limits_partial = False
+                self._limits_stale_flag = False
+
             self.auth_pool.apply_limit_health(
                 self._limit_health_cache,
                 min_remaining_percent=self.settings.limit_min_remaining_percent,
@@ -291,6 +346,8 @@ class ProxyRuntime:
                     append_history=fetched,
                 )
             return self._limit_health_cache
+        finally:
+            self._limit_health_lock.release()
 
     def _start_limit_sampler(self) -> None:
         self._limit_sampler_stop.clear()
@@ -322,14 +379,33 @@ class ProxyRuntime:
     def limits_snapshot(self, *, force_refresh_stale: bool = False) -> Dict[str, Any]:
         self._mark_trace_poll()
         if force_refresh_stale and self._limits_snapshot_stale():
+            # _refresh_limit_health already uses bounded lock acquisition,
+            # so this will not block indefinitely — it returns stale data
+            # with a lock_timeout marker if the lock is contended.
             self._refresh_limit_health(force=True, persist_snapshot=True)
         if not self._latest_limits_snapshot:
-            with self._limit_health_lock:
+            # Use bounded lock acquisition here too instead of infinite wait
+            acquired = self._limit_health_lock.acquire(
+                timeout=self._REFRESH_LOCK_TIMEOUT_SECONDS
+            )
+            if not acquired:
+                # Cannot build snapshot right now — return a minimal stale placeholder
+                return {
+                    "fetched_at": None,
+                    "stale": True,
+                    "error": "lock_timeout",
+                    "next_auth_file": None,
+                    "next_auth_email": None,
+                    "accounts": self.auth_pool.health_snapshot(),
+                }
+            try:
                 if not self._latest_limits_snapshot:
                     return self._store_limits_snapshot(
                         error=self._latest_limits_error,
                         fetched_at=self._limit_health_cache_at,
                     )
+            finally:
+                self._limit_health_lock.release()
         return dict(self._latest_limits_snapshot)
 
     def trace_payload(self, *, limit: int) -> Dict[str, Any]:
@@ -391,10 +467,10 @@ class ProxyRuntime:
             ):
                 continue
 
-            success = self._perform_auto_heal_check(account)
+            outcome = self._perform_auto_heal_check(account)
             self._auto_heal_last_check[auth_file] = now_ts
 
-            if success:
+            if outcome.get("success"):
                 # Reload before restoration so fresh on-disk tokens are used.
                 self.reload_auths()
                 self.apply_auth_result(auth_file, status=200)
@@ -432,14 +508,39 @@ class ProxyRuntime:
                 message=f"Health check failed for {account.get('email') or auth_file}, blacklist extended",
                 auth_file=auth_file,
                 auth_email=account.get("email"),
+                http_status=outcome.get("http_status"),
+                error_code=outcome.get("error_code"),
+                origin=self._classify_auto_heal_failure_origin(outcome),
                 cooldown_seconds=state.get("cooldown_seconds"),
                 blacklist_seconds=state.get("blacklist_seconds"),
             )
 
-    def _perform_auto_heal_check(self, account: Dict[str, Any]) -> bool:
+    @staticmethod
+    def _classify_auto_heal_failure_origin(outcome: Dict[str, Any]) -> str:
+        http_status = outcome.get("http_status")
+        try:
+            normalized_status = int(http_status) if http_status is not None else None
+        except (TypeError, ValueError):
+            normalized_status = None
+        error_code = str(outcome.get("error_code") or "").strip().lower()
+        error_message = str(outcome.get("error") or "").strip().lower()
+
+        if normalized_status in {401, 403}:
+            return FAILURE_ORIGIN_HARD_AUTH
+        if normalized_status == 429:
+            return FAILURE_ORIGIN_QUOTA
+        if normalized_status is not None and normalized_status >= 500:
+            return FAILURE_ORIGIN_UPSTREAM_TRANSIENT
+        if error_code == "network_error":
+            return FAILURE_ORIGIN_PROBE_TRANSPORT
+        if "timeout" in error_message or "connection" in error_message:
+            return FAILURE_ORIGIN_PROBE_TRANSPORT
+        return FAILURE_ORIGIN_UPSTREAM_TRANSIENT
+
+    def _perform_auto_heal_check(self, account: Dict[str, Any]) -> Dict[str, Any]:
         """Perform a lightweight health check on a blacklisted key.
 
-        Returns True if the key appears to be working again.
+        Returns a structured probe outcome for observability and recovery flow.
         """
 
         auth_file = account.get("file", "")
@@ -449,15 +550,34 @@ class ProxyRuntime:
                 matching_record = candidate
                 break
         if matching_record is None or not matching_record.token:
-            return False
+            return {
+                "file": auth_file,
+                "success": False,
+                "http_status": None,
+                "error_code": (
+                    "auth_record_missing"
+                    if matching_record is None
+                    else "token_missing"
+                ),
+                "latency_ms": 0,
+            }
 
-        result = self._probe_single_auth(
-            auth_file,
-            matching_record.token,
-            matching_record.account_id,
-            timeout=5,
-        )
-        return result.get("success", False)
+        try:
+            return self._probe_single_auth(
+                auth_file,
+                matching_record.token,
+                matching_record.account_id,
+                timeout=5,
+            )
+        except Exception as exc:
+            return {
+                "file": auth_file,
+                "success": False,
+                "http_status": None,
+                "error_code": "network_error",
+                "latency_ms": 0,
+                "error": str(exc),
+            }
 
     def _probe_single_auth(
         self,
@@ -700,6 +820,85 @@ class ProxyRuntime:
         )
         return counters
 
+    @staticmethod
+    def _normalize_route(route: Optional[str]) -> str:
+        return str(route or "").strip().lower()
+
+    def is_interactive_route(self, route: Optional[str]) -> bool:
+        return self._normalize_route(route) in INTERACTIVE_AUTH_ROUTES
+
+    def _interactive_auth_state(self) -> Dict[str, Any]:
+        safe_auth_names: set[str] = set()
+        skipped_auth_files: List[str] = []
+        for account in self._merged_accounts(limit_health=self._limit_health_cache):
+            auth_file = str(account.get("file") or "").strip()
+            if not auth_file:
+                continue
+            if bool(account.get("eligible_now")):
+                safe_auth_names.add(auth_file)
+            else:
+                skipped_auth_files.append(auth_file)
+
+        next_pick = self.auth_pool.preview_next_pick(allowed_names=safe_auth_names)
+        return {
+            "safe_auth_names": safe_auth_names,
+            "safe_auth_count": len(safe_auth_names),
+            "skipped_auth_files": skipped_auth_files,
+            "next_pick": dict(next_pick) if isinstance(next_pick, dict) else {},
+        }
+
+    def degraded_state_verdict(self) -> Dict[str, Any]:
+        """Classify the current health of the auth pool into a degraded-state matrix.
+
+        Returns a dict with:
+          - state: one of healthy / degraded / partial_outage / full_outage
+          - ok_count: number of auth keys currently eligible
+          - cooldown_count: number of auth keys in cooldown
+          - blacklist_count: number of auth keys blacklisted
+          - interactive_safe_count: number of auth keys safe for interactive routes
+          - primary_blocker: short human-readable blocker summary, or None
+          - next_action: recommended next action
+        """
+        stats = self.auth_pool.stats()
+        ok_count = int(stats.get("ok", 0))
+        cooldown_count = int(stats.get("cooldown", 0))
+        blacklist_count = int(stats.get("blacklist", 0))
+        interactive_state = self._interactive_auth_state()
+        interactive_safe_count = int(interactive_state["safe_auth_count"])
+        total = int(stats.get("total", 0))
+
+        state: str = POOL_STATE_HEALTHY
+        primary_blocker: Optional[str] = None
+        next_action: Optional[str] = None
+
+        if ok_count == 0:
+            state = POOL_STATE_FULL_OUTAGE
+            primary_blocker = "no healthy auths"
+            next_action = (
+                "all auths are blacklisted — run cdx reset --state blacklist or add new auth files"
+            )
+        elif interactive_safe_count == 0:
+            state = POOL_STATE_PARTIAL_OUTAGE
+            primary_blocker = "no interactive-safe auths"
+            next_action = (
+                "run cdx doctor --probe to check auth health, then cdx reset --state blacklist"
+            )
+        elif cooldown_count > 0 or blacklist_count > 0:
+            state = POOL_STATE_DEGRADED
+            primary_blocker = "some auths in cooldown"
+            next_action = "cdx rotate to avoid degraded keys, or wait for cooldown expiry"
+
+        return {
+            "state": state,
+            "ok_count": ok_count,
+            "cooldown_count": cooldown_count,
+            "blacklist_count": blacklist_count,
+            "interactive_safe_count": interactive_safe_count,
+            "total": total,
+            "primary_blocker": primary_blocker,
+            "next_action": next_action,
+        }
+
     def next_auth_payload(self, *, route: Optional[str] = None) -> Optional[Dict[str, Any]]:
         allowed_auth_names = self.allowed_auth_names_for_route(route or "")
         if allowed_auth_names is not None and not allowed_auth_names:
@@ -710,20 +909,9 @@ class ProxyRuntime:
         return dict(next_pick)
 
     def allowed_auth_names_for_route(self, route: str) -> Optional[set[str]]:
-        normalized_route = str(route or "").strip().lower()
-        if normalized_route != "compact":
+        if not self.is_interactive_route(route):
             return None
-        allowed: set[str] = set()
-        for account in self._merged_accounts(limit_health=self._limit_health_cache):
-            auth_file = str(account.get("file") or "").strip()
-            status = str(account.get("status") or "UNKNOWN").upper()
-            if (
-                auth_file
-                and bool(account.get("eligible_now"))
-                and status == "OK"
-            ):
-                allowed.add(auth_file)
-        return allowed
+        return set(self._interactive_auth_state()["safe_auth_names"])
 
     def _emit_auth_transitions(
         self,
@@ -875,11 +1063,28 @@ class ProxyRuntime:
         self._refresh_limit_health(force=refresh, persist_snapshot=refresh)
         accounts = self._merged_accounts(limit_health=self._limit_health_cache)
         next_pick = self.next_auth_payload() or {}
+        triage_summary = self.degraded_state_verdict()
+        # Refresh metadata
+        refresh_age = (
+            (time.time() - self._limit_health_cache_at)
+            if self._limit_health_cache_at > 0
+            else None
+        )
         return {
             "ok": merged_ok(accounts),
             "next_auth_file": str(next_pick.get("file") or "").strip() or None,
             "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "accounts": accounts,
+            "degraded_state": triage_summary,
+            "triage": {
+                "state": triage_summary.get("state"),
+                "primary_blocker": triage_summary.get("primary_blocker"),
+                "next_action": triage_summary.get("next_action"),
+            },
+            "limits_refresh_age_seconds": refresh_age,
+            "limits_stale": self._limits_snapshot_stale(),
+            "limits_refresh_error": self._limits_refresh_error,
+            "limits_partial": self._limits_partial,
         }
 
     def trace_events(self, limit: int) -> List[Dict[str, Any]]:
@@ -887,6 +1092,9 @@ class ProxyRuntime:
 
     def debug_payload(self, host: str, port: int) -> Dict[str, Any]:
         next_pick = self.next_auth_payload() or {}
+        interactive_state = self._interactive_auth_state()
+        next_interactive_pick = dict(interactive_state["next_pick"])
+        triage_summary = self.degraded_state_verdict()
         return {
             "status": "running",
             "host": host,
@@ -912,6 +1120,16 @@ class ProxyRuntime:
             "limits_stale": self._limits_snapshot_stale(),
             "next_auth_file": str(next_pick.get("file") or "").strip() or None,
             "next_auth_email": str(next_pick.get("email") or "").strip() or None,
+            "interactive_auth_available": bool(interactive_state["safe_auth_count"]),
+            "interactive_safe_auth_count": int(interactive_state["safe_auth_count"]),
+            "next_interactive_auth_file": (
+                str(next_interactive_pick.get("file") or "").strip() or None
+            ),
+            "next_interactive_auth_email": (
+                str(next_interactive_pick.get("email") or "").strip() or None
+            ),
+            "degraded_state": triage_summary,
+            "triage_summary": triage_summary,
             "pid": os.getpid(),
             "event_log_file": str(self.logger.path),
             "metrics": self.metrics_snapshot(),
@@ -931,6 +1149,7 @@ class ProxyRuntime:
         attempt: int,
         client_ip: Optional[str],
         error: Optional[str] = None,
+        review_invocation_id: Optional[str] = None,
     ) -> None:
         payload: Dict[str, Any] = {
             "ts": time.time(),
@@ -948,6 +1167,8 @@ class ProxyRuntime:
         }
         if error:
             payload["error"] = error
+        if review_invocation_id:
+            payload["review_invocation_id"] = review_invocation_id
         self.trace_store.add(payload)
         log_payload = dict(payload)
         log_payload.pop("event", None)
@@ -1047,11 +1268,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         upstream_response: http.client.HTTPResponse,
     ) -> None:
         self.close_connection = True
+        runtime = self.server.runtime
+
+        def _on_client_disconnect(exc: Exception) -> None:
+            self._emit_downstream_disconnect(runtime=runtime, phase="body", error=exc)
+
         tunnel_websocket(
             client_socket=self.connection,
             client_writer=self.wfile,
             upstream_connection=upstream_connection,
             upstream_response=upstream_response,
+            on_client_disconnect=_on_client_disconnect,
         )
 
     def do_GET(self) -> None:  # noqa: N802
@@ -1107,17 +1334,69 @@ class ProxyHandler(BaseHTTPRequestHandler):
         provided = str(self.headers.get("X-Management-Key") or "")
         return hmac.compare_digest(provided, expected)
 
+    def _request_needs_review_diagnostics(self, path: str) -> bool:
+        normalized = str(path or "")
+        return "/responses" in normalized or "/chat/completions" in normalized
+
+    def _resolve_review_invocation_id(self) -> Optional[str]:
+        if not self._request_needs_review_diagnostics(self.path):
+            return None
+        existing = str(self.headers.get(REVIEW_INVOCATION_HEADER) or "").strip()
+        if existing:
+            return existing
+        return f"rev_{uuid.uuid4().hex[:8]}"
+
+    def _emit_review_event(
+        self,
+        runtime: ProxyRuntime,
+        *,
+        level: str,
+        event: str,
+        message: str,
+        review_id: Optional[str],
+        **kwargs: Any,
+    ) -> None:
+        if not review_id:
+            return
+        runtime._notify_user(
+            level=level,
+            event=event,
+            message=message,
+            review_id=review_id,
+            review_invocation_id=review_id,
+            **kwargs,
+        )
+
+    def _emit_downstream_disconnect(
+        self,
+        *,
+        runtime: "ProxyRuntime",
+        phase: str,
+        error: Exception,
+    ) -> None:
+        runtime._increment_metric("downstream_disconnects_total")
+        runtime._notify_user(
+            level="WARN",
+            event="proxy.downstream_disconnect",
+            message=f"client disconnected during {phase} write",
+            phase=phase,
+            origin=FAILURE_ORIGIN_DOWNSTREAM_DISCONNECT,
+            error_type=type(error).__name__,
+            request_id=getattr(self, "_current_request_id", ""),
+        )
+
     def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
         raw = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
         try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
             self.wfile.write(raw)
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            # Client disconnected before body flush; keep server alive without noisy traceback.
-            return
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            runtime = getattr(self.server, "runtime", None)
+            if runtime is not None:
+                self._emit_downstream_disconnect(runtime=runtime, phase="body", error=exc)
 
     def _read_body(self) -> Optional[bytes]:
         raw_length = self.headers.get("Content-Length", "0")
@@ -1295,12 +1574,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
             chatgpt_responses_mode=chatgpt_responses_mode,
             websocket_upgrade=websocket_upgrade_request,
         )
+        review_invocation_id = self._resolve_review_invocation_id()
+        if review_invocation_id:
+            set_header_case_insensitive(
+                base_headers, REVIEW_INVOCATION_HEADER, review_invocation_id
+            )
         client_ip = self.client_address[0] if self.client_address else None
         return ProxyRequestContext(
             scheme=scheme,
             host=host,
             port=port,
             route=route,
+            review_invocation_id=review_invocation_id,
             rewritten_path=rewritten_path,
             full_path=full_path,
             body=body,
@@ -1341,38 +1626,71 @@ class ProxyHandler(BaseHTTPRequestHandler):
         runtime: ProxyRuntime,
         auth_state: Any,
         result: UpstreamAttemptResult,
+        suppress_pool_exhausted_notice: bool = False,
     ) -> None:
-        self.send_response(result.status)
-        for key, value in result.headers:
-            normalized = key.lower()
-            if normalized in {"transfer-encoding", "content-length"}:
-                continue
-            if normalized == "connection" and not result.websocket_upgrade:
-                continue
-            self.send_header(key, value)
+        try:
+            self.send_response(result.status)
+            for key, value in result.headers:
+                normalized = key.lower()
+                if normalized in {"transfer-encoding", "content-length"}:
+                    continue
+                if normalized == "connection" and not result.websocket_upgrade:
+                    continue
+                self.send_header(key, value)
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            self._emit_downstream_disconnect(runtime=runtime, phase="headers", error=exc)
+            return
 
         if (
             result.websocket_upgrade
             and result.stream_response is not None
             and result.stream_connection is not None
         ):
-            self.end_headers()
-            self._tunnel_websocket(
-                upstream_connection=result.stream_connection,
-                upstream_response=result.stream_response,
-            )
+            try:
+                self.end_headers()
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self._emit_downstream_disconnect(runtime=runtime, phase="headers", error=exc)
+                return
+            try:
+                self._tunnel_websocket(
+                    upstream_connection=result.stream_connection,
+                    upstream_response=result.stream_response,
+                )
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self._emit_downstream_disconnect(runtime=runtime, phase="body", error=exc)
             return
 
         if result.stream_response is not None:
             self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
+            try:
+                self.end_headers()
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self._emit_downstream_disconnect(runtime=runtime, phase="headers", error=exc)
+                try:
+                    result.stream_response.close()
+                except Exception:
+                    pass
+                if result.stream_connection is not None:
+                    try:
+                        result.stream_connection.close()
+                    except Exception:
+                        pass
+                return
             try:
                 while True:
                     chunk = result.stream_response.read(8192)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                    try:
+                        self.wfile.write(chunk)
+                    except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                        self._emit_downstream_disconnect(runtime=runtime, phase="body", error=exc)
+                        break
+                    try:
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                        self._emit_downstream_disconnect(runtime=runtime, phase="flush", error=exc)
+                        break
             finally:
                 try:
                     result.stream_response.close()
@@ -1385,19 +1703,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         pass
             return
 
-        if result.status == 503 and not auth_state:
+        if (
+            result.status == 503
+            and not auth_state
+            and not suppress_pool_exhausted_notice
+        ):
             stats = runtime.auth_pool.stats()
             runtime._notify_user(
                 level="ERROR",
                 event="auth.pool_exhausted",
                 message=f"All auth keys unavailable (ok={stats['ok']}, cooldown={stats['cooldown']}, blacklist={stats['blacklist']})",
+                origin=FAILURE_ORIGIN_QUOTA,
                 stats=stats,
             )
 
         self.send_header("Content-Length", str(len(result.body)))
-        self.end_headers()
+        try:
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            self._emit_downstream_disconnect(runtime=runtime, phase="headers", error=exc)
+            return
         if result.body:
-            self.wfile.write(result.body)
+            try:
+                self.wfile.write(result.body)
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self._emit_downstream_disconnect(runtime=runtime, phase="body", error=exc)
 
     def _proxy_request(self) -> None:
         runtime = self.server.runtime
@@ -1422,6 +1752,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             max_attempts = max(1, runtime.auth_pool.count())
             compact_timeout = runtime.settings.compact_timeout
             request_id = uuid.uuid4().hex[:12]
+            self._current_request_id = request_id
+            self._current_review_id = context.review_invocation_id
+            interactive_route = runtime.is_interactive_route(context.route)
+            allowed_auth_names = runtime.allowed_auth_names_for_route(context.route)
+            suppress_pool_exhausted_notice = False
+            total_latency_ms = 0
 
             final_result = UpstreamAttemptResult(
                 status=503,
@@ -1429,16 +1765,80 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 body=json.dumps({"error": "no auths available"}).encode("utf-8"),
             )
             auth_state = None
+            completed_attempts = 0
+            last_attempt_status: Optional[int] = None
+            last_attempt_error_code: Optional[str] = None
+
+            if interactive_route:
+                interactive_state = runtime._interactive_auth_state()
+                allowed_auth_names = set(interactive_state["safe_auth_names"])
+                self._emit_review_event(
+                    runtime,
+                    level="INFO",
+                    event="review.request_start",
+                    message="interactive review request entered proxy",
+                    review_id=context.review_invocation_id,
+                    route=context.route,
+                    auth_count=runtime.auth_pool.count(),
+                    interactive_safe_count=int(interactive_state["safe_auth_count"]),
+                )
+                skipped_auth_files = list(interactive_state["skipped_auth_files"])
+                if skipped_auth_files:
+                    runtime._notify_user(
+                        level="INFO" if allowed_auth_names else "WARN",
+                        event="auth.interactive_skipped",
+                        message="interactive route skipped non-safe auths",
+                        route=context.route,
+                        skipped_auth_files=skipped_auth_files,
+                        skipped_auth_count=len(skipped_auth_files),
+                        interactive_safe_auth_count=len(allowed_auth_names),
+                    )
+                if not allowed_auth_names:
+                    suppress_pool_exhausted_notice = True
+                    final_result = UpstreamAttemptResult(
+                        status=503,
+                        headers=[("Content-Type", "application/json")],
+                        body=json.dumps(INTERACTIVE_POOL_WEAK_PAYLOAD).encode("utf-8"),
+                    )
+                    runtime._notify_user(
+                        level="WARN",
+                        event="auth.interactive_pool_weak",
+                        message="interactive route blocked because no safe auths are available",
+                        route=context.route,
+                        interactive_safe_auth_count=0,
+                        auth_count=runtime.auth_pool.count(),
+                    )
+                    self._emit_review_event(
+                        runtime,
+                        level="WARN",
+                        event="review.pool_exhausted",
+                        message="interactive review request has no safe auths",
+                        review_id=context.review_invocation_id,
+                        reason="interactive_pool_weak",
+                    )
+                    max_attempts = 0
+                else:
+                    max_attempts = min(len(allowed_auth_names), INTERACTIVE_MAX_ATTEMPTS)
+            elif allowed_auth_names is not None and not allowed_auth_names:
+                max_attempts = 0
 
             attempt = 0
             while attempt < max_attempts:
-                allowed_auth_names = runtime.allowed_auth_names_for_route(context.route)
                 if allowed_auth_names is not None and not allowed_auth_names:
                     break
 
                 auth_state = runtime.auth_pool.pick(allowed_names=allowed_auth_names)
                 if not auth_state:
                     break
+                self._emit_review_event(
+                    runtime,
+                    level="INFO",
+                    event="review.auth_selected",
+                    message="selected auth for review attempt",
+                    review_id=context.review_invocation_id if interactive_route else None,
+                    attempt=attempt + 1,
+                    auth_file=auth_state.record.name,
+                )
 
                 headers = dict(context.base_headers)
                 set_header_case_insensitive(
@@ -1462,8 +1862,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     compact_timeout=compact_timeout,
                 )
                 latency_ms = int((time.time() - start) * 1000)
+                total_latency_ms += latency_ms
 
                 final_result = attempt_result
+                completed_attempts = attempt + 1
+                last_attempt_status = attempt_result.status
+                last_attempt_error_code = attempt_result.error_code
 
                 runtime.record_attempt(
                     request_id=request_id,
@@ -1477,6 +1881,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     attempt=attempt + 1,
                     client_ip=context.client_ip,
                     error=attempt_result.error_message,
+                    review_invocation_id=context.review_invocation_id,
+                )
+                self._emit_review_event(
+                    runtime,
+                    level="INFO" if attempt_result.status < 500 else "WARN",
+                    event="review.upstream_result",
+                    message="review upstream attempt completed",
+                    review_id=context.review_invocation_id if interactive_route else None,
+                    attempt=attempt + 1,
+                    status=attempt_result.status,
+                    error_code=attempt_result.error_code,
+                    latency_ms=latency_ms,
                 )
                 runtime.apply_auth_result(
                     auth_state.record.name,
@@ -1499,6 +1915,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         continue
                 break
 
+            if (
+                interactive_route
+                and last_attempt_status is not None
+                and is_retryable_auth_failure(
+                    last_attempt_status, last_attempt_error_code
+                )
+            ):
+                suppress_pool_exhausted_notice = True
+                final_result = UpstreamAttemptResult(
+                    status=503,
+                    headers=[("Content-Type", "application/json")],
+                    body=json.dumps(INTERACTIVE_POOL_WEAK_PAYLOAD).encode("utf-8"),
+                )
+                runtime._notify_user(
+                    level="WARN",
+                    event="auth.interactive_pool_weak",
+                    message="interactive route exhausted safe auth retries",
+                    route=context.route,
+                    attempts=completed_attempts,
+                    last_status=last_attempt_status,
+                    last_error_code=last_attempt_error_code,
+                    interactive_safe_auth_count=len(allowed_auth_names or ()),
+                )
+                self._emit_review_event(
+                    runtime,
+                    level="WARN",
+                    event="review.pool_exhausted",
+                    message="interactive review request exhausted safe auth retries",
+                    review_id=context.review_invocation_id,
+                    reason="safe_retries_exhausted",
+                )
+
             if auth_state is not None and final_result.status >= 500:
                 runtime._increment_metric("upstream_errors_total")
 
@@ -1506,6 +1954,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 runtime=runtime,
                 auth_state=auth_state,
                 result=final_result,
+                suppress_pool_exhausted_notice=suppress_pool_exhausted_notice,
+            )
+            self._emit_review_event(
+                runtime,
+                level="INFO" if final_result.status < 500 else "WARN",
+                event="review.complete",
+                message="review request completed",
+                review_id=context.review_invocation_id if interactive_route else None,
+                final_status=final_result.status,
+                total_attempts=completed_attempts,
+                total_latency_ms=total_latency_ms,
             )
 
 
