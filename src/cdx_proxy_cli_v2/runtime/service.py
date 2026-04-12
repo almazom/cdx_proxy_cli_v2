@@ -593,10 +593,14 @@ def service_status(settings: Settings) -> Dict[str, object]:
     healthy = bool(isinstance(debug, dict) and debug.get("status") == "running")
 
     auth_count = None
+    triage_summary: Optional[Dict[str, object]] = None
     if isinstance(debug, dict):
         value = debug.get("auth_count")
         if isinstance(value, int):
             auth_count = value
+        triage_value = debug.get("triage_summary")
+        if isinstance(triage_value, dict):
+            triage_summary = dict(triage_value)
 
     return {
         "pid": pid,
@@ -606,6 +610,7 @@ def service_status(settings: Settings) -> Dict[str, object]:
         "host": host,
         "port": port,
         "auth_count": auth_count,
+        "triage_summary": triage_summary,
         "state": state.get("status"),
         "log_file": str(log_path(settings.auth_dir)),
         "events_file": str(events_path(settings.auth_dir)),
