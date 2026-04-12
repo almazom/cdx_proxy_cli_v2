@@ -138,6 +138,76 @@ class TestHandleStatus:
         output = json.loads(captured.out)
         assert "pid" in output
 
+    def test_status_verbose_shows_triage(
+        self, capsys, temp_auth_dir, monkeypatch
+    ):
+        monkeypatch.setenv("CLIPROXY_AUTH_DIR", temp_auth_dir)
+
+        args = argparse.Namespace(
+            auth_dir=None,
+            host=None,
+            port=None,
+            upstream=None,
+            management_key=None,
+            allow_non_loopback=None,
+            trace_max=None,
+            json=False,
+            verbose=True,
+        )
+
+        with patch("cdx_proxy_cli_v2.cli.commands.status.service_status") as mock_status:
+            mock_status.return_value = {
+                "pid": 12345,
+                "pid_running": True,
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+                "host": "127.0.0.1",
+                "port": 8080,
+                "auth_count": 2,
+                "state": "running",
+                "log_file": "/tmp/log",
+                "events_file": "/tmp/events",
+                "triage_summary": {
+                    "state": "degraded",
+                    "ok_count": 1,
+                    "total": 2,
+                    "cooldown_count": 1,
+                    "blacklist_count": 0,
+                    "next_action": "cdx doctor --probe",
+                },
+                "triage": {
+                    "summary": "POOL: 2 keys | 1 OK, 1 COOLDOWN (rate_limited, 42s remaining)",
+                    "risk_level": "medium",
+                    "auto_reset_status": "armed (streak 4)",
+                    "next_action": "cdx doctor --probe",
+                },
+                "pool_health": [
+                    {
+                        "file": "a.json",
+                        "status": "OK",
+                        "weight": 1.0,
+                        "effective_pick_probability": 1.0,
+                        "time_since_last_pick_seconds": 2.0,
+                        "starvation_risk_flag": True,
+                    },
+                    {
+                        "file": "b.json",
+                        "status": "COOLDOWN",
+                        "weight": 0.3,
+                        "effective_pick_probability": 0.0,
+                        "time_since_last_pick_seconds": None,
+                        "starvation_risk_flag": False,
+                    },
+                ],
+            }
+            result = handle_status(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "POOL: 2 keys | 1 OK, 1 COOLDOWN" in captured.out
+        assert "pool health" in captured.out
+        assert "a.json" in captured.out
+
 
 class TestProxyShellSetup:
     """Tests for shell bootstrap emitted by `cdx proxy --print-env-only`."""
@@ -818,7 +888,7 @@ class TestHandleRotate:
     """Tests for handle_rotate function."""
 
     def test_rotate_returns_error_when_proxy_not_healthy(self, capsys, temp_auth_dir):
-        """Test rotate fails when proxy is not running."""
+        """Test rotate fails when no auth can be selected locally or from proxy."""
         args = argparse.Namespace(
             auth_dir=temp_auth_dir,
             host=None,
@@ -829,19 +899,25 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=False,
+            fallback=False,
+            no_write=False,
             json=False,
         )
 
-        with patch("cdx_proxy_cli_v2.cli.shared.service_status") as mock_status:
+        with (
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
+        ):
             mock_status.return_value = {
                 "healthy": False,
-                "base_url": "http://127.0.0.1:8080",
+                "base_url": None,
             }
+            mock_fetch_json.side_effect = RuntimeError("proxy down")
             result = handle_rotate(args)
 
         captured = capsys.readouterr()
         assert result == 1
-        assert "Proxy is not healthy/running" in captured.err
+        assert "No healthy auth keys available" in captured.err
 
     def test_rotate_no_healthy_auths(self, capsys, temp_auth_dir):
         """Test rotate when no healthy auths available."""
@@ -855,18 +931,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=False,
+            fallback=False,
+            no_write=False,
             json=False,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.return_value = None
             result = handle_rotate(args)
 
@@ -904,18 +985,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=False,
+            fallback=True,
+            no_write=False,
             json=False,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.return_value = {
                 "file": "healthy_auth.json",
                 "email": "test@example.com",
@@ -947,18 +1033,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=True,
+            fallback=False,
+            no_write=False,
             json=False,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.return_value = {
                 "file": "auth1.json",
                 "email": "user1@example.com",
@@ -997,18 +1088,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=False,
+            fallback=True,
+            no_write=False,
             json=True,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.return_value = {
                 "file": "auth1.json",
                 "email": "user1@example.com",
@@ -1020,6 +1116,7 @@ class TestHandleRotate:
         assert result == 0
         output = json.loads(captured.out)
         assert output["success"] is True
+        assert output["proxy_active"] is True
         assert output["selected"]["file"] == "auth1.json"
         assert output["selected"]["email"] == "user1@example.com"
 
@@ -1051,18 +1148,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=True,
+            fallback=False,
+            no_write=False,
             json=False,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.return_value = {
                 "file": "auth_old.json",
                 "email": "old@example.com",
@@ -1101,18 +1203,23 @@ class TestHandleRotate:
             trace_max=None,
             request_timeout=None,
             dry_run=False,
+            fallback=False,
+            no_write=False,
             json=False,
         )
 
         with (
-            patch(
-                "cdx_proxy_cli_v2.cli.commands.rotate._healthy_base_url_or_none"
-            ) as mock_base_url,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.service_status") as mock_status,
+            patch("cdx_proxy_cli_v2.cli.commands.rotate.fetch_json") as mock_fetch_json,
             patch(
                 "cdx_proxy_cli_v2.cli.commands.rotate._fetch_runtime_next_auth"
             ) as mock_next_auth,
         ):
-            mock_base_url.return_value = "http://127.0.0.1:8080"
+            mock_status.return_value = {
+                "healthy": True,
+                "base_url": "http://127.0.0.1:8080",
+            }
+            mock_fetch_json.return_value = {"status": "running"}
             mock_next_auth.side_effect = RuntimeError("timed out")
             result = handle_rotate(args)
 

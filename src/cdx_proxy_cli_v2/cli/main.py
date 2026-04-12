@@ -237,11 +237,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  cdx status\n"
             "  cdx status --json\n"
+            "  cdx status --verbose\n"
         ),
     )
     _add_runtime_options(status_parser)
     status_parser.add_argument(
         "--json", action="store_true", help="JSON output for scripting"
+    )
+    status_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show triage summary and per-key pool health",
     )
     status_parser.set_defaults(handler=handle_status)
 
@@ -428,6 +434,17 @@ def build_parser() -> argparse.ArgumentParser:
         dest="dry_run",
         action="store_true",
         help="show what would be rotated without making changes",
+    )
+    rotate_parser.add_argument(
+        "--fallback",
+        action="store_true",
+        help="force write to ~/.codex/auth.json even when the proxy is active",
+    )
+    rotate_parser.add_argument(
+        "--no-write",
+        dest="no_write",
+        action="store_true",
+        help="report the next recommended key without writing ~/.codex/auth.json",
     )
     rotate_parser.add_argument(
         "--json", action="store_true", help="JSON output for scripting"
