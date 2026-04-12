@@ -1,272 +1,167 @@
-# Production Runbook: Auto Blacklist Management
+# Auto-Heal Recovery Runbook
 
-## Overview
+## Purpose
 
-This runbook covers the auto-heal blacklist management system for cdx_proxy_cli_v2.
+Use this runbook when the auth pool is degraded, review traffic is stalling, or operators need a quick answer about what the proxy is doing and what action to take next.
 
-## System Architecture
+## Quick Diagnosis
 
-### Components
-
-1. **RoundRobinAuthPool** (`src/cdx_proxy_cli_v2/auth/rotation.py`)
-   - Manages auth key rotation
-   - Tracks blacklist/cooldown/probation states
-   - Implements auto-heal logic
-
-2. **Background Health Checker** (`src/cdx_proxy_cli_v2/proxy/server.py`)
-   - Runs every 60 seconds (configurable)
-   - Probes blacklisted keys with lightweight API calls
-   - Restores keys after 2 successful checks
-
-3. **Event Logger** (`src/cdx_proxy_cli_v2/observability/`)
-   - Logs all major events to `rr_proxy_v2.events.jsonl`
-   - Trace store for real-time monitoring
-
-### Envoy-Inspired Features
-
-| Feature | Description | Default |
-|---------|-------------|---------|
-| `consecutive_error_threshold` | Errors before blacklist | 3 |
-| `auto_heal_interval` | Seconds between health checks | 60 |
-| `auto_heal_success_target` | Successes to restore key | 2 |
-| `auto_heal_max_attempts` | Failures before penalty | 3 |
-| `max_ejection_percent` | Max % keys blacklisted | 50 |
-
-## Configuration
-
-### Environment Variables
+Run these first, in order:
 
 ```bash
-# Auto-heal configuration
-export CLIPROXY_AUTO_HEAL_INTERVAL=60          # Health check interval (seconds)
-export CLIPROXY_AUTO_HEAL_SUCCESS_TARGET=2     # Successes to restore
-export CLIPROXY_AUTO_HEAL_MAX_ATTEMPTS=3       # Failures before penalty
-export CLIPROXY_MAX_EJECTION_PERCENT=50        # Max blacklist %
-export CLIPROXY_CONSECUTIVE_ERROR_THRESHOLD=3  # Errors before blacklist
+cd /home/pets/TOOLS/cdx_proxy_cli_v2
+
+cdx status
+cdx doctor --probe
+cdx all
 ```
 
-### CLI Options (future)
+What each command gives you:
+
+- `cdx status` shows the top-level health verdict and the one-line pool state guidance.
+- `cdx doctor --probe` probes auth keys without mutating runtime state and helps separate bad auths from upstream or transport issues.
+- `cdx all` shows quota pressure and per-key dashboard output, which is useful when `429` or `auth.interactive_pool_weak` is involved.
+
+If you need raw management data, check:
 
 ```bash
-cdx proxy \
-  --auto-heal-interval 60 \
-  --auto-heal-success-target 2 \
-  --auto-heal-max-attempts 3 \
-  --max-ejection-percent 50 \
-  --consecutive-error-threshold 3
+cdx trace --limit 20
+curl -sS -H "X-Management-Key: $CLIPROXY_MANAGEMENT_KEY" "$(cdx status --json | jq -r '.base_url')/debug" | jq .
+curl -sS -H "X-Management-Key: $CLIPROXY_MANAGEMENT_KEY" "$(cdx status --json | jq -r '.base_url')/health?refresh=1" | jq .
 ```
 
-## Monitoring
+## Pool State Decision Tree
 
-### Real-time Monitoring
+### `healthy`
+
+- Meaning: the pool has usable auths and no immediate operator action is needed.
+- First action: nothing.
+- Follow-up: keep watching `cdx status` and `cdx trace` if the incident is still unfolding.
+
+### `degraded`
+
+- Meaning: some keys are in `COOLDOWN` or `BLACKLIST`, but the pool still has working capacity.
+- Try, in order:
+  - `cdx rotate`
+  - wait for cooldown expiry
+  - `cdx reset --state cooldown`
+- Confirm recovery with:
 
 ```bash
-# Watch live trace events
-cdx trace
-
-# View event log
-tail -f ~/.codex/_auths/rr_proxy_v2.events.jsonl | jq .
-
-# Check health status
-cdx doctor
+cdx status
+cdx doctor --probe
 ```
 
-### Key Events
+### `partial_outage`
 
-| Event | Level | Description | Action |
-|-------|-------|-------------|--------|
-| `auth.blacklisted` | WARN | Key ejected (401/403) | Monitor frequency |
-| `auth.cooldown` | INFO | Key rate limited (429) | Normal operation |
-| `auth.pool_exhausted` | ERROR | All keys unavailable | Investigate immediately |
-| `auto_heal.success` | INFO | Key restored | Normal operation |
-| `auto_heal.failure` | WARN | Health check failed | Monitor pattern |
+- Meaning: the proxy still has auth records, but interactive-safe capacity is gone.
+- Typical signals:
+  - `auth.interactive_skipped`
+  - `auth.interactive_pool_weak`
+  - `review.pool_exhausted`
+- Try, in order:
+  - `cdx doctor --probe`
+  - `cdx limits`
+  - `cdx reset --state blacklist`
 
-### Metrics (future endpoint)
+### `full_outage`
+
+- Meaning: no healthy auths remain.
+- Try, in order:
+  - `cdx reset --state blacklist`
+  - add new auth files
+  - restart the proxy
+
+Example restart flow:
 
 ```bash
-# Prometheus-format metrics (planned)
-curl http://127.0.0.1:8080/stats/prometheus
-
-# Expected metrics:
-# cdx_auth_total 5
-# cdx_auth_ok 3
-# cdx_auth_blacklist 1
-# cdx_auth_cooldown 1
-# cdx_auto_heal_success_total 12
-# cdx_auto_heal_failure_total 3
+cdx stop
+cdx proxy
+cdx status
 ```
 
-## Troubleshooting
+## Auto-Heal Behavior
 
-### High Blacklist Rate
+Auto-heal runs in the background and periodically probes blacklisted or probation keys. It uses lightweight auth checks and tries to re-enter keys only after repeated success, instead of forcing them back immediately.
 
-**Symptom:** Many `auth.blacklisted` events
+Watch these events in `cdx trace`:
 
-**Possible Causes:**
-1. Invalid/expired tokens
-2. Upstream API issues
-3. Network connectivity problems
+- `auto_heal.success`
+- `auto_heal.failure`
+- `auth.probation`
+- `auth.returned`
 
-**Actions:**
-```bash
-# Check which keys are blacklisted
-cdx doctor
+Important interpretation:
 
-# View recent events
-cdx trace
+- Repeated `auto_heal.success` means recovery is progressing.
+- `auto_heal.failure` means the probe still sees a bad state; check `http_status`, `error_code`, and `origin`.
+- The `origin` field helps classify the failure:
+  - `hard_auth`
+  - `quota`
+  - `probe_transport`
+  - `upstream_transient`
 
-# Check token validity manually
-curl -H "Authorization: Bearer <token>" https://chatgpt.com/backend-api/models
-
-# Reset blacklisted keys if tokens are valid
-cdx reset --state blacklist
-```
-
-### Pool Exhausted (503 Errors)
-
-**Symptom:** `auth.pool_exhausted` events, 503 responses
-
-**Possible Causes:**
-1. All tokens expired
-2. Upstream outage
-3. Configuration issue (max_ejection_percent too low)
-
-**Actions:**
-```bash
-# Immediate: Check all key states
-cdx doctor
-
-# If tokens are valid, reset all
-cdx reset
-
-# If upstream issue, wait for recovery
-# Monitor with:
-watch -n 5 'cdx status'
-```
-
-### Auto-heal Not Restoring Keys
-
-**Symptom:** Keys remain blacklisted despite valid tokens
-
-**Possible Causes:**
-1. Health check endpoint unreachable
-2. Health check timeout too short
-3. Auto-heal disabled
-
-**Actions:**
-```bash
-# Check auto-heal configuration
-cat ~/.codex/_auths/.env | grep AUTO_HEAL
-
-# Test health check endpoint manually
-curl -H "Authorization: Bearer <token>" https://chatgpt.com/backend-api/models
-
-# Check event log for auto_heal.failure events
-grep auto_heal.failure ~/.codex/_auths/rr_proxy_v2.events.jsonl
-```
-
-### Performance Issues
-
-**Symptom:** High latency, slow key rotation
-
-**Possible Causes:**
-1. Too frequent health checks
-2. Too many keys
-3. Network latency
-
-**Actions:**
-```bash
-# Increase health check interval
-export CLIPROXY_AUTO_HEAL_INTERVAL=120
-
-# Check trace for latency patterns
-cdx trace
-
-# Monitor system resources
-top -p $(cat ~/.codex/_auths/rr_proxy_v2.pid)
-```
-
-## Maintenance
-
-### Regular Tasks
-
-**Daily:**
-- Monitor `cdx trace` for unusual patterns
-- Check `cdx doctor` for key distribution
-
-**Weekly:**
-- Review event logs for trends
-- Rotate tokens proactively
-
-**Monthly:**
-- Audit key usage patterns
-- Update configuration based on metrics
-
-### Token Rotation
+Useful commands:
 
 ```bash
-# Add new token
-python scripts/add_auth_token.py
-
-# Verify new token works
-cdx doctor
-
-# Remove old token (if needed)
-rm ~/.codex/_auths/old_token.json
+cdx trace --limit 50
+cdx doctor --probe
 ```
 
-## Escalation
+## Downstream Disconnects
 
-### When to Escalate
+`proxy.downstream_disconnect` means the upstream side may have been fine, but the client disconnected while the proxy was writing headers, body, or flushing output. This is not the same as an auth failure.
 
-1. Persistent `auth.pool_exhausted` after reset
-2. Auto-heal failure rate > 50%
-3. Unusual latency spikes (> 5 seconds)
-4. Memory/CPU exhaustion
+Check these signals:
 
-### Escalation Path
+- trace event: `proxy.downstream_disconnect`
+- metric: `downstream_disconnects_total`
 
-1. **L1:** Check runbook, run diagnostics
-2. **L2:** Review logs, check upstream status
-3. **L3:** Engage upstream provider, investigate code
+Example checks:
 
-## Appendix
-
-### Configuration Reference
-
-```yaml
-# ~/.codex/_auths/config.yaml (future format)
-auto_heal:
-  enabled: true
-  interval_seconds: 60
-  success_target: 2
-  max_attempts: 3
-  check_path: "/backend-api/models"
-  check_timeout_seconds: 5
-
-outlier_detection:
-  consecutive_errors: 3
-  base_ejection_time_seconds: 900
-  max_ejection_percent: 50
+```bash
+cdx trace --limit 50
+curl -sS -H "X-Management-Key: $CLIPROXY_MANAGEMENT_KEY" "$(cdx status --json | jq -r '.base_url')/debug" | jq '.metrics.downstream_disconnects_total'
 ```
 
-### Log Format
+What to do:
 
-```json
-{
-  "ts": "2026-03-09T12:00:00.000Z",
-  "level": "WARN",
-  "event": "auth.blacklisted",
-  "message": "Key user@example.com blacklisted (status 401)",
-  "auth_file": "user.json",
-  "auth_email": "user@example.com",
-  "status": 401,
-  "error_code": "token_invalid"
-}
-```
+- If disconnects rise but auth health is fine, inspect the downstream client or terminal session.
+- Do not reset auths only because disconnects are present.
 
-### Related Documentation
+## Review-Path Stall Triage
 
-- [Auto-heal Roadmap](docs/auto_heal_roadmap.md)
-- [TaaD Test Matrix](docs/quality/TAAD_TEST_MATRIX.md)
-- [Operations Runbook](docs/operations/runbook.md)
+For review incidents, read the `review.*` lifecycle events in `cdx trace`:
+
+- `review.request_start`
+- `review.auth_selected`
+- `review.upstream_result`
+- `review.pool_exhausted`
+- `review.complete`
+
+Suggested reading order:
+
+1. Find `review.request_start`.
+2. Check whether `review.auth_selected` happened.
+3. Check every `review.upstream_result`.
+4. Look for `review.pool_exhausted`.
+5. Confirm whether `review.complete` happened.
+
+Interpretation:
+
+- `review.request_start` without `review.auth_selected` usually points to pool gating before upstream traffic.
+- `review.auth_selected` without a later success often means retry pressure, upstream failure, or review-path exhaustion.
+- `review.pool_exhausted` means interactive-safe auths were not available or safe retries were exhausted.
+
+Related events to watch beside `review.*`:
+
+- `auth.interactive_skipped`
+- `auth.interactive_pool_weak`
+
+## Operator Checklist
+
+- Start with `cdx status`, `cdx doctor --probe`, and `cdx all`.
+- Use `/debug` or `cdx status --json` to read the triage summary quickly.
+- Use `cdx trace` when you need exact event ordering.
+- Use `cdx limits` when quota pressure is suspected.
+- Reset only the state you understand: `cooldown`, `blacklist`, or `probation`.

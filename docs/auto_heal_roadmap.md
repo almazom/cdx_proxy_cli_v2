@@ -238,6 +238,46 @@ trace_headers: List[str] = ["x-request-id", "user-agent"]
 ## Implementation Priority
 
 | Priority | Feature | Effort | Impact |
+
+---
+
+## Newly Implemented Diagnostic Surfaces
+
+### Failure Origin Classification
+
+The runtime now classifies auto-heal probe failures with explicit origin values instead of treating every failure as a generic blacklist extension.
+
+Current failure-origin vocabulary:
+
+- `hard_auth`
+- `quota`
+- `probe_transport`
+- `upstream_transient`
+
+This helps operators distinguish between:
+
+- invalid or forbidden auth material
+- quota pressure and `429` conditions
+- transport-level probe failures
+- transient upstream failures that do not imply broken credentials
+
+### Triage Summary Surfaces
+
+The runtime now exposes a compact triage summary so operators do not need to infer pool state by stitching together multiple raw views.
+
+Current surfaces:
+
+- `/debug` includes `triage_summary`
+- `/health` includes a compact `triage` object
+- `cdx status` prints a one-line pool verdict and includes `triage_summary` in `--json`
+
+The summary is built from `degraded_state_verdict()` and includes:
+
+- `state`
+- `primary_blocker`
+- `next_action`
+
+This closes a major observability gap from the earlier roadmap phases: operators can now see both the current degraded state and the recommended next step without manually correlating `cdx doctor`, `cdx trace`, and raw event logs first.
 |----------|---------|--------|--------|
 | P0 | Configurable settings | Low | High |
 | P0 | Max ejection percent | Low | High |
