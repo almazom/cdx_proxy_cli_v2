@@ -4,7 +4,7 @@ import http.client
 import json
 import select
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from cdx_proxy_cli_v2.proxy.models import _extract_error_code, _normalize_models_response_body
 from cdx_proxy_cli_v2.proxy.rules import get_request_timeout
@@ -46,6 +46,7 @@ def _tunnel_websocket(
     client_writer: object,
     upstream_connection: http.client.HTTPConnection,
     upstream_response: http.client.HTTPResponse,
+    on_client_disconnect: Optional[Callable[[Exception], None]] = None,
 ) -> None:
     upstream_socket = getattr(upstream_connection, "sock", None)
     if upstream_socket is None:
@@ -77,7 +78,12 @@ def _tunnel_websocket(
                 if not chunk:
                     return
                 target = upstream_socket if source is client_socket else client_socket
-                target.sendall(chunk)
+                try:
+                    target.sendall(chunk)
+                except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                    if target is client_socket and on_client_disconnect is not None:
+                        on_client_disconnect(exc)
+                    return
     finally:
         try:
             upstream_response.close()
