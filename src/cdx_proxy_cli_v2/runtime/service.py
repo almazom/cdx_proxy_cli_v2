@@ -594,6 +594,8 @@ def service_status(settings: Settings) -> Dict[str, object]:
 
     auth_count = None
     triage_summary: Optional[Dict[str, object]] = None
+    triage: Optional[Dict[str, object]] = None
+    pool_health: list[Dict[str, object]] = []
     if isinstance(debug, dict):
         value = debug.get("auth_count")
         if isinstance(value, int):
@@ -601,6 +603,14 @@ def service_status(settings: Settings) -> Dict[str, object]:
         triage_value = debug.get("triage_summary")
         if isinstance(triage_value, dict):
             triage_summary = dict(triage_value)
+        triage_payload = debug.get("triage")
+        if isinstance(triage_payload, dict):
+            triage = dict(triage_payload)
+        pool_health_payload = debug.get("pool_health")
+        if isinstance(pool_health_payload, list):
+            pool_health = [
+                dict(item) for item in pool_health_payload if isinstance(item, dict)
+            ]
 
     return {
         "pid": pid,
@@ -611,6 +621,8 @@ def service_status(settings: Settings) -> Dict[str, object]:
         "port": port,
         "auth_count": auth_count,
         "triage_summary": triage_summary,
+        "triage": triage,
+        "pool_health": pool_health,
         "state": state.get("status"),
         "log_file": str(log_path(settings.auth_dir)),
         "events_file": str(events_path(settings.auth_dir)),

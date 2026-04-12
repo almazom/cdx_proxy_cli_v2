@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from io import BytesIO
+import re
 import time
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
@@ -2219,11 +2220,123 @@ class TestOperatorTriage:
         snapshot = runtime.health_snapshot(refresh=False)
 
         assert "triage" in snapshot
-        assert snapshot["triage"] == {
-            "state": "healthy",
-            "primary_blocker": None,
-            "next_action": None,
-        }
+        assert snapshot["triage"]["summary"] == "POOL: 1 keys | 1 OK"
+        assert snapshot["triage"]["risk_level"] == "none"
+        assert snapshot["triage"]["auto_reset_status"] == "armed (streak 4)"
+        assert snapshot["triage"]["next_action"] is None
+        assert snapshot["triage"]["state"] == "healthy"
+        assert snapshot["triage"]["primary_blocker"] is None
+        assert "pool_health" in snapshot
+        assert snapshot["pool_health"][0]["file"] == sample_auth_record.name
+
+    def test_pool_health_shows_starvation_risk_when_single_key_active(
+        self, test_settings
+    ):
+        first_auth = AuthRecord(
+            name="first.json",
+            path="/tmp/first.json",
+            token="tok-first",
+            email="first@example.com",
+        )
+        second_auth = AuthRecord(
+            name="second.json",
+            path="/tmp/second.json",
+            token="tok-second",
+            email="second@example.com",
+        )
+        runtime = ProxyRuntime(settings=replace(test_settings, consecutive_error_threshold=1))
+        runtime.auth_pool.load([first_auth, second_auth])
+        runtime.auth_pool.mark_result("second.json", status=401, error_code="token_invalid")
+
+        snapshot = runtime.health_snapshot(refresh=False)
+        pool_health = {item["file"]: item for item in snapshot["pool_health"]}
+
+        assert pool_health["first.json"]["starvation_risk_flag"] is True
+        assert pool_health["first.json"]["effective_pick_probability"] == pytest.approx(1.0)
+        assert pool_health["second.json"]["starvation_risk_flag"] is False
+        assert pool_health["second.json"]["effective_pick_probability"] == 0.0
+
+    def test_triage_summary_string_format(self, test_settings):
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        cooldown_auth = AuthRecord(
+            name="cool.json",
+            path="/tmp/cool.json",
+            token="tok-cool",
+            email="cool@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth, cooldown_auth])
+        runtime.auth_pool.mark_result("cool.json", status=429)
+
+        summary = runtime.health_snapshot(refresh=False)["triage"]["summary"]
+
+        assert re.match(r"^POOL: 2 keys \| .+", summary)
+        assert "1 OK" in summary
+        assert "1 COOLDOWN" in summary
+
+    def test_triage_risk_level_none_when_all_ok(self, test_settings):
+        ok_auth_a = AuthRecord(
+            name="ok_a.json",
+            path="/tmp/ok_a.json",
+            token="tok-ok-a",
+            email="ok_a@example.com",
+        )
+        ok_auth_b = AuthRecord(
+            name="ok_b.json",
+            path="/tmp/ok_b.json",
+            token="tok-ok-b",
+            email="ok_b@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth_a, ok_auth_b])
+
+        triage = runtime.health_snapshot(refresh=False)["triage"]
+
+        assert triage["risk_level"] == "none"
+        assert triage["summary"] == "POOL: 2 keys | 2 OK"
+        assert triage["next_action"] is None
+
+    def test_triage_risk_level_high_when_most_keys_down(self, test_settings):
+        auth_a = AuthRecord(
+            name="a.json",
+            path="/tmp/a.json",
+            token="tok-a",
+            email="a@example.com",
+        )
+        auth_b = AuthRecord(
+            name="b.json",
+            path="/tmp/b.json",
+            token="tok-b",
+            email="b@example.com",
+        )
+        auth_c = AuthRecord(
+            name="c.json",
+            path="/tmp/c.json",
+            token="tok-c",
+            email="c@example.com",
+        )
+        runtime = ProxyRuntime(
+            settings=replace(
+                test_settings,
+                consecutive_error_threshold=1,
+                max_ejection_percent=100,
+            )
+        )
+        runtime.auth_pool.load([auth_a, auth_b, auth_c])
+        runtime.auth_pool.mark_result("b.json", status=401, error_code="token_invalid")
+        runtime.auth_pool.mark_result("c.json", status=403, error_code="forbidden")
+
+        triage = runtime.health_snapshot(refresh=False)["triage"]
+
+        assert triage["risk_level"] == "high"
+        assert triage["available_count"] == 1
+        assert triage["total_keys"] == 3
+        assert triage["next_action"] == "cdx reset --state blacklist"
 
 
 # ============================================================================
@@ -2293,7 +2406,6 @@ class TestBoundedManagementRefresh:
     ):
         """health_snapshot must include limits_refresh_age_seconds, limits_stale,
         limits_refresh_error, and limits_partial fields."""
-        import time as _time
 
         runtime = _build_runtime(test_settings, sample_auth_record)
 

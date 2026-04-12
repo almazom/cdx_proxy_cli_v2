@@ -166,3 +166,63 @@ def test_cli_runtime_flow_covers_status_doctor_all_reset_and_trace(
         assert cooldown_after["reason"] == "limit_weekly"
     finally:
         _stop_proxy(auth_dir, env)
+
+
+def test_health_endpoint_includes_pool_health_section(
+    tmp_path: Path,
+    upstream_server: str,
+    monkeypatch,
+) -> None:
+    auth_dir = tmp_path / "auths"
+    auth_dir.mkdir()
+    write_auth(auth_dir / "a.json", "tok-a", "a@example.com", "acc-a")
+    write_auth(auth_dir / "b.json", "tok-b", "b@example.com", "acc-b")
+    monkeypatch.setenv("CLIPROXY_ENV_FILE", str(tmp_path / "poison.env"))
+
+    MockUpstreamHandler.reset()
+    MockUpstreamHandler.set_usage_payload(
+        "tok-a",
+        make_usage_payload(
+            five_hour_used_percent=10,
+            weekly_used_percent=15,
+            weekly_reset_after_seconds=2 * 60 * 60,
+        ),
+    )
+    MockUpstreamHandler.set_usage_payload(
+        "tok-b",
+        make_usage_payload(
+            five_hour_used_percent=95,
+            five_hour_reset_after_seconds=120,
+            weekly_used_percent=20,
+            limit_reached=True,
+        ),
+    )
+
+    base_url = _start_proxy(auth_dir, upstream_server)
+    env = _cli_env(auth_dir, upstream_server)
+
+    try:
+        status_code, payload = request_json(
+            base_url=base_url,
+            path="/health",
+            headers={"X-Management-Key": env["CLIPROXY_MANAGEMENT_KEY"]},
+        )
+
+        assert status_code == 200
+        assert "pool_health" in payload
+        assert isinstance(payload["pool_health"], list)
+        assert len(payload["pool_health"]) == 2
+        assert all(
+            {
+                "file",
+                "status",
+                "weight",
+                "effective_pick_probability",
+                "time_since_last_pick_seconds",
+                "starvation_risk_flag",
+            }.issubset(item.keys())
+            for item in payload["pool_health"]
+        )
+        assert payload["triage"]["summary"].startswith("POOL: 2 keys |")
+    finally:
+        _stop_proxy(auth_dir, env)

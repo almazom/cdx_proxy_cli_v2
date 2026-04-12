@@ -216,7 +216,7 @@ def ensure_codex_runtime(
     settings: Settings, cwd: str | Path
 ) -> Dict[str, Any]:
     paths = runtime_paths(settings.auth_dir, cwd)
-    state = _load_state(paths.state_file)
+    _load_state(paths.state_file)
     pid = _read_pid(paths.pid_file)
 
     if _matches_runtime_process(pid, paths) and _socket_ready(paths.socket_file):

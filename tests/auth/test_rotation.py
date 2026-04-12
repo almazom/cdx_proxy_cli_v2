@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from cdx_proxy_cli_v2.auth.models import AuthRecord
 from cdx_proxy_cli_v2.auth.rotation import (
     DEFAULT_BLACKLIST_SECONDS,
@@ -7,6 +9,139 @@ from cdx_proxy_cli_v2.auth.rotation import (
     PROBATION_PROBE_INTERVAL_SECONDS,
     RoundRobinAuthPool,
 )
+from cdx_proxy_cli_v2.config.settings import (
+    DEFAULT_AUTO_RESET_COOLDOWN,
+    DEFAULT_AUTO_RESET_STREAK,
+)
+
+
+def _cycle_random_values(pool: RoundRobinAuthPool, values: list[float]) -> None:
+    draws = iter(values)
+    pool._random.random = lambda: next(draws)
+
+
+def test_auto_reset_streak_default_is_four() -> None:
+    assert DEFAULT_AUTO_RESET_STREAK == 4
+
+
+def test_auto_reset_cooldown_default_is_120() -> None:
+    assert DEFAULT_AUTO_RESET_COOLDOWN == 120
+
+
+def test_auto_reset_triggers_on_small_pool_by_default(monkeypatch) -> None:
+    now = 7000.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(consecutive_error_threshold=1)
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    pool.mark_result("b.json", status=401, error_code="token_invalid")
+
+    reset_count = 0
+    for _ in range(4):
+        picked = pool.pick()
+        assert picked is not None
+        assert picked.record.name == "a.json"
+        reset_count = pool.maybe_auto_reset_single_key(picked.record.name, now)
+
+    assert reset_count == 1
+    snapshot = {item["file"]: item for item in pool.health_snapshot()}
+    assert snapshot["b.json"]["status"] == "OK"
+
+
+def test_auto_reset_uses_ring_buffer_not_global_counter(monkeypatch) -> None:
+    now = 7100.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(
+        auto_reset_on_single_key=True,
+        auto_reset_streak=4,
+        consecutive_error_threshold=1,
+    )
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+            AuthRecord(
+                name="c.json", path="/tmp/c.json", token="tok-c", email="c@example.com"
+            ),
+        ]
+    )
+
+    pool.mark_result("c.json", status=401, error_code="token_invalid")
+
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("b.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+
+    snapshot = {item["file"]: item for item in pool.health_snapshot()}
+    assert snapshot["c.json"]["status"] == "BLACKLIST"
+
+
+def test_auto_reset_respects_cooldown(monkeypatch) -> None:
+    now = 7200.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(
+        auto_reset_on_single_key=True,
+        auto_reset_streak=2,
+        auto_reset_cooldown=120,
+        consecutive_error_threshold=1,
+    )
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    pool.mark_result("b.json", status=401, error_code="token_invalid")
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 1
+
+    pool.mark_result("b.json", status=401, error_code="token_invalid")
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+
+
+def test_auto_reset_returns_zero_when_no_blacklisted_keys(monkeypatch) -> None:
+    now = 7300.0
+    monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
+
+    pool = RoundRobinAuthPool(auto_reset_on_single_key=True, auto_reset_streak=4)
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
+    assert pool.maybe_auto_reset_single_key("a.json", now) == 0
 
 
 def test_round_robin_and_cooldown() -> None:
@@ -21,6 +156,7 @@ def test_round_robin_and_cooldown() -> None:
             ),
         ]
     )
+    pool._random.seed(0)
 
     first = pool.pick()
     assert first is not None
@@ -280,6 +416,7 @@ def test_rate_limited_key_rejoins_rotation_after_cooldown(monkeypatch) -> None:
             ),
         ]
     )
+    pool._random.seed(0)
 
     first = pool.pick()
     assert first is not None
@@ -322,7 +459,7 @@ def test_persistently_rate_limited_keys_are_not_force_restored() -> None:
     assert snapshot["c.json"]["status"] == "COOLDOWN"
 
 
-def test_round_robin_keeps_next_healthy_auth_in_order(monkeypatch) -> None:
+def test_weighted_pick_skips_unavailable_auths(monkeypatch) -> None:
     now = 5000.0
     monkeypatch.setattr("cdx_proxy_cli_v2.auth.rotation.time.time", lambda: now)
 
@@ -340,6 +477,7 @@ def test_round_robin_keeps_next_healthy_auth_in_order(monkeypatch) -> None:
             ),
         ]
     )
+    pool._random.seed(4)
 
     first = pool.pick()
     assert first is not None
@@ -348,7 +486,7 @@ def test_round_robin_keeps_next_healthy_auth_in_order(monkeypatch) -> None:
     pool.mark_result("a.json", status=429, cooldown_seconds=60)
     second = pool.pick()
     assert second is not None
-    assert second.record.name == "b.json"
+    assert second.record.name in {"b.json", "c.json"}
 
 
 def test_probation_recovery_returns_key_to_round_robin(monkeypatch) -> None:
@@ -366,6 +504,7 @@ def test_probation_recovery_returns_key_to_round_robin(monkeypatch) -> None:
             ),
         ]
     )
+    pool._random.seed(0)
 
     pool.mark_result("a.json", status=401, error_code="token_invalid")
 
@@ -474,11 +613,141 @@ def test_non_auth_4xx_resets_hard_failure_streak(monkeypatch) -> None:
         ]
     )
 
-    pool.mark_result("a.json", status=401, error_code="token_invalid")
+    pool.mark_result("a.json", status=403, error_code="forbidden")
     assert pool.health_snapshot()[0]["status"] == "COOLDOWN"
 
     now = now + float(DEFAULT_TRANSIENT_COOLDOWN_SECONDS) + 1.0
     pool.mark_result("a.json", status=405)
-    pool.mark_result("a.json", status=401, error_code="token_invalid")
+    pool.mark_result("a.json", status=403, error_code="forbidden")
 
     assert pool.health_snapshot()[0]["status"] == "COOLDOWN"
+
+
+def test_weighted_pick_prefers_higher_capacity_keys() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+    pool._states[0].remaining_capacity_weight = 0.9
+    pool._states[1].remaining_capacity_weight = 0.1
+    _cycle_random_values(pool, [step / 100 for step in range(100)])
+
+    counts = Counter()
+    for _ in range(100):
+        picked = pool.pick()
+        assert picked is not None
+        counts[picked.record.name] += 1
+
+    assert counts["a.json"] >= 70
+
+
+def test_weighted_pick_falls_back_to_uniform_when_no_limit_data() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+    _cycle_random_values(pool, [step / 100 for step in range(100)])
+
+    counts = Counter()
+    for _ in range(100):
+        picked = pool.pick()
+        assert picked is not None
+        counts[picked.record.name] += 1
+
+    assert counts["a.json"] >= 30
+    assert counts["b.json"] >= 30
+
+
+def test_weighted_pick_with_all_keys_equal_is_uniform() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            ),
+            AuthRecord(
+                name="b.json", path="/tmp/b.json", token="tok-b", email="b@example.com"
+            ),
+        ]
+    )
+    pool._states[0].remaining_capacity_weight = 0.5
+    pool._states[1].remaining_capacity_weight = 0.5
+    _cycle_random_values(pool, [step / 100 for step in range(100)])
+
+    counts = Counter()
+    for _ in range(100):
+        picked = pool.pick()
+        assert picked is not None
+        counts[picked.record.name] += 1
+
+    assert counts["a.json"] >= 30
+    assert counts["b.json"] >= 30
+
+
+def test_weighted_pick_respects_stable_filter() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="stable.json",
+                path="/tmp/stable.json",
+                token="tok-stable",
+                email="stable@example.com",
+            ),
+            AuthRecord(
+                name="unstable.json",
+                path="/tmp/unstable.json",
+                token="tok-unstable",
+                email="unstable@example.com",
+            ),
+        ]
+    )
+    pool._states[0].remaining_capacity_weight = 0.1
+    pool._states[1].remaining_capacity_weight = 0.9
+    pool._states[1].hard_failures = 1
+    _cycle_random_values(pool, [step / 100 for step in range(100)])
+
+    for _ in range(20):
+        picked = pool.pick()
+        assert picked is not None
+        assert picked.record.name == "stable.json"
+
+
+def test_apply_limit_health_sets_weight_from_used_percent() -> None:
+    pool = RoundRobinAuthPool()
+    pool.load(
+        [
+            AuthRecord(
+                name="a.json", path="/tmp/a.json", token="tok-a", email="a@example.com"
+            )
+        ]
+    )
+
+    pool.apply_limit_health(
+        {
+            "a.json": {
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 25.0,
+                    "reset_after_seconds": 300,
+                }
+            }
+        },
+        min_remaining_percent=10.0,
+    )
+
+    assert pool._states[0].remaining_capacity_weight == 0.75

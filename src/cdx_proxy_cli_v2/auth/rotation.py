@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from typing import List, Optional
 
 from cdx_proxy_cli_v2.auth.eligibility import limit_block_details
 from cdx_proxy_cli_v2.auth.models import AuthRecord, AuthState
+from cdx_proxy_cli_v2.config.settings import DEFAULT_SMALL_POOL_AUTO_RESET_KEY_COUNT
 
 DEFAULT_COOLDOWN_SECONDS = 30
 DEFAULT_TRANSIENT_COOLDOWN_SECONDS = 8
@@ -51,6 +53,10 @@ class RoundRobinAuthPool:
     def __init__(
         self,
         *,
+        auto_reset_on_single_key: bool = False,
+        auto_reset_on_single_key_explicit: bool = False,
+        auto_reset_streak: int = 4,
+        auto_reset_cooldown: int = 120,
         auto_heal_interval: int = 60,
         auto_heal_success_target: int = 2,
         auto_heal_max_attempts: int = 3,
@@ -60,6 +66,17 @@ class RoundRobinAuthPool:
         self._states: List[AuthState] = []
         self._index = 0
         self._lock = threading.Lock()
+        self._random = random.Random()
+        self._configured_auto_reset_on_single_key = bool(auto_reset_on_single_key)
+        self._auto_reset_on_single_key_explicit = bool(
+            auto_reset_on_single_key_explicit
+        )
+        self.auto_reset_on_single_key = bool(auto_reset_on_single_key)
+        self.auto_reset_streak = max(1, int(auto_reset_streak))
+        self.auto_reset_cooldown = max(1, int(auto_reset_cooldown))
+        self._recent_pick_names: List[str] = []
+        self._recent_pick_index = 0
+        self.last_auto_reset_time = 0.0
         # Auto-heal configuration (from Settings)
         self.auto_heal_interval = auto_heal_interval
         self.auto_heal_success_target = auto_heal_success_target
@@ -78,6 +95,7 @@ class RoundRobinAuthPool:
                 if prev:
                     same_token = prev.record.token == record.token
                     state.used = prev.used
+                    state.last_picked_at = prev.last_picked_at
                     state.errors = prev.errors
                     if same_token:
                         state.cooldown_until = prev.cooldown_until
@@ -90,6 +108,9 @@ class RoundRobinAuthPool:
                         state.next_probe_after = prev.next_probe_after
                         state.rate_limit_strikes = prev.rate_limit_strikes
                         state.hard_failures = prev.hard_failures
+                        state.remaining_capacity_weight = (
+                            prev.remaining_capacity_weight
+                        )
                         state.auto_heal_successes = prev.auto_heal_successes
                         state.auto_heal_failures = prev.auto_heal_failures
                         state.auto_heal_last_check = prev.auto_heal_last_check
@@ -100,6 +121,12 @@ class RoundRobinAuthPool:
                         state.probation_target = PROBATION_SUCCESS_TARGET
                 next_states.append(state)
             self._states = next_states
+            self.auto_reset_on_single_key = self._configured_auto_reset_on_single_key or (
+                not self._auto_reset_on_single_key_explicit
+                and 0 < len(self._states) <= DEFAULT_SMALL_POOL_AUTO_RESET_KEY_COUNT
+            )
+            self._recent_pick_names = [""] * self.auto_reset_streak
+            self._recent_pick_index = 0
             if self._states:
                 self._index %= len(self._states)
             else:
@@ -133,19 +160,11 @@ class RoundRobinAuthPool:
             # avoid sending foreground traffic through previously hard-failed keys.
             preferred = [state for state in available if self._is_stable(state)]
             pool = preferred or available
-            pool_ids = {id(candidate) for candidate in pool}
-            state: Optional[AuthState] = None
-            for offset in range(len(self._states)):
-                idx = (self._index + offset) % len(self._states)
-                candidate = self._states[idx]
-                if id(candidate) not in pool_ids:
-                    continue
-                state = candidate
-                self._index = (idx + 1) % len(self._states)
-                break
+            state = self._pick_from_pool(pool)
             if state is None:
                 return None
             state.used += 1
+            state.last_picked_at = now
             if state.probation_successes < state.probation_target:
                 state.next_probe_after = now + PROBATION_PROBE_INTERVAL_SECONDS
             return state
@@ -173,12 +192,8 @@ class RoundRobinAuthPool:
 
             preferred = [state for state in available if self._is_stable(state)]
             pool = preferred or available
-            pool_ids = {id(candidate) for candidate in pool}
-            for offset in range(len(self._states)):
-                idx = (self._index + offset) % len(self._states)
-                candidate = self._states[idx]
-                if id(candidate) not in pool_ids:
-                    continue
+            candidate = self._preview_pool_pick(pool)
+            if candidate is not None:
                 return {
                     "file": candidate.record.name,
                     "email": candidate.record.email,
@@ -252,6 +267,47 @@ class RoundRobinAuthPool:
         with self._lock:
             now = time.time()
             return [state.health(now) for state in self._states]
+
+    def selection_snapshot(self) -> List[dict]:
+        with self._lock:
+            return [
+                {
+                    "file": state.record.name,
+                    "weight": float(state.remaining_capacity_weight),
+                    "last_picked_at": float(state.last_picked_at),
+                }
+                for state in self._states
+            ]
+
+    def load_from_snapshot(self, snapshot: dict[str, dict], now: float) -> int:
+        restored = 0
+        with self._lock:
+            for state in self._states:
+                entry = snapshot.get(state.record.name)
+                if not isinstance(entry, dict):
+                    continue
+                cooldown_until = float(entry.get("cooldown_until") or 0.0)
+                if cooldown_until > now:
+                    state.cooldown_until = cooldown_until
+                limit_until = float(entry.get("limit_until") or 0.0)
+                if limit_until > now:
+                    state.limit_until = limit_until
+                    state.limit_reason = entry.get("limit_reason")
+                blacklist_until = float(entry.get("blacklist_until") or 0.0)
+                if blacklist_until > now:
+                    state.blacklist_until = blacklist_until
+                    state.blacklist_reason = entry.get("blacklist_reason")
+                    state.next_probe_after = blacklist_until
+                state.rate_limit_strikes = int(entry.get("rate_limit_strikes") or 0)
+                state.hard_failures = int(entry.get("hard_failures") or 0)
+                state.consecutive_errors = int(entry.get("consecutive_errors") or 0)
+                state.probation_successes = int(entry.get("probation_successes") or 0)
+                state.probation_target = int(
+                    entry.get("probation_target") or PROBATION_SUCCESS_TARGET
+                )
+                state.last_picked_at = float(entry.get("last_picked_at") or 0.0)
+                restored += 1
+        return restored
 
     def auth_files(self) -> List[str]:
         with self._lock:
@@ -412,6 +468,100 @@ class RoundRobinAuthPool:
                     self._mark_auto_heal_failure(state, now)
                     return
 
+    def _pick_from_pool(self, pool: List[AuthState]) -> Optional[AuthState]:
+        if self._weights_are_uniform(pool):
+            return self._pick_round_robin(pool, advance_index=True)
+        weighted_pool = self._build_weighted_pool(pool)
+        if not weighted_pool:
+            return None
+        total_weight = weighted_pool[-1][1]
+        if total_weight <= 0.0:
+            state = pool[0]
+            self._advance_index_past(state)
+            return state
+        draw = self._random.random() * total_weight
+        for state, cumulative_weight in weighted_pool:
+            if draw < cumulative_weight:
+                self._advance_index_past(state)
+                return state
+        state = weighted_pool[-1][0]
+        self._advance_index_past(state)
+        return state
+
+    def _preview_pool_pick(self, pool: List[AuthState]) -> Optional[AuthState]:
+        if self._weights_are_uniform(pool):
+            return self._pick_round_robin(pool, advance_index=False)
+        weighted_pool = self._build_weighted_pool(pool)
+        if not weighted_pool:
+            return None
+        total_weight = weighted_pool[-1][1]
+        if total_weight <= 0.0:
+            return pool[0]
+        random_state = self._random.getstate()
+        try:
+            draw = self._random.random() * total_weight
+        finally:
+            self._random.setstate(random_state)
+        for state, cumulative_weight in weighted_pool:
+            if draw < cumulative_weight:
+                return state
+        return weighted_pool[-1][0]
+
+    @staticmethod
+    def _build_weighted_pool(
+        pool: List[AuthState],
+    ) -> list[tuple[AuthState, float]]:
+        weighted_pool: list[tuple[AuthState, float]] = []
+        total_weight = 0.0
+        for state in pool:
+            total_weight += max(0.0, float(state.remaining_capacity_weight))
+            weighted_pool.append((state, total_weight))
+        return weighted_pool
+
+    @staticmethod
+    def _weights_are_uniform(pool: List[AuthState]) -> bool:
+        if len(pool) <= 1:
+            return True
+        first = max(0.0, float(pool[0].remaining_capacity_weight))
+        for state in pool[1:]:
+            if abs(max(0.0, float(state.remaining_capacity_weight)) - first) > 1e-9:
+                return False
+        return True
+
+    def _pick_round_robin(
+        self,
+        pool: List[AuthState],
+        *,
+        advance_index: bool,
+    ) -> Optional[AuthState]:
+        pool_ids = {id(candidate) for candidate in pool}
+        for offset in range(len(self._states)):
+            idx = (self._index + offset) % len(self._states)
+            candidate = self._states[idx]
+            if id(candidate) not in pool_ids:
+                continue
+            if advance_index:
+                self._index = (idx + 1) % len(self._states)
+            return candidate
+        return None
+
+    def _advance_index_past(self, state: AuthState) -> None:
+        for idx, candidate in enumerate(self._states):
+            if candidate is state:
+                self._index = (idx + 1) % len(self._states)
+                return
+
+    @staticmethod
+    def _remaining_capacity_weight(limit_health: dict[str, dict]) -> float:
+        for window_name in ("five_hour", "weekly"):
+            window = limit_health.get(window_name) or {}
+            used_percent = window.get("used_percent")
+            if used_percent is None:
+                continue
+            remaining = 100.0 - float(used_percent)
+            return max(0.1, remaining / 100.0)
+        return 1.0
+
     def apply_limit_health(
         self,
         limit_health_by_file: dict[str, dict],
@@ -421,6 +571,9 @@ class RoundRobinAuthPool:
         with self._lock:
             for state in self._states:
                 limit_health = limit_health_by_file.get(state.record.name) or {}
+                state.remaining_capacity_weight = self._remaining_capacity_weight(
+                    limit_health
+                )
                 block = limit_block_details(
                     limit_health,
                     min_remaining_percent=min_remaining_percent,
@@ -455,6 +608,57 @@ class RoundRobinAuthPool:
             and state.probation_successes >= state.probation_target
         )
 
+    @staticmethod
+    def _reset_state(auth_state: AuthState) -> None:
+        auth_state.cooldown_until = 0.0
+        auth_state.blacklist_until = 0.0
+        auth_state.blacklist_reason = None
+        auth_state.rate_limit_strikes = 0
+        auth_state.hard_failures = 0
+        auth_state.errors = 0
+        auth_state.consecutive_errors = 0
+        auth_state.auto_heal_successes = 0
+        auth_state.auto_heal_failures = 0
+        auth_state.auto_heal_last_check = 0.0
+        auth_state.probation_successes = auth_state.probation_target
+        auth_state.next_probe_after = 0.0
+
+    def maybe_auto_reset_single_key(self, picked_name: str, now: float) -> int:
+        with self._lock:
+            if not self.auto_reset_on_single_key:
+                return 0
+
+            normalized_name = str(picked_name).strip()
+            if not normalized_name:
+                return 0
+
+            if not self._recent_pick_names:
+                self._recent_pick_names = [""] * self.auto_reset_streak
+                self._recent_pick_index = 0
+            self._recent_pick_names[self._recent_pick_index] = normalized_name
+            self._recent_pick_index = (self._recent_pick_index + 1) % self.auto_reset_streak
+
+            if "" in self._recent_pick_names:
+                return 0
+            if any(name != normalized_name for name in self._recent_pick_names):
+                return 0
+            if (now - self.last_auto_reset_time) < float(self.auto_reset_cooldown):
+                return 0
+
+            reset_count = 0
+            for auth_state in self._states:
+                if auth_state.record.name == normalized_name:
+                    continue
+                status = self._resettable_status(auth_state, now)
+                if status not in {"BLACKLIST", "PROBATION"}:
+                    continue
+                self._reset_state(auth_state)
+                reset_count += 1
+
+            if reset_count > 0:
+                self.last_auto_reset_time = now
+            return reset_count
+
     def reset_auth(
         self,
         *,
@@ -485,19 +689,7 @@ class RoundRobinAuthPool:
                     if current_status != state.lower():
                         continue
 
-                # Reset all failure counters and timers
-                auth_state.cooldown_until = 0.0
-                auth_state.blacklist_until = 0.0
-                auth_state.blacklist_reason = None
-                auth_state.rate_limit_strikes = 0
-                auth_state.hard_failures = 0
-                auth_state.errors = 0
-                auth_state.consecutive_errors = 0
-                auth_state.auto_heal_successes = 0
-                auth_state.auto_heal_failures = 0
-                auth_state.auto_heal_last_check = 0.0
-                auth_state.probation_successes = auth_state.probation_target
-                auth_state.next_probe_after = 0.0
+                self._reset_state(auth_state)
                 count += 1
 
             return count

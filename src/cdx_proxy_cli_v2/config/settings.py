@@ -16,8 +16,9 @@ DEFAULT_TRACE_MAX = 500
 DEFAULT_REQUEST_TIMEOUT = 45
 DEFAULT_COMPACT_TIMEOUT = 120
 DEFAULT_LIMIT_MIN_REMAINING_PERCENT = 15.0
-DEFAULT_AUTO_RESET_STREAK = 12
-DEFAULT_AUTO_RESET_COOLDOWN = 5 * 60
+DEFAULT_AUTO_RESET_STREAK = 4
+DEFAULT_AUTO_RESET_COOLDOWN = 120
+DEFAULT_SMALL_POOL_AUTO_RESET_KEY_COUNT = 3
 DEFAULT_MAX_IN_FLIGHT_REQUESTS = 0
 DEFAULT_MAX_PENDING_REQUESTS = 0
 DEFAULT_CODEX_WP_ZELLIJ_FLOAT_TOP = "12%"
@@ -385,6 +386,7 @@ class Settings:
     max_in_flight_requests: int = DEFAULT_MAX_IN_FLIGHT_REQUESTS
     max_pending_requests: int = DEFAULT_MAX_PENDING_REQUESTS
     auto_reset_on_single_key: bool = False
+    auto_reset_on_single_key_explicit: bool = False
     auto_reset_streak: int = DEFAULT_AUTO_RESET_STREAK
     auto_reset_cooldown: int = DEFAULT_AUTO_RESET_COOLDOWN
     # Auto-heal configuration (Envoy-inspired)
@@ -493,10 +495,17 @@ def build_settings(
         if allow_non_loopback is not None
         else parse_bool(merged.get(ENV_ALLOW_NON_LOOPBACK), default=False)
     )
+    auto_reset_env_value = merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY)
+    auto_reset_on_single_key_explicit = (
+        auto_reset_on_single_key is not None
+        or auto_reset_env_value is not None
+    )
     resolved_auto_reset_on_single_key = (
         bool(auto_reset_on_single_key)
         if auto_reset_on_single_key is not None
-        else parse_bool(merged.get(ENV_AUTO_RESET_ON_SINGLE_KEY), default=False)
+        else parse_bool(auto_reset_env_value, default=False)
+        if auto_reset_env_value is not None
+        else _default_auto_reset_on_single_key_for_auth_dir(resolved_auth_dir)
     )
 
     # --- special-case: percentage float ---
@@ -552,8 +561,19 @@ def build_settings(
         max_in_flight_requests=resolved_max_in_flight,
         max_pending_requests=resolved_max_pending,
         auto_reset_on_single_key=resolved_auto_reset_on_single_key,
+        auto_reset_on_single_key_explicit=auto_reset_on_single_key_explicit,
         **spec_resolved,
     )
+
+
+def _default_auto_reset_on_single_key_for_auth_dir(auth_dir: str) -> bool:
+    try:
+        from cdx_proxy_cli_v2.auth.store import load_auth_records
+
+        count = len(load_auth_records(auth_dir, prefer_keyring=False))
+    except Exception:
+        return False
+    return 0 < count <= DEFAULT_SMALL_POOL_AUTO_RESET_KEY_COUNT
 
 
 def ensure_management_key(

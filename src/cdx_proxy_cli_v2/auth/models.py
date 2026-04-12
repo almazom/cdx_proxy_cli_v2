@@ -25,6 +25,8 @@ class AuthState:
     probation_target: int = 2
     next_probe_after: float = 0.0
     used: int = 0
+    last_picked_at: float = 0.0
+    remaining_capacity_weight: float = 1.0
     errors: int = 0
     rate_limit_strikes: int = 0
     hard_failures: int = 0
@@ -95,6 +97,9 @@ class AuthState:
             "email": self.record.email,
             "status": status,
             "eligible_now": self.available(now),
+            "cooldown_until": self.cooldown_until,
+            "limit_until": self.limit_until,
+            "blacklist_until": self.blacklist_until,
             "cooldown_seconds": remaining if remaining > 0 else None,
             "blacklist_seconds": blacklist_remaining
             if blacklist_remaining > 0
@@ -108,7 +113,9 @@ class AuthState:
             "probation_successes": self.probation_successes,
             "probation_target": self.probation_target,
             "used": self.used,
+            "last_picked_at": self.last_picked_at,
             "errors": self.errors,
             "rate_limit_strikes": self.rate_limit_strikes,
             "hard_failures": self.hard_failures,
+            "consecutive_errors": self.consecutive_errors,
         }

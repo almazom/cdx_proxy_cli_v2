@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from cdx_proxy_cli_v2.auth.eligibility import (
     fetch_limit_health,
+    has_limit_window_data,
     merge_runtime_with_limits,
     merged_ok,
 )
@@ -43,6 +44,10 @@ from cdx_proxy_cli_v2.auth.rotation import (
     RoundRobinAuthPool,
     is_auth_incompatible_error,
     is_retryable_auth_failure,
+)
+from cdx_proxy_cli_v2.auth.limit_snapshot import (
+    load_boot_snapshot,
+    write_boot_snapshot,
 )
 from cdx_proxy_cli_v2.proxy.failure_types import (
     FAILURE_ORIGIN_DOWNSTREAM_DISCONNECT,
@@ -111,13 +116,9 @@ class ProxyRuntime:
     trace_store: TraceStore = field(init=False)
     logger: EventLogger = field(init=False)
     overload_guard: LocalOverloadGuard = field(init=False)
-    _auto_reset_lock: threading.Lock = field(
-        default_factory=threading.Lock, init=False, repr=False
-    )
     _metrics_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
-    _auto_reset_blocked_until: float = field(default=0.0, init=False, repr=False)
     # Auto-heal background checker
     _auto_heal_thread: Optional[threading.Thread] = field(
         default=None, init=False, repr=False
@@ -153,6 +154,7 @@ class ProxyRuntime:
     )
     _limits_partial: bool = field(default=False, init=False, repr=False)
     _limits_stale_flag: bool = field(default=False, init=False, repr=False)
+    _last_auto_reset_trace_id: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.trace_store = TraceStore(max_size=self.settings.trace_max)
@@ -171,6 +173,10 @@ class ProxyRuntime:
         self._auto_heal_last_check: Dict[str, float] = {}
         # Initialize auth pool with settings
         self.auth_pool = RoundRobinAuthPool(
+            auto_reset_on_single_key=self.settings.auto_reset_on_single_key,
+            auto_reset_on_single_key_explicit=self.settings.auto_reset_on_single_key_explicit,
+            auto_reset_streak=self.settings.auto_reset_streak,
+            auto_reset_cooldown=self.settings.auto_reset_cooldown,
             auto_heal_interval=self.settings.auto_heal_interval,
             auto_heal_success_target=self.settings.auto_heal_success_target,
             auto_heal_max_attempts=self.settings.auto_heal_max_attempts,
@@ -306,16 +312,30 @@ class ProxyRuntime:
             fetch_error: Optional[str] = None
             fetched = False
             try:
-                usage_base_url = (
-                    str(os.environ.get("CLIPROXY_USAGE_BASE_URL") or "").strip()
-                    or self.settings.upstream
-                )
-                self._limit_health_cache = fetch_limit_health(
+                configured_usage_base_url = str(
+                    os.environ.get("CLIPROXY_USAGE_BASE_URL") or ""
+                ).strip()
+                usage_base_url = configured_usage_base_url or self.settings.upstream
+                fetched_limit_health = fetch_limit_health(
                     self.settings.auth_dir,
                     base_url=usage_base_url,
                     min_remaining_percent=self.settings.limit_min_remaining_percent,
                     prefer_keyring=False,
                 )
+                if (
+                    not configured_usage_base_url
+                    and fetched_limit_health
+                    and all(
+                        not has_limit_window_data(item)
+                        and "usage fetch failed"
+                        in str(item.get("error") or "").strip().lower()
+                        for item in fetched_limit_health.values()
+                        if isinstance(item, dict)
+                    )
+                ):
+                    self._limit_health_cache = {}
+                else:
+                    self._limit_health_cache = fetched_limit_health
                 self._limit_health_cache_at = now
                 fetched = True
             except Exception as exc:
@@ -374,7 +394,39 @@ class ProxyRuntime:
 
     def _mark_trace_poll(self) -> None:
         self._last_trace_poll_at = time.time()
-        self._limit_sampler_wakeup.set()
+
+    def maybe_auto_reset_single_key_stall(self) -> int:
+        if not self.auth_pool.auto_reset_on_single_key:
+            return 0
+
+        threshold = max(1, int(self.auth_pool.auto_reset_streak))
+        trace_events = self.trace_store.list(limit=self.trace_store.max_size)
+        recent_names = [
+            str(event.get("auth_file") or "").strip()
+            for event in trace_events
+            if str(event.get("event") or "") == "proxy.request"
+            and str(event.get("auth_file") or "").strip()
+        ]
+        recent_names = recent_names[-threshold:]
+        if len(recent_names) < threshold:
+            return 0
+
+        now = time.time()
+        reset_count = 0
+        for auth_name in recent_names:
+            reset_count = self.auth_pool.maybe_auto_reset_single_key(auth_name, now)
+
+        if reset_count > 0:
+            self.logger.write(
+                level="WARN",
+                event="proxy.auth_auto_reset",
+                message="auto-reset blacklist/probation keys after single-key streak",
+                trigger_auth=recent_names[-1],
+                streak=self.auth_pool.auto_reset_streak,
+                cooldown_seconds=self.auth_pool.auto_reset_cooldown,
+                reset=reset_count,
+            )
+        return reset_count
 
     def limits_snapshot(self, *, force_refresh_stale: bool = False) -> Dict[str, Any]:
         self._mark_trace_poll()
@@ -899,6 +951,175 @@ class ProxyRuntime:
             "next_action": next_action,
         }
 
+    @staticmethod
+    def _triage_risk_level(*, available_count: int, total: int) -> str:
+        if total <= 0 or available_count <= 0:
+            return "high"
+        if available_count >= total:
+            return "none"
+        ratio = available_count / total
+        if ratio >= 0.75:
+            return "low"
+        if ratio >= 0.5:
+            return "medium"
+        return "high"
+
+    @staticmethod
+    def _status_order(status: str) -> int:
+        order = {
+            "OK": 0,
+            "WARN": 1,
+            "COOLDOWN": 2,
+            "PROBATION": 3,
+            "BLACKLIST": 4,
+            "EXPIRED": 5,
+            "UNKNOWN": 6,
+        }
+        return order.get(str(status or "").upper(), 99)
+
+    @staticmethod
+    def _triage_status_detail(account: Dict[str, Any]) -> Optional[str]:
+        status = str(account.get("status") or "").upper()
+        if status == "PROBATION":
+            successes = int(account.get("probation_successes") or 0)
+            target = int(account.get("probation_target") or 0)
+            return f"{successes}/{target} successes" if target > 0 else None
+
+        if status == "COOLDOWN":
+            detail_parts: List[str] = []
+            reason = str(account.get("reason") or "").strip()
+            if reason:
+                detail_parts.append(reason)
+            remaining = account.get("cooldown_seconds")
+            if isinstance(remaining, (int, float)) and int(remaining) > 0:
+                detail_parts.append(f"{int(remaining)}s remaining")
+            return ", ".join(detail_parts) or None
+
+        if status == "BLACKLIST":
+            detail_parts = []
+            reason = str(account.get("blacklist_reason") or account.get("reason") or "").strip()
+            if reason:
+                detail_parts.append(reason)
+            remaining = account.get("blacklist_seconds")
+            if isinstance(remaining, (int, float)) and int(remaining) > 0:
+                detail_parts.append(f"{int(remaining)}s remaining")
+            return ", ".join(detail_parts) or None
+
+        if status in {"EXPIRED", "UNKNOWN"}:
+            reason = str(account.get("reason") or "").strip()
+            return reason or None
+
+        return None
+
+    def _triage_summary_line(self, accounts: List[Dict[str, Any]]) -> str:
+        total = len(accounts)
+        if total <= 0:
+            return "POOL: 0 keys | no auths loaded"
+
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for account in accounts:
+            status = str(account.get("status") or "UNKNOWN").upper()
+            grouped.setdefault(status, []).append(account)
+
+        parts: List[str] = []
+        for status in sorted(grouped, key=self._status_order):
+            items = grouped[status]
+            part = f"{len(items)} {status}"
+            if len(items) == 1:
+                detail = self._triage_status_detail(items[0])
+                if detail:
+                    part += f" ({detail})"
+            parts.append(part)
+        suffix = ", ".join(parts) if parts else "no auths loaded"
+        return f"POOL: {total} keys | {suffix}"
+
+    def _pool_health_snapshot(self, accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        now = time.time()
+        selection_index = {
+            str(item.get("file") or "").strip(): item
+            for item in self.auth_pool.selection_snapshot()
+            if isinstance(item, dict)
+        }
+        available_accounts = [
+            account for account in accounts if bool(account.get("eligible_now"))
+        ]
+        available_weight_sum = sum(
+            max(
+                0.0,
+                float(
+                    selection_index.get(str(account.get("file") or "").strip(), {}).get(
+                        "weight", 0.0
+                    )
+                ),
+            )
+            for account in available_accounts
+        )
+        starvation_risk = len(available_accounts) == 1 and len(accounts) > 1
+
+        pool_health: List[Dict[str, Any]] = []
+        for account in accounts:
+            auth_file = str(account.get("file") or "").strip()
+            selection = selection_index.get(auth_file, {})
+            weight = max(0.0, float(selection.get("weight") or 0.0))
+            eligible_now = bool(account.get("eligible_now"))
+            last_picked_at = float(selection.get("last_picked_at") or 0.0)
+            time_since_last_pick = None
+            if last_picked_at > 0.0:
+                time_since_last_pick = max(0.0, now - last_picked_at)
+            pool_health.append(
+                {
+                    "file": auth_file,
+                    "status": str(account.get("status") or "UNKNOWN").upper(),
+                    "weight": weight,
+                    "effective_pick_probability": (
+                        weight / available_weight_sum
+                        if eligible_now and available_weight_sum > 0.0
+                        else 0.0
+                    ),
+                    "time_since_last_pick_seconds": time_since_last_pick,
+                    "starvation_risk_flag": bool(eligible_now and starvation_risk),
+                }
+            )
+        return pool_health
+
+    def _triage_payload(
+        self,
+        *,
+        accounts: List[Dict[str, Any]],
+        degraded_state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        available_count = sum(1 for account in accounts if bool(account.get("eligible_now")))
+        total = len(accounts)
+        risk_level = self._triage_risk_level(
+            available_count=available_count,
+            total=total,
+        )
+        statuses = {str(account.get("status") or "UNKNOWN").upper() for account in accounts}
+
+        if risk_level == "none":
+            next_action = None
+        elif risk_level == "high" and statuses & {"BLACKLIST", "PROBATION"}:
+            next_action = "cdx reset --state blacklist"
+        elif statuses & {"COOLDOWN", "BLACKLIST", "PROBATION", "UNKNOWN", "EXPIRED"}:
+            next_action = "cdx doctor --probe"
+        else:
+            next_action = str(degraded_state.get("next_action") or "cdx doctor --probe")
+
+        auto_reset_status = "disarmed"
+        if self.auth_pool.auto_reset_on_single_key:
+            auto_reset_status = f"armed (streak {self.auth_pool.auto_reset_streak})"
+
+        return {
+            "summary": self._triage_summary_line(accounts),
+            "risk_level": risk_level,
+            "auto_reset_status": auto_reset_status,
+            "next_action": next_action,
+            "available_count": available_count,
+            "total_keys": total,
+            "state": degraded_state.get("state"),
+            "primary_blocker": degraded_state.get("primary_blocker"),
+        }
+
     def next_auth_payload(self, *, route: Optional[str] = None) -> Optional[Dict[str, Any]]:
         allowed_auth_names = self.allowed_auth_names_for_route(route or "")
         if allowed_auth_names is not None and not allowed_auth_names:
@@ -1044,6 +1265,7 @@ class ProxyRuntime:
 
     def shutdown(self) -> None:
         """Shutdown runtime and stop background threads."""
+        write_boot_snapshot(self.settings.auth_dir, self.auth_pool.health_snapshot())
         self._limit_sampler_stop.set()
         self._limit_sampler_wakeup.set()
         if self._limit_sampler_thread:
@@ -1052,9 +1274,14 @@ class ProxyRuntime:
         if self._auto_heal_thread:
             self._auto_heal_thread.join(timeout=2.0)
 
-    def reload_auths(self) -> int:
+    def reload_auths(self, *, restore_boot_snapshot: bool = False) -> int:
         records = load_auth_records(self.settings.auth_dir, prefer_keyring=False)
         self.auth_pool.load(records)
+        if restore_boot_snapshot:
+            self.auth_pool.load_from_snapshot(
+                load_boot_snapshot(self.settings.auth_dir, time.time()),
+                time.time(),
+            )
         return len(records)
 
     def health_snapshot(self, *, refresh: bool = False) -> Dict[str, Any]:
@@ -1064,6 +1291,11 @@ class ProxyRuntime:
         accounts = self._merged_accounts(limit_health=self._limit_health_cache)
         next_pick = self.next_auth_payload() or {}
         triage_summary = self.degraded_state_verdict()
+        pool_health = self._pool_health_snapshot(accounts)
+        triage = self._triage_payload(
+            accounts=accounts,
+            degraded_state=triage_summary,
+        )
         # Refresh metadata
         refresh_age = (
             (time.time() - self._limit_health_cache_at)
@@ -1075,12 +1307,9 @@ class ProxyRuntime:
             "next_auth_file": str(next_pick.get("file") or "").strip() or None,
             "next_auth_email": str(next_pick.get("email") or "").strip() or None,
             "accounts": accounts,
+            "pool_health": pool_health,
             "degraded_state": triage_summary,
-            "triage": {
-                "state": triage_summary.get("state"),
-                "primary_blocker": triage_summary.get("primary_blocker"),
-                "next_action": triage_summary.get("next_action"),
-            },
+            "triage": triage,
             "limits_refresh_age_seconds": refresh_age,
             "limits_stale": self._limits_snapshot_stale(),
             "limits_refresh_error": self._limits_refresh_error,
@@ -1095,6 +1324,12 @@ class ProxyRuntime:
         interactive_state = self._interactive_auth_state()
         next_interactive_pick = dict(interactive_state["next_pick"])
         triage_summary = self.degraded_state_verdict()
+        accounts = self._merged_accounts(limit_health=self._limit_health_cache)
+        pool_health = self._pool_health_snapshot(accounts)
+        triage = self._triage_payload(
+            accounts=accounts,
+            degraded_state=triage_summary,
+        )
         return {
             "status": "running",
             "host": host,
@@ -1111,7 +1346,7 @@ class ProxyRuntime:
             "limit_min_remaining_percent": self.settings.limit_min_remaining_percent,
             "max_in_flight_requests": self.settings.max_in_flight_requests,
             "max_pending_requests": self.settings.max_pending_requests,
-            "auto_reset_on_single_key": self.settings.auto_reset_on_single_key,
+            "auto_reset_on_single_key": self.auth_pool.auto_reset_on_single_key,
             "auto_reset_streak": self.settings.auto_reset_streak,
             "auto_reset_cooldown": self.settings.auto_reset_cooldown,
             "limit_sampler_interval_seconds": self._limit_sampler_interval_seconds(),
@@ -1128,6 +1363,8 @@ class ProxyRuntime:
             "next_interactive_auth_email": (
                 str(next_interactive_pick.get("email") or "").strip() or None
             ),
+            "pool_health": pool_health,
+            "triage": triage,
             "degraded_state": triage_summary,
             "triage_summary": triage_summary,
             "pid": os.getpid(),
@@ -1178,68 +1415,6 @@ class ProxyRuntime:
             message="request attempt completed",
             **log_payload,
         )
-
-    def maybe_auto_reset_single_key_stall(self) -> int:
-        """Recover blacklisted/probation auths after a sustained single-key streak.
-
-        This is intentionally opt-in because it relaxes the default hard-failure
-        isolation policy for 401/403 keys.
-        """
-        if not self.settings.auto_reset_on_single_key:
-            return 0
-
-        threshold = max(1, int(self.settings.auto_reset_streak))
-        trace_events = self.trace_store.list(limit=self.trace_store.max_size)
-        recent_events = [
-            event
-            for event in reversed(trace_events)
-            if str(event.get("event") or "") == "proxy.request"
-        ][:threshold]
-        if len(recent_events) < threshold:
-            return 0
-
-        auth_names = {
-            str(event.get("auth_file") or "").strip()
-            for event in recent_events
-            if str(event.get("auth_file") or "").strip()
-        }
-        if len(auth_names) != 1:
-            return 0
-
-        stats = self.auth_pool.stats()
-        if int(stats.get("total", 0)) < 2:
-            return 0
-        if int(stats.get("ok", 0)) != 1:
-            return 0
-        recoverable = int(stats.get("blacklist", 0)) + int(stats.get("probation", 0))
-        if recoverable <= 0:
-            return 0
-
-        now = time.time()
-        with self._auto_reset_lock:
-            if now < self._auto_reset_blocked_until:
-                return 0
-
-            reset_count = self.auth_pool.reset_auth(state="blacklist")
-            reset_count += self.auth_pool.reset_auth(state="probation")
-            if reset_count <= 0:
-                return 0
-
-            self._auto_reset_blocked_until = now + max(
-                1, int(self.settings.auto_reset_cooldown)
-            )
-            only_auth = next(iter(auth_names))
-            self.logger.write(
-                level="WARN",
-                event="proxy.auth_auto_reset",
-                message="auto-reset blacklist/probation keys after single-key streak",
-                trigger_auth=only_auth,
-                streak=threshold,
-                cooldown_seconds=self.settings.auto_reset_cooldown,
-                reset=reset_count,
-            )
-            return reset_count
-
 
 class ProxyHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address: Tuple[str, int], runtime: ProxyRuntime):
@@ -1905,7 +2080,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     headers=attempt_result.headers,
                     body=attempt_result.body,
                 )
-                runtime.maybe_auto_reset_single_key_stall()
+                reset_count = runtime.maybe_auto_reset_single_key_stall()
+                if reset_count > 0:
+                    runtime.logger.write(
+                        level="WARN",
+                        event="proxy.auth_auto_reset",
+                        message="auto-reset blacklist/probation keys after single-key streak",
+                        trigger_auth=auth_state.record.name,
+                        streak=runtime.auth_pool.auto_reset_streak,
+                        cooldown_seconds=runtime.auth_pool.auto_reset_cooldown,
+                        reset=reset_count,
+                    )
 
                 if is_retryable_auth_failure(
                     attempt_result.status, attempt_result.error_code
@@ -1978,7 +2163,7 @@ def run_proxy_server(settings: Settings) -> None:
         raise ValueError("management key required")
 
     runtime = ProxyRuntime(settings=settings.with_management_key(management_key))
-    auth_count = runtime.reload_auths()
+    auth_count = runtime.reload_auths(restore_boot_snapshot=True)
     if auth_count <= 0:
         raise ValueError(f"no valid auth files found in {settings.auth_dir}")
 
