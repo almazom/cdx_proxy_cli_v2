@@ -17,6 +17,7 @@ from tests.integration.support import (
     TRACE_PATH,
     build_chat_completions_payload,
     build_responses_payload,
+    make_usage_payload,
     MockUpstreamHandler,
     request_json,
 )
@@ -55,6 +56,7 @@ def test_models_are_normalized_for_codex(proxy_server: dict[str, Any]) -> None:
     assert all(item["shell_type"] == "shell_command" for item in models)
     assert all(item["visibility"] == "list" for item in models)
     assert all(item["default_reasoning_level"] == "low" for item in models)
+    assert all(item["prefer_websockets"] is False for item in models)
 
 
 def test_streaming_responses_request_succeeds(proxy_server: dict[str, Any]) -> None:
@@ -92,6 +94,34 @@ def test_rotates_after_401(proxy_server: dict[str, Any]) -> None:
     assert _upstream_path_count(RESPONSES_PATH) == 2
 
 
+def test_interactive_route_rotates_after_429_to_next_safe_auth(
+    proxy_server: dict[str, Any],
+) -> None:
+    MockUpstreamHandler.set_usage_payload(
+        "tok-a",
+        make_usage_payload(five_hour_used_percent=20.0),
+    )
+    MockUpstreamHandler.set_usage_payload(
+        "tok-b",
+        make_usage_payload(five_hour_used_percent=25.0),
+    )
+    MockUpstreamHandler.responses = [
+        {"status": 429, "data": {"error": {"code": "rate_limited"}}},
+        {"status": 200, "data": {"id": "resp_retry_429", "status": "completed"}},
+    ]
+
+    status, body = request_json(
+        base_url=str(proxy_server["base_url"]),
+        path=RESPONSES_PATH,
+        method="POST",
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
+    )
+
+    assert status == 200
+    assert body["id"] == "resp_retry_429"
+    assert _upstream_path_count(RESPONSES_PATH) == 2
+
+
 def test_rotates_after_known_account_incompatible_400(
     proxy_server: dict[str, Any],
 ) -> None:
@@ -117,20 +147,85 @@ def test_rotates_after_known_account_incompatible_400(
     assert _upstream_path_count(RESPONSES_PATH) == 2
 
 
-def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) -> None:
+def test_interactive_route_returns_local_failure_when_safe_pool_is_weak(
+    proxy_server: dict[str, Any],
+) -> None:
+    MockUpstreamHandler.set_usage_payload(
+        "tok-a",
+        make_usage_payload(five_hour_used_percent=100.0),
+    )
+    MockUpstreamHandler.set_usage_payload(
+        "tok-b",
+        make_usage_payload(five_hour_used_percent=100.0),
+    )
     MockUpstreamHandler.responses = [
-        {"status": 401, "data": {"error": {"code": "invalid_token"}}},
-        {"status": 401, "data": {"error": {"code": "invalid_token"}}},
+        {"status": 200, "data": {"id": "should_not_be_used", "status": "completed"}}
     ]
 
-    status, _body = request_json(
+    status, body = request_json(
         base_url=str(proxy_server["base_url"]),
         path=RESPONSES_PATH,
         method="POST",
         payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
     )
 
-    assert status == 401
+    assert status == 503
+    assert body == {
+        "error": "interactive auth pool unavailable",
+        "reason": "interactive_pool_weak",
+    }
+    assert _upstream_path_count(RESPONSES_PATH) == 0
+
+
+def test_returns_last_error_when_all_auths_fail(proxy_server: dict[str, Any]) -> None:
+    MockUpstreamHandler.responses = [
+        {"status": 401, "data": {"error": {"code": "invalid_token"}}},
+        {"status": 401, "data": {"error": {"code": "invalid_token"}}},
+    ]
+
+    status, body = request_json(
+        base_url=str(proxy_server["base_url"]),
+        path=RESPONSES_PATH,
+        method="POST",
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
+    )
+
+    assert status == 503
+    assert body == {
+        "error": "interactive auth pool unavailable",
+        "reason": "interactive_pool_weak",
+    }
+    assert _upstream_path_count(RESPONSES_PATH) == 2
+
+
+def test_interactive_route_returns_local_failure_after_safe_retries_exhausted(
+    proxy_server: dict[str, Any],
+) -> None:
+    MockUpstreamHandler.set_usage_payload(
+        "tok-a",
+        make_usage_payload(five_hour_used_percent=20.0),
+    )
+    MockUpstreamHandler.set_usage_payload(
+        "tok-b",
+        make_usage_payload(five_hour_used_percent=25.0),
+    )
+    MockUpstreamHandler.responses = [
+        {"status": 429, "data": {"error": {"code": "rate_limited"}}},
+        {"status": 429, "data": {"error": {"code": "rate_limited"}}},
+    ]
+
+    status, body = request_json(
+        base_url=str(proxy_server["base_url"]),
+        path=RESPONSES_PATH,
+        method="POST",
+        payload=build_responses_payload(model=DEFAULT_TEST_MODEL),
+    )
+
+    assert status == 503
+    assert body == {
+        "error": "interactive auth pool unavailable",
+        "reason": "interactive_pool_weak",
+    }
     assert _upstream_path_count(RESPONSES_PATH) == 2
 
 

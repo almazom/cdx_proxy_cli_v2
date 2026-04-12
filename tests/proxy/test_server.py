@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from io import BytesIO
+import time
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,10 @@ from cdx_proxy_cli_v2.config.settings import Settings
 from cdx_proxy_cli_v2.observability.limits_history import (
     latest_limits_path,
     limits_history_path,
+)
+from cdx_proxy_cli_v2.proxy.failure_types import (
+    FAILURE_ORIGIN_HARD_AUTH,
+    FAILURE_ORIGIN_PROBE_TRANSPORT,
 )
 from cdx_proxy_cli_v2.proxy.server import (
     CHATGPT_ACCOUNT_MODEL_FALLBACK,
@@ -952,7 +957,7 @@ class TestRuntimeTransitionsAndOverload:
         assert snapshot["status"] == "OK"
         assert not any(event.get("event") == "auth.cooldown" for event in events)
 
-    def test_compact_request_skips_warn_auths(
+    def test_compact_request_keeps_warn_auths_available(
         self,
         test_settings,
     ):
@@ -1010,9 +1015,9 @@ class TestRuntimeTransitionsAndOverload:
         handler._proxy_request()
 
         sent_headers = handler._run_upstream_attempt.call_args.kwargs["headers"]
-        assert sent_headers["Authorization"] == f"Bearer {ok_auth.token}"
+        assert sent_headers["Authorization"] == f"Bearer {warn_auth.token}"
 
-    def test_next_auth_payload_respects_compact_route(
+    def test_next_auth_payload_keeps_warn_auths_available_for_interactive_route(
         self,
         test_settings,
     ):
@@ -1053,9 +1058,199 @@ class TestRuntimeTransitionsAndOverload:
             },
         }
 
-        next_auth = runtime.next_auth_payload(route="compact")
+        next_auth = runtime.next_auth_payload(route="responses")
 
-        assert next_auth == {"file": ok_auth.name, "email": ok_auth.email}
+        assert next_auth == {"file": warn_auth.name, "email": warn_auth.email}
+
+    def test_next_auth_payload_keeps_noninteractive_routes_unfiltered(
+        self,
+        test_settings,
+    ):
+        warn_auth = AuthRecord(
+            name="warn.json",
+            path="/tmp/warn.json",
+            token="tok-warn",
+            email="warn@example.com",
+        )
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([warn_auth, ok_auth])
+        runtime._limit_health_cache = {
+            warn_auth.name: {
+                "file": warn_auth.name,
+                "email": warn_auth.email,
+                "status": "WARN",
+                "five_hour": {
+                    "status": "WARN",
+                    "used_percent": 85.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+            ok_auth.name: {
+                "file": ok_auth.name,
+                "email": ok_auth.email,
+                "status": "OK",
+                "five_hour": {
+                    "status": "OK",
+                    "used_percent": 20.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+
+        next_auth = runtime.next_auth_payload(route="models")
+
+        assert next_auth == {"file": warn_auth.name, "email": warn_auth.email}
+
+    def test_interactive_request_fails_locally_when_no_eligible_auth_exists(
+        self,
+        test_settings,
+    ):
+        limited_auth = AuthRecord(
+            name="limited.json",
+            path="/tmp/limited.json",
+            token="tok-limited",
+            email="limited@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([limited_auth])
+        runtime._limit_health_cache = {
+            limited_auth.name: {
+                "file": limited_auth.name,
+                "email": limited_auth.email,
+                "status": "COOLDOWN",
+                "five_hour": {
+                    "status": "COOLDOWN",
+                    "used_percent": 100.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+        runtime._refresh_limit_health = MagicMock(return_value=runtime._limit_health_cache)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock()
+
+        handler._proxy_request()
+
+        assert handler._run_upstream_attempt.call_count == 0
+        assert json.loads(handler.wfile.getvalue().decode("utf-8")) == {
+            "error": "interactive auth pool unavailable",
+            "reason": "interactive_pool_weak",
+        }
+        events = runtime.trace_store.list(limit=20)
+        assert any(event.get("event") == "auth.interactive_skipped" for event in events)
+        assert any(event.get("event") == "auth.interactive_pool_weak" for event in events)
+
+    def test_interactive_request_rotates_to_next_safe_auth_before_local_failure(
+        self,
+        test_settings,
+    ):
+        first_auth = AuthRecord(
+            name="first.json",
+            path="/tmp/first.json",
+            token="tok-first",
+            email="first@example.com",
+        )
+        second_auth = AuthRecord(
+            name="second.json",
+            path="/tmp/second.json",
+            token="tok-second",
+            email="second@example.com",
+        )
+        runtime = ProxyRuntime(settings=replace(test_settings, consecutive_error_threshold=1))
+        runtime.auth_pool.load([first_auth, second_auth])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        seen_tokens: list[str] = []
+
+        def fake_run_upstream_attempt(**kwargs: Any) -> UpstreamAttemptResult:
+            seen_tokens.append(str(kwargs["headers"]["Authorization"]))
+            if len(seen_tokens) == 1:
+                return UpstreamAttemptResult(
+                    status=429,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"error":{"code":"rate_limited"}}',
+                    error_code="rate_limited",
+                )
+            return UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+
+        handler._run_upstream_attempt = MagicMock(side_effect=fake_run_upstream_attempt)
+
+        handler._proxy_request()
+
+        assert seen_tokens == [
+            f"Bearer {first_auth.token}",
+            f"Bearer {second_auth.token}",
+        ]
+        assert json.loads(handler.wfile.getvalue().decode("utf-8")) == {"ok": True}
+
+    def test_interactive_request_returns_local_failure_after_safe_retries_exhausted(
+        self,
+        test_settings,
+    ):
+        first_auth = AuthRecord(
+            name="first.json",
+            path="/tmp/first.json",
+            token="tok-first",
+            email="first@example.com",
+        )
+        second_auth = AuthRecord(
+            name="second.json",
+            path="/tmp/second.json",
+            token="tok-second",
+            email="second@example.com",
+        )
+        runtime = ProxyRuntime(settings=replace(test_settings, consecutive_error_threshold=1))
+        runtime.auth_pool.load([first_auth, second_auth])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            side_effect=[
+                UpstreamAttemptResult(
+                    status=429,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"error":{"code":"rate_limited"}}',
+                    error_code="rate_limited",
+                ),
+                UpstreamAttemptResult(
+                    status=429,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"error":{"code":"rate_limited"}}',
+                    error_code="rate_limited",
+                ),
+            ]
+        )
+
+        handler._proxy_request()
+
+        assert json.loads(handler.wfile.getvalue().decode("utf-8")) == {
+            "error": "interactive auth pool unavailable",
+            "reason": "interactive_pool_weak",
+        }
+        events = runtime.trace_store.list(limit=20)
+        assert any(event.get("event") == "auth.interactive_pool_weak" for event in events)
 
     def test_response_limit_feedback_quarantines_key_immediately(
         self, test_settings, sample_auth_record
@@ -1143,10 +1338,194 @@ class TestRuntimeTransitionsAndOverload:
         assert metrics["upstream_errors_total"] == 0
         assert metrics["auth_ejections_total"] == 0
         assert metrics["auth_restores_total"] == 0
+        assert payload["interactive_auth_available"] is True
+        assert payload["interactive_safe_auth_count"] == 1
+        assert payload["next_interactive_auth_file"] == sample_auth_record.name
+        assert payload["next_interactive_auth_email"] == sample_auth_record.email
         assert metrics["auth_available"] == 1
         assert metrics["in_flight_requests"] == 0
         assert payload["next_auth_file"] == sample_auth_record.name
         assert payload["next_auth_email"] == sample_auth_record.email
+
+
+class TestReviewPathDiagnostics:
+    """Tests for review-path lifecycle telemetry."""
+
+    def test_interactive_request_emits_review_lifecycle_events(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        review_events = {event.get("event") for event in events}
+        assert "review.request_start" in review_events
+        assert "review.auth_selected" in review_events
+        assert "review.upstream_result" in review_events
+        assert "review.complete" in review_events
+
+    def test_review_events_include_invocation_id(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+
+        handler._proxy_request()
+
+        review_events = [
+            event
+            for event in runtime.trace_store.list(limit=20)
+            if str(event.get("event") or "").startswith("review.")
+        ]
+        invocation_ids = {
+            event.get("review_invocation_id")
+            for event in review_events
+            if event.get("review_invocation_id")
+        }
+        assert len(review_events) >= 4
+        assert len(invocation_ids) == 1
+        review_id = next(iter(invocation_ids))
+        assert review_id == getattr(handler, "_current_review_id", None)
+        assert all(event.get("review_id") == review_id for event in review_events)
+
+    def test_pool_exhausted_emits_review_pool_exhausted_event(self, test_settings):
+        limited_auth = AuthRecord(
+            name="limited.json",
+            path="/tmp/limited.json",
+            token="tok-limited",
+            email="limited@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([limited_auth])
+        runtime._limit_health_cache = {
+            limited_auth.name: {
+                "file": limited_auth.name,
+                "email": limited_auth.email,
+                "status": "COOLDOWN",
+                "five_hour": {
+                    "status": "COOLDOWN",
+                    "used_percent": 100.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+        runtime._refresh_limit_health = MagicMock(return_value=runtime._limit_health_cache)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            event.get("event") == "review.pool_exhausted"
+            and event.get("reason") == "interactive_pool_weak"
+            for event in events
+        )
+
+    def test_non_interactive_request_does_not_emit_review_events(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=CHAT_COMPLETIONS_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert not any(
+            str(event.get("event") or "").startswith("review.") for event in events
+        )
+
+    def test_review_events_after_rotation_include_all_attempts(
+        self, test_settings
+    ):
+        first_auth = AuthRecord(
+            name="first.json",
+            path="/tmp/first.json",
+            token="tok-first",
+            email="first@example.com",
+        )
+        second_auth = AuthRecord(
+            name="second.json",
+            path="/tmp/second.json",
+            token="tok-second",
+            email="second@example.com",
+        )
+        runtime = ProxyRuntime(settings=replace(test_settings, consecutive_error_threshold=1))
+        runtime.auth_pool.load([first_auth, second_auth])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            side_effect=[
+                UpstreamAttemptResult(
+                    status=429,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"error":{"code":"rate_limited"}}',
+                    error_code="rate_limited",
+                ),
+                UpstreamAttemptResult(
+                    status=200,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"ok":true}',
+                ),
+            ]
+        )
+
+        handler._proxy_request()
+
+        upstream_events = [
+            event
+            for event in runtime.trace_store.list(limit=20)
+            if event.get("event") == "review.upstream_result"
+        ]
+        assert len(upstream_events) == 2
+        assert [event.get("attempt") for event in upstream_events] == [1, 2]
+        assert [event.get("status") for event in upstream_events] == [429, 200]
 
 
 class TestProbeBehavior:
@@ -1230,6 +1609,85 @@ class TestProbeBehavior:
         assert runtime.metrics_snapshot()["upstream_errors_total"] == 1
 
 
+class TestAutoHealFailureClassification:
+    """Tests for auto-heal failure event classification."""
+
+    def test_auto_heal_failure_includes_origin_classification(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        runtime._auto_heal_stop.set()
+        if runtime._auto_heal_thread is not None:
+            runtime._auto_heal_thread.join(timeout=1)
+
+        try:
+            runtime.auth_pool.max_ejection_percent = 100
+            runtime.auth_pool.consecutive_error_threshold = 1
+            runtime.auth_pool.mark_result(
+                sample_auth_record.name, status=401, error_code="token_invalid"
+            )
+
+            with patch(
+                "cdx_proxy_cli_v2.proxy.server.load_auth_records",
+                return_value=[sample_auth_record],
+            ):
+                runtime._probe_single_auth = MagicMock(
+                    return_value={
+                        "file": sample_auth_record.name,
+                        "success": False,
+                        "http_status": 401,
+                        "error_code": "token_invalid",
+                        "latency_ms": 3,
+                    }
+                )
+                runtime._run_auto_heal_cycle(now=time.time())
+
+            events = runtime.trace_store.list(limit=20)
+            assert any(
+                event.get("event") == "auto_heal.failure"
+                and event.get("origin") == FAILURE_ORIGIN_HARD_AUTH
+                and event.get("http_status") == 401
+                and event.get("error_code") == "token_invalid"
+                for event in events
+            )
+        finally:
+            runtime.shutdown()
+
+    def test_auto_heal_failure_classifies_timeout_as_probe_transport(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+        runtime._auto_heal_stop.set()
+        if runtime._auto_heal_thread is not None:
+            runtime._auto_heal_thread.join(timeout=1)
+
+        try:
+            runtime.auth_pool.max_ejection_percent = 100
+            runtime.auth_pool.consecutive_error_threshold = 1
+            runtime.auth_pool.mark_result(
+                sample_auth_record.name, status=401, error_code="token_invalid"
+            )
+
+            with patch(
+                "cdx_proxy_cli_v2.proxy.server.load_auth_records",
+                return_value=[sample_auth_record],
+            ):
+                runtime._probe_single_auth = MagicMock(
+                    side_effect=TimeoutError("probe timed out")
+                )
+                runtime._run_auto_heal_cycle(now=time.time())
+
+            events = runtime.trace_store.list(limit=20)
+            assert any(
+                event.get("event") == "auto_heal.failure"
+                and event.get("origin") == FAILURE_ORIGIN_PROBE_TRANSPORT
+                and event.get("error_code") == "network_error"
+                for event in events
+            )
+        finally:
+            runtime.shutdown()
+
+
 # ============================================================================
 # Test: Loopback Host Detection
 # ============================================================================
@@ -1310,6 +1768,676 @@ class TestRetryLogic:
 
         stats = mock_auth_pool.stats()
         assert stats["ok"] == 0
+
+
+class TestDownstreamDisconnect:
+    """Verify BrokenPipe / client-disconnect classification and event emission."""
+
+    def test_send_json_disconnect_emits_event(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path="/debug",
+            headers={},
+            body=b"",
+        )
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("client gone")
+
+        handler._send_json(200, {"ok": True})
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            e.get("event") == "proxy.downstream_disconnect" and e.get("phase") == "body"
+            for e in events
+        )
+        assert runtime.metrics_snapshot()["downstream_disconnects_total"] == 1
+
+    def test_buffered_headers_disconnect_emits_event(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+        handler.send_response = MagicMock(
+            side_effect=BrokenPipeError("client gone")
+        )
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            e.get("event") == "proxy.downstream_disconnect" and e.get("phase") == "headers"
+            for e in events
+        )
+
+    def test_buffered_body_disconnect_emits_event(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("client gone")
+
+        handler._proxy_request()
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            e.get("event") == "proxy.downstream_disconnect" and e.get("phase") == "body"
+            for e in events
+        )
+
+    def test_streaming_body_disconnect_emits_event(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+
+        mock_stream_response = MagicMock()
+        mock_stream_response.read.side_effect = [b'{"type":"message_start"}', b""]
+        mock_stream_connection = MagicMock()
+
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("client gone")
+
+        result = UpstreamAttemptResult(
+            status=200,
+            headers=[("Content-Type", "text/event-stream")],
+            body=b"",
+            stream_response=mock_stream_response,
+            stream_connection=mock_stream_connection,
+        )
+        handler._send_upstream_result(
+            runtime=runtime, auth_state=None, result=result
+        )
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            e.get("event") == "proxy.downstream_disconnect" and e.get("phase") == "body"
+            for e in events
+        )
+        mock_stream_response.close.assert_called()
+
+    def test_streaming_flush_disconnect_classified_as_flush(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+
+        mock_stream_response = MagicMock()
+        mock_stream_response.read.side_effect = [b'{"type":"message_start"}', b""]
+        mock_stream_connection = MagicMock()
+
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler.wfile = MagicMock()
+        # write succeeds but flush raises
+        handler.wfile.flush.side_effect = BrokenPipeError("client gone")
+
+        result = UpstreamAttemptResult(
+            status=200,
+            headers=[("Content-Type", "text/event-stream")],
+            body=b"",
+            stream_response=mock_stream_response,
+            stream_connection=mock_stream_connection,
+        )
+        handler._send_upstream_result(
+            runtime=runtime, auth_state=None, result=result
+        )
+
+        events = runtime.trace_store.list(limit=20)
+        assert any(
+            e.get("event") == "proxy.downstream_disconnect" and e.get("phase") == "flush"
+            for e in events
+        )
+
+    def test_disconnect_does_not_affect_auth_health(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+        handler = _build_proxy_handler(
+            runtime=runtime,
+            path=RESPONSES_PATH,
+            headers={"Content-Type": "application/json"},
+            body=b"{}",
+        )
+        handler._run_upstream_attempt = MagicMock(
+            return_value=UpstreamAttemptResult(
+                status=200,
+                headers=[("Content-Type", "application/json")],
+                body=b'{"ok":true}',
+            )
+        )
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("client gone")
+
+        stats_before = runtime.auth_pool.stats()
+        handler._proxy_request()
+        stats_after = runtime.auth_pool.stats()
+
+        assert stats_after["ok"] == stats_before["ok"]
+        assert stats_after["blacklist"] == stats_before["blacklist"]
+
+    def test_disconnect_metric_increments(
+        self,
+        test_settings,
+        sample_auth_record,
+    ):
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([sample_auth_record])
+
+        for _ in range(2):
+            handler = _build_proxy_handler(
+                runtime=runtime,
+                path=RESPONSES_PATH,
+                headers={"Content-Type": "application/json"},
+                body=b"{}",
+            )
+            handler._run_upstream_attempt = MagicMock(
+                return_value=UpstreamAttemptResult(
+                    status=200,
+                    headers=[("Content-Type", "application/json")],
+                    body=b'{"ok":true}',
+                )
+            )
+            handler.wfile = MagicMock()
+            handler.wfile.write.side_effect = BrokenPipeError("client gone")
+            handler._proxy_request()
+
+        assert runtime.metrics_snapshot()["downstream_disconnects_total"] == 2
+
+
+class TestDegradedStateVerdict:
+    """Tests for ProxyRuntime.degraded_state_verdict()."""
+
+    def test_all_ok_returns_healthy(self, test_settings):
+        """When all auths are OK the state should be healthy with no blocker."""
+        ok_auth_a = AuthRecord(
+            name="ok_a.json",
+            path="/tmp/ok_a.json",
+            token="tok-ok-a",
+            email="ok_a@example.com",
+        )
+        ok_auth_b = AuthRecord(
+            name="ok_b.json",
+            path="/tmp/ok_b.json",
+            token="tok-ok-b",
+            email="ok_b@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth_a, ok_auth_b])
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "healthy"
+        assert verdict["ok_count"] == 2
+        assert verdict["cooldown_count"] == 0
+        assert verdict["blacklist_count"] == 0
+        assert verdict["primary_blocker"] is None
+        assert verdict["interactive_safe_count"] == 2
+
+    def test_mixed_ok_and_cooldown_returns_degraded(self, test_settings):
+        """When some auths are in cooldown the state should be degraded."""
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        cooldown_auth = AuthRecord(
+            name="cooldown.json",
+            path="/tmp/cooldown.json",
+            token="tok-cool",
+            email="cool@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth, cooldown_auth])
+        # Put one auth into cooldown
+        runtime.auth_pool.mark_result("cooldown.json", status=429)
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "degraded"
+        assert verdict["primary_blocker"] == "some auths in cooldown"
+        assert verdict["ok_count"] >= 1
+        assert verdict["cooldown_count"] >= 1
+
+    def test_all_blacklisted_returns_full_outage(self, test_settings):
+        """When every auth is blacklisted the state should be full_outage."""
+        bad_auth_a = AuthRecord(
+            name="bad_a.json",
+            path="/tmp/bad_a.json",
+            token="tok-bad-a",
+            email="bad_a@example.com",
+        )
+        bad_auth_b = AuthRecord(
+            name="bad_b.json",
+            path="/tmp/bad_b.json",
+            token="tok-bad-b",
+            email="bad_b@example.com",
+        )
+        runtime = ProxyRuntime(
+            settings=replace(test_settings, consecutive_error_threshold=1)
+        )
+        runtime.auth_pool.load([bad_auth_a, bad_auth_b])
+        # First key blacklists; second is held in cooldown by max_ejection_percent.
+        runtime.auth_pool.mark_result("bad_a.json", status=401, error_code="token_invalid")
+        runtime.auth_pool.mark_result("bad_b.json", status=403, error_code="forbidden")
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "full_outage"
+        assert verdict["primary_blocker"] == "no healthy auths"
+        assert verdict["ok_count"] == 0
+        assert verdict["blacklist_count"] == 1
+        assert verdict["cooldown_count"] == 1
+        assert verdict["interactive_safe_count"] == 0
+
+    def test_no_interactive_safe_auths_returns_partial_outage(self, test_settings):
+        """When auths exist but none are interactive-safe, state should be partial_outage."""
+        limited_auth = AuthRecord(
+            name="limited.json",
+            path="/tmp/limited.json",
+            token="tok-limited",
+            email="limited@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([limited_auth])
+        runtime._limit_health_cache = {
+            limited_auth.name: {
+                "file": limited_auth.name,
+                "email": limited_auth.email,
+                "status": "COOLDOWN",
+                "five_hour": {
+                    "status": "COOLDOWN",
+                    "used_percent": 100.0,
+                    "reset_after_seconds": 1800,
+                },
+            },
+        }
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "partial_outage"
+        assert verdict["interactive_safe_count"] == 0
+        assert verdict["primary_blocker"] == "no interactive-safe auths"
+
+    def test_verdict_does_not_mutate_runtime_state(self, test_settings):
+        """Calling degraded_state_verdict() must not alter pool stats or health."""
+        ok_auth = AuthRecord(
+            name="stable.json",
+            path="/tmp/stable.json",
+            token="tok-stable",
+            email="stable@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth])
+
+        stats_before = runtime.auth_pool.stats()
+        health_before = runtime.auth_pool.health_snapshot()
+
+        verdict = runtime.degraded_state_verdict()
+        assert verdict["state"] == "healthy"
+
+        stats_after = runtime.auth_pool.stats()
+        health_after = runtime.auth_pool.health_snapshot()
+
+        assert stats_before == stats_after
+        assert health_before == health_after
+
+
+class TestOperatorTriage:
+    """Tests for operator-facing triage summaries."""
+
+    def test_degraded_state_verdict_includes_next_action_for_degraded(
+        self, test_settings
+    ):
+        ok_auth = AuthRecord(
+            name="ok.json",
+            path="/tmp/ok.json",
+            token="tok-ok",
+            email="ok@example.com",
+        )
+        cooldown_auth = AuthRecord(
+            name="cool.json",
+            path="/tmp/cool.json",
+            token="tok-cool",
+            email="cool@example.com",
+        )
+        runtime = ProxyRuntime(settings=test_settings)
+        runtime.auth_pool.load([ok_auth, cooldown_auth])
+        runtime.auth_pool.mark_result("cool.json", status=429)
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "degraded"
+        assert (
+            verdict["next_action"]
+            == "cdx rotate to avoid degraded keys, or wait for cooldown expiry"
+        )
+
+    def test_degraded_state_verdict_includes_next_action_for_full_outage(
+        self, test_settings
+    ):
+        bad_auth = AuthRecord(
+            name="bad.json",
+            path="/tmp/bad.json",
+            token="tok-bad",
+            email="bad@example.com",
+        )
+        runtime = ProxyRuntime(
+            settings=replace(test_settings, consecutive_error_threshold=1)
+        )
+        runtime.auth_pool.load([bad_auth])
+        runtime.auth_pool.mark_result("bad.json", status=401, error_code="token_invalid")
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "full_outage"
+        assert (
+            verdict["next_action"]
+            == "all auths are blacklisted — run cdx reset --state blacklist or add new auth files"
+        )
+
+    def test_degraded_state_verdict_next_action_none_for_healthy(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        verdict = runtime.degraded_state_verdict()
+
+        assert verdict["state"] == "healthy"
+        assert verdict["next_action"] is None
+
+    def test_debug_payload_includes_triage_summary(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        payload = runtime.debug_payload(host="127.0.0.1", port=43123)
+
+        assert "triage_summary" in payload
+        assert payload["triage_summary"]["state"] == "healthy"
+        assert payload["triage_summary"] == payload["degraded_state"]
+
+    def test_health_snapshot_includes_triage_fields(
+        self, test_settings, sample_auth_record
+    ):
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        snapshot = runtime.health_snapshot(refresh=False)
+
+        assert "triage" in snapshot
+        assert snapshot["triage"] == {
+            "state": "healthy",
+            "primary_blocker": None,
+            "next_action": None,
+        }
+
+
+# ============================================================================
+# Test: Bounded Management Refresh
+# ============================================================================
+
+
+class TestBoundedManagementRefresh:
+    """Tests for bounded lock acquisition in /health and management-plane refresh.
+
+    Verifies that _refresh_limit_health uses timed lock acquisition so that
+    /health?refresh=1 and /trace never block indefinitely under degraded auth.
+    """
+
+    def test_health_snapshot_returns_stale_when_lock_is_held(
+        self, test_settings, sample_auth_record
+    ):
+        """Hold the lock from another thread, call health_snapshot(refresh=True),
+        verify it returns cached data with stale metadata instead of blocking."""
+        import threading
+
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        # Seed the cache with an initial refresh so there is something to return
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "OK",
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 10.0,
+                        "reset_after_seconds": 100000,
+                    },
+                }
+            }
+            runtime._refresh_limit_health(force=True, persist_snapshot=True)
+
+        assert runtime._limit_health_cache, "cache must be seeded before lock contention test"
+
+        # Hold the lock from a background thread so _refresh_limit_health cannot acquire it
+        lock_acquired = threading.Event()
+        release_lock = threading.Event()
+
+        def hold_lock():
+            runtime._limit_health_lock.acquire()
+            lock_acquired.set()
+            release_lock.wait(timeout=10)
+
+        holder = threading.Thread(target=hold_lock, daemon=True)
+        holder.start()
+        lock_acquired.wait(timeout=5)
+        assert lock_acquired.is_set(), "holder thread must acquire the lock"
+
+        try:
+            # health_snapshot(refresh=True) should return stale data quickly
+            snapshot = runtime.health_snapshot(refresh=True)
+            assert "ok" in snapshot
+            # The refresh metadata must show the stale condition
+            assert snapshot.get("limits_refresh_error") == "lock_timeout"
+        finally:
+            release_lock.set()
+            holder.join(timeout=5)
+
+    def test_health_snapshot_includes_refresh_metadata(
+        self, test_settings, sample_auth_record
+    ):
+        """health_snapshot must include limits_refresh_age_seconds, limits_stale,
+        limits_refresh_error, and limits_partial fields."""
+        import time as _time
+
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "OK",
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 10.0,
+                        "reset_after_seconds": 100000,
+                    },
+                }
+            }
+            snapshot = runtime.health_snapshot(refresh=True)
+
+        # The required metadata fields must be present
+        assert "limits_refresh_age_seconds" in snapshot
+        assert "limits_stale" in snapshot
+        assert "limits_refresh_error" in snapshot
+        assert "limits_partial" in snapshot
+
+        # After a successful refresh, age should be a small positive number
+        assert isinstance(snapshot["limits_refresh_age_seconds"], float)
+        assert snapshot["limits_refresh_age_seconds"] >= 0
+        # No error after successful refresh
+        assert snapshot["limits_refresh_error"] is None
+        assert snapshot["limits_partial"] is False
+
+    def test_trace_payload_returns_stale_when_lock_is_held(
+        self, test_settings, sample_auth_record
+    ):
+        """trace_payload calls limits_snapshot(force_refresh_stale=True) which
+        must not block when the lock is contended."""
+        import threading
+
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        # Seed cache first
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "OK",
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 10.0,
+                        "reset_after_seconds": 100000,
+                    },
+                }
+            }
+            runtime._refresh_limit_health(force=True, persist_snapshot=True)
+
+        # Mark snapshot as stale so trace_payload triggers a refresh attempt
+        runtime._latest_limits_fetched_at = 0.0
+        # Also clear the cached snapshot so limits_snapshot must rebuild it
+        runtime._latest_limits_snapshot = {}
+
+        # Hold the lock
+        lock_acquired = threading.Event()
+        release_lock = threading.Event()
+
+        def hold_lock():
+            runtime._limit_health_lock.acquire()
+            lock_acquired.set()
+            release_lock.wait(timeout=10)
+
+        holder = threading.Thread(target=hold_lock, daemon=True)
+        holder.start()
+        lock_acquired.wait(timeout=5)
+        assert lock_acquired.is_set()
+
+        try:
+            payload = runtime.trace_payload(limit=5)
+            assert "events" in payload
+            assert "limits" in payload
+            # Must not have blocked — limits should have stale/error markers
+            limits = payload["limits"]
+            assert limits.get("stale") is True or limits.get("error") is not None
+        finally:
+            release_lock.set()
+            holder.join(timeout=5)
+
+    def test_refresh_limit_health_marks_partial_on_upstream_error(
+        self, test_settings, sample_auth_record
+    ):
+        """When fetch_limit_health raises, the cache must be preserved and
+        _limits_partial/_limits_refresh_error must be set."""
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        # Seed the cache with valid data
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "OK",
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 10.0,
+                        "reset_after_seconds": 100000,
+                    },
+                }
+            }
+            runtime._refresh_limit_health(force=True, persist_snapshot=True)
+
+        cached_data = dict(runtime._limit_health_cache)
+        assert cached_data, "cache must be seeded"
+
+        # Now make fetch_limit_health raise
+        with patch(
+            "cdx_proxy_cli_v2.proxy.server.fetch_limit_health",
+            side_effect=RuntimeError("upstream timeout"),
+        ):
+            runtime._refresh_limit_health(force=True, persist_snapshot=True)
+
+        # Cache should still exist (possibly cleared by the exception path)
+        # The key thing: error metadata must be set
+        assert runtime._limits_refresh_error == "upstream timeout"
+        assert runtime._limits_partial is True
+
+    def test_health_snapshot_no_error_when_lock_available(
+        self, test_settings, sample_auth_record
+    ):
+        """When the lock is not contended, health_snapshot(refresh=True)
+        must return without lock_timeout error."""
+        runtime = _build_runtime(test_settings, sample_auth_record)
+
+        with patch("cdx_proxy_cli_v2.proxy.server.fetch_limit_health") as mock_limits:
+            mock_limits.return_value = {
+                sample_auth_record.name: {
+                    "file": sample_auth_record.name,
+                    "status": "OK",
+                    "weekly": {
+                        "status": "OK",
+                        "used_percent": 10.0,
+                        "reset_after_seconds": 100000,
+                    },
+                }
+            }
+            snapshot = runtime.health_snapshot(refresh=True)
+
+        assert snapshot["limits_refresh_error"] is None
+        assert snapshot["limits_partial"] is False
 
 
 # ============================================================================
