@@ -1,5 +1,5 @@
 PYTHON ?= python3
-PYTEST ?= $(PYTHON) -m pytest
+PYTEST ?= $(shell if command -v pytest >/dev/null 2>&1; then echo pytest; else echo "$(PYTHON) -m pytest"; fi)
 
 UNIT_TEST_PATHS = \
 	tests/auth \

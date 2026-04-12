@@ -1,0 +1,21 @@
+{
+  "status": "pass",
+  "summary": "Manual backlog package created from verified repo surfaces and observed 2026-04-10 proxy degradation evidence.",
+  "checks": [
+    {
+      "id": "QG-001",
+      "status": "pass",
+      "note": "All cards stay at or below 4 story points and about 4 hours."
+    },
+    {
+      "id": "QG-002",
+      "status": "pass",
+      "note": "The package uses trello-cards/kanban.json as the execution SSOT."
+    },
+    {
+      "id": "QG-003",
+      "status": "pass",
+      "note": "The detailed implementation plan is self-contained and maps to real repo files."
+    }
+  ]
+}

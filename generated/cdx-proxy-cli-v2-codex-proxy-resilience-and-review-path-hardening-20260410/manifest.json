@@ -1,0 +1,18 @@
+{
+  "title": "Implementation Plan: cdx_proxy_cli_v2 | Codex Proxy Resilience and Review-Path Hardening | v1",
+  "slug": "cdx-proxy-cli-v2-codex-proxy-resilience-and-review-path-hardening-20260410",
+  "package_path": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-codex-proxy-resilience-and-review-path-hardening-20260410",
+  "input_plan": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-codex-proxy-resilience-and-review-path-hardening-20260410/INPUT_IMPLEMENTATION_PLAN.md",
+  "card_count": 8,
+  "total_story_points": 19,
+  "card_ids": [
+    "0001",
+    "0002",
+    "0003",
+    "0004",
+    "0005",
+    "0006",
+    "0007",
+    "0008"
+  ]
+}

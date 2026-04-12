@@ -1,0 +1,31 @@
+{
+  "overall_status": "ready",
+  "current_card": "0001",
+  "progress_percent": 0,
+  "done_count": 0,
+  "blocked_count": 0,
+  "simplify_count": 0,
+  "commit_count": 0,
+  "codex_review_count": 0,
+  "status_counts": {
+    "backlog": 5,
+    "ready": 3,
+    "in_progress": 0,
+    "simplify": 0,
+    "commit": 0,
+    "codex-review": 0,
+    "done": 0,
+    "blocked": 0
+  },
+  "cards": {
+    "0001": "ready",
+    "0002": "backlog",
+    "0003": "ready",
+    "0004": "ready",
+    "0005": "backlog",
+    "0006": "backlog",
+    "0007": "backlog",
+    "0008": "backlog"
+  },
+  "updated_at": "2026-04-10T08:48:10Z"
+}

@@ -1,0 +1,232 @@
+{
+  "meta": {
+    "status": "ready",
+    "generated_at": "2026-04-10T08:48:10Z",
+    "input_plan": "INPUT_IMPLEMENTATION_PLAN.md",
+    "package_path": "/home/pets/TOOLS/cdx_proxy_cli_v2/generated/cdx-proxy-cli-v2-codex-proxy-resilience-and-review-path-hardening-20260410",
+    "repo_root": "/home/pets/TOOLS/cdx_proxy_cli_v2"
+  },
+  "cards": [
+    {
+      "id": "0001",
+      "title": "Build the failure taxonomy and reproduce the degraded-state matrix",
+      "status": "ready",
+      "story_points": 2,
+      "estimated_hours": 2,
+      "depends_on": [],
+      "source_refs": ["T-1"],
+      "acceptance_refs": ["AC-001", "AC-004"],
+      "files": [
+        "src/cdx_proxy_cli_v2/proxy/server.py",
+        "src/cdx_proxy_cli_v2/runtime/service.py",
+        "tests/integration/test_codex_wp_green_path.py",
+        "docs/operations/codex_wp_observability_runbook.md"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "ready",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Seeded manually from the 2026-04-10 proxy resilience plan."
+        }
+      ]
+    },
+    {
+      "id": "0002",
+      "title": "Bound `/health` and management-plane refresh under degraded auth state",
+      "status": "backlog",
+      "story_points": 3,
+      "estimated_hours": 3,
+      "depends_on": ["0001"],
+      "source_refs": ["T-2"],
+      "acceptance_refs": ["AC-001", "AC-004"],
+      "files": [
+        "src/cdx_proxy_cli_v2/health_snapshot.py",
+        "src/cdx_proxy_cli_v2/proxy/management.py",
+        "src/cdx_proxy_cli_v2/runtime/service.py",
+        "src/cdx_proxy_cli_v2/cli/shared.py",
+        "src/cdx_proxy_cli_v2/cli/commands/doctor.py"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "backlog",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Waiting on the failure taxonomy card."
+        }
+      ]
+    },
+    {
+      "id": "0003",
+      "title": "Harden downstream write path and classify BrokenPipe disconnects",
+      "status": "ready",
+      "story_points": 2,
+      "estimated_hours": 2,
+      "depends_on": [],
+      "source_refs": ["T-3"],
+      "acceptance_refs": ["AC-002"],
+      "files": [
+        "src/cdx_proxy_cli_v2/proxy/server.py",
+        "tests/proxy/test_server.py",
+        "tests/proxy/test_websocket_and_auth_errors.py"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "ready",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Independent resilience slice."
+        }
+      ]
+    },
+    {
+      "id": "0004",
+      "title": "Refine auth rotation and auto-heal policy for mixed healthy/degraded pools",
+      "status": "ready",
+      "story_points": 3,
+      "estimated_hours": 3,
+      "depends_on": [],
+      "source_refs": ["T-4"],
+      "acceptance_refs": ["AC-003", "AC-004"],
+      "files": [
+        "src/cdx_proxy_cli_v2/auth/rotation.py",
+        "src/cdx_proxy_cli_v2/auth/models.py",
+        "src/cdx_proxy_cli_v2/config/settings.py",
+        "src/cdx_proxy_cli_v2/proxy/server.py",
+        "tests/auth/test_rotation.py",
+        "tests/auth/test_auto_heal.py",
+        "tests/e2e/test_auto_heal_e2e.py"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "ready",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Independent resilience slice."
+        }
+      ]
+    },
+    {
+      "id": "0005",
+      "title": "Add review-path diagnostics for model refresh and child-exit stalls",
+      "status": "backlog",
+      "story_points": 3,
+      "estimated_hours": 3,
+      "depends_on": ["0001", "0002", "0004"],
+      "source_refs": ["T-5"],
+      "acceptance_refs": ["AC-004", "AC-006"],
+      "files": [
+        "src/cdx_proxy_cli_v2/proxy/server.py",
+        "src/cdx_proxy_cli_v2/observability/event_log.py",
+        "src/cdx_proxy_cli_v2/observability/trace_store.py",
+        "src/cdx_proxy_cli_v2/cli/commands/trace.py",
+        "tests/integration/test_codex_wp_green_path.py",
+        "docs/operations/codex_wp_observability_runbook.md"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "backlog",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Needs management and rotation behavior anchored first."
+        }
+      ]
+    },
+    {
+      "id": "0006",
+      "title": "Expose operator triage signals in debug, trace, and CLI health flows",
+      "status": "backlog",
+      "story_points": 2,
+      "estimated_hours": 2,
+      "depends_on": ["0002", "0003", "0004", "0005"],
+      "source_refs": ["T-6"],
+      "acceptance_refs": ["AC-001", "AC-004"],
+      "files": [
+        "src/cdx_proxy_cli_v2/proxy/server.py",
+        "src/cdx_proxy_cli_v2/cli/commands/doctor.py",
+        "src/cdx_proxy_cli_v2/cli/commands/trace.py",
+        "tests/integration/test_codex_cli_patterns.py",
+        "tests/taad/test_taad_management_contracts.py"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "backlog",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Depends on the core resilience fixes."
+        }
+      ]
+    },
+    {
+      "id": "0007",
+      "title": "Update recovery runbooks for degraded pool and review-path incidents",
+      "status": "backlog",
+      "story_points": 1,
+      "estimated_hours": 1,
+      "depends_on": ["0006"],
+      "source_refs": ["T-7"],
+      "acceptance_refs": ["AC-005"],
+      "files": [
+        "docs/operations/auto_heal_runbook.md",
+        "docs/operations/codex_wp_observability_runbook.md",
+        "docs/auto_heal_roadmap.md"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "backlog",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Runbooks should reflect the final diagnostic behavior, not guesses."
+        }
+      ]
+    },
+    {
+      "id": "0008",
+      "title": "Run the regression and live-smoke verification matrix",
+      "status": "backlog",
+      "story_points": 3,
+      "estimated_hours": 3,
+      "depends_on": ["0002", "0003", "0004", "0005", "0006", "0007"],
+      "source_refs": ["T-8"],
+      "acceptance_refs": ["AC-006"],
+      "files": [
+        "tests/auth/test_rotation.py",
+        "tests/auth/test_auto_heal.py",
+        "tests/proxy/test_server.py",
+        "tests/runtime/test_service.py",
+        "tests/integration/test_codex_wp_green_path.py",
+        "tests/e2e/test_auto_heal_e2e.py",
+        "Makefile"
+      ],
+      "evidence": [],
+      "transition_history": [
+        {
+          "from": null,
+          "to": "backlog",
+          "at": "2026-04-10T08:48:10Z",
+          "note": "Final verification card."
+        }
+      ]
+    }
+  ],
+  "status_counts": {
+    "backlog": 5,
+    "ready": 3,
+    "in_progress": 0,
+    "simplify": 0,
+    "commit": 0,
+    "codex-review": 0,
+    "done": 0,
+    "blocked": 0
+  },
+  "current_card": "0001",
+  "total_story_points": 19,
+  "total_estimated_hours": 19
+}

@@ -1,0 +1,8 @@
+{
+  "planning_handoff_live": "pass",
+  "split_handoff_live": "pass",
+  "implementation_guided_orchestration_live": "pass",
+  "expert_improvement_loop_live": "pass",
+  "package_reconciled": "pass",
+  "capability_progress_percent": 100
+}
