@@ -1997,6 +1997,112 @@ hook_python_bin() {
   printf '%s\n' "$codex_wp_python_bin"
 }
 
+interactive_preflight_management_key() {
+  local python_bin=""
+  local env_file="${CLIPROXY_ENV_FILE:-}"
+
+  if [[ -n "${CLIPROXY_MANAGEMENT_KEY:-}" ]]; then
+    printf '%s\n' "${CLIPROXY_MANAGEMENT_KEY}"
+    return 0
+  fi
+
+  [[ -n "$env_file" && -f "$env_file" ]] || return 1
+
+  python_bin="$(hook_python_bin)"
+  "$python_bin" - "$env_file" <<'PY' 2>/dev/null
+import sys
+from pathlib import Path
+
+env_path = Path(sys.argv[1])
+for raw in env_path.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if line.startswith("export "):
+        line = line[len("export "):].strip()
+    if not line or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() != "CLIPROXY_MANAGEMENT_KEY":
+        continue
+    print(value.strip().strip("'").strip('"'))
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+interactive_preflight_require_safe_pool() {
+  local base_url="${CLIPROXY_BASE_URL:-}"
+  local management_key=""
+  local python_bin=""
+  local status=0
+  local safe_count=""
+  local debug_timeout=3
+
+  [[ -n "$base_url" ]] || return 0
+
+  management_key="$(interactive_preflight_management_key || true)"
+  [[ -n "$management_key" ]] || return 0
+
+  python_bin="$(hook_python_bin)"
+  safe_count="$(
+    CODEX_WP_PREFLIGHT_BASE_URL="$base_url" \
+    CODEX_WP_PREFLIGHT_MANAGEMENT_KEY="$management_key" \
+    CODEX_WP_PREFLIGHT_TIMEOUT="$debug_timeout" \
+    "$python_bin" - <<'PY'
+import json
+import os
+import sys
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+base_url = str(os.environ.get("CODEX_WP_PREFLIGHT_BASE_URL") or "").strip()
+management_key = str(os.environ.get("CODEX_WP_PREFLIGHT_MANAGEMENT_KEY") or "").strip()
+timeout = float(os.environ.get("CODEX_WP_PREFLIGHT_TIMEOUT") or "3")
+
+if not base_url or not management_key:
+    raise SystemExit(3)
+
+request = Request(
+    f"{base_url}/debug",
+    headers={"X-Management-Key": management_key},
+    method="GET",
+)
+
+try:
+    with urlopen(request, timeout=timeout) as response:
+        if int(response.status) != 200:
+            raise SystemExit(3)
+        payload = json.loads(response.read().decode("utf-8") or "{}")
+except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+    raise SystemExit(3)
+
+safe_count = payload.get("interactive_safe_auth_count")
+available = payload.get("interactive_auth_available")
+if isinstance(safe_count, bool):
+    raise SystemExit(3)
+if not isinstance(safe_count, int):
+    raise SystemExit(3)
+if available is False or safe_count <= 0:
+    print(str(max(0, safe_count)))
+    raise SystemExit(42)
+
+print(str(safe_count))
+PY
+  )" || status=$?
+
+  case "$status" in
+    0)
+      return 0
+      ;;
+    42)
+      die "codex_wp: no safe interactive auths are available right now. Retry later or repair the pool before opening an interactive session." 2
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 hook_require_headless_preconditions() {
   [[ $# -gt 0 ]] || return 0
 
@@ -3220,6 +3326,7 @@ if [[ -n "$hook_mode" ]]; then
 elif (( ! help_requested )) && hook_is_interactive_mode "$@"; then
   hook_disable_project_managed_stop "$hook_run_project_root" || \
     die "codex_wp: failed to clear managed stop hook for $hook_run_project_root." 2
+  interactive_preflight_require_safe_pool
 fi
 
 # --no-alt-screen: preserve scrollback inside zellij (codex TUI uses alternate screen by default)

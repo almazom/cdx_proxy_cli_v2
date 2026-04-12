@@ -95,6 +95,26 @@ raise SystemExit(97)
     return _write_executable(tmp_path / "fake_cdx_proxy_env", body)
 
 
+def _write_fake_proxy_env_cdx_with_debug(
+    tmp_path: Path,
+    *,
+    base_url: str,
+    management_key: str,
+) -> Path:
+    body = f"""#!{sys.executable}
+import sys
+
+if sys.argv[1:] == ["proxy", "--print-env-only"]:
+    print('export CLIPROXY_BASE_URL="{base_url}"')
+    print('export CLIPROXY_MANAGEMENT_KEY="{management_key}"')
+    raise SystemExit(0)
+
+print(f"unexpected fake cdx argv: {{sys.argv[1:]!r}}", file=sys.stderr)
+raise SystemExit(97)
+"""
+    return _write_executable(tmp_path / "fake_cdx_proxy_env_with_debug", body)
+
+
 def _write_fake_codex(tmp_path: Path) -> Path:
     body = f"""#!{sys.executable}
 from __future__ import annotations
@@ -1704,6 +1724,101 @@ def test_codex_wp_plain_interactive_run_clears_stale_managed_stop_hook_without_c
     _assert_managed_stop_hook_removed(project)
     assert _stop_groups(project) == [user_stop_group]
     assert not (project / ".codex" / "config.toml").exists()
+
+
+def test_codex_wp_interactive_preflight_blocks_when_proxy_reports_no_safe_auths(
+    tmp_path: Path,
+    proxy_server: dict[str, Any],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    codex_log = tmp_path / "codex.jsonl"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    runtime = proxy_server["runtime"]
+    runtime._limit_health_cache = {
+        "a.json": {
+            "file": "a.json",
+            "email": "a@example.com",
+            "status": "COOLDOWN",
+            "five_hour": {
+                "status": "COOLDOWN",
+                "used_percent": 95.0,
+                "reset_after_seconds": 1800,
+            },
+        },
+        "b.json": {
+            "file": "b.json",
+            "email": "b@example.com",
+            "status": "COOLDOWN",
+            "five_hour": {
+                "status": "COOLDOWN",
+                "used_percent": 96.0,
+                "reset_after_seconds": 1800,
+            },
+        },
+    }
+    debug_payload = runtime.debug_payload(host="127.0.0.1", port=0)
+    assert debug_payload["interactive_safe_auth_count"] == 0
+
+    fake_cdx = _write_fake_proxy_env_cdx_with_debug(
+        tmp_path,
+        base_url=str(proxy_server["base_url"]),
+        management_key=str(proxy_server["management_key"]),
+    )
+    fake_codex = _write_fake_hook_codex(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(["hello interactive"], env, cwd=project)
+
+    assert result.returncode == 2
+    assert "no safe interactive auths are available" in result.stderr
+    assert not codex_log.exists()
+
+
+def test_codex_wp_interactive_preflight_allows_when_proxy_reports_safe_auths(
+    tmp_path: Path,
+    proxy_server: dict[str, Any],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    codex_log = tmp_path / "codex.jsonl"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    fake_cdx = _write_fake_proxy_env_cdx_with_debug(
+        tmp_path,
+        base_url=str(proxy_server["base_url"]),
+        management_key=str(proxy_server["management_key"]),
+    )
+    fake_codex = _write_fake_hook_codex(tmp_path)
+
+    env = _path_env(
+        tmp_path,
+        extra_env={
+            "CDX_BIN": str(fake_cdx),
+            "CODEX_BIN": str(fake_codex),
+            "FAKE_HOOK_CODEX_LOG_PATH": str(codex_log),
+            "HOME": str(home),
+        },
+    )
+
+    result = _run_codex_wp_args(["hello interactive"], env, cwd=project)
+
+    assert result.returncode == 0, result.stderr
+    codex_records = _read_jsonl_records(codex_log)
+    assert len(codex_records) == 1
+    assert codex_records[0]["mode"] == "interactive"
 
 
 def test_codex_wp_headless_hook_loop_runs_and_notifies(
