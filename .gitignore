@@ -40,3 +40,7 @@ venv/
 docs/envoy_doc/
 docs/flow_artefacts/
 bin/*.bak.*
+# Claude Code / Shehroz artifacts
+.claude/
+.MEMORY/
+uv.lock
